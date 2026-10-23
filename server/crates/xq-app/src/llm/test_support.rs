@@ -86,3 +86,18 @@ pub fn blunder_bundle() -> EvidenceBundle {
     };
     build(&study, 1, &record(&study, 1, Some(&engine))).unwrap()
 }
+
+/// 起始局面走马二进三，主变化给出精确的将杀分；`complete` 决定分析是否完整。
+pub fn mate_bundle(complete: bool) -> EvidenceBundle {
+    let study = study_with(&["h0g2"]);
+    let mut mate = line("h0g2", 0, &["h0g2", "h9g7"]);
+    mate.score = Score::Mate(3);
+    let engine = EngineEvidence {
+        candidates: vec![mate, line("b0c2", 20, &["b0c2"])],
+        actual: None,
+        conditions: "测试".into(),
+        complete,
+        notes: if complete { vec![] } else { vec!["最后一轮搜索没有完成".into()] },
+    };
+    build(&study, 1, &record(&study, 1, Some(&engine))).unwrap()
+}

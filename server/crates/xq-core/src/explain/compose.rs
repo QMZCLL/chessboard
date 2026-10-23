@@ -25,7 +25,7 @@ use crate::uci::Bound;
 use crate::uci::Score;
 
 /// 模板版本，随讲解一起保存，便于判断缓存是否过期。
-pub const GENERATOR_VERSION: u32 = 2;
+pub const GENERATOR_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -710,15 +710,43 @@ pub fn candidate_list(pos: &Position, lines: &[EngineLine]) -> Vec<CandidateView
         .collect()
 }
 
+/// 变化中的着法是否依次都合法。
+pub fn line_is_legal(pos: &Position, moves: &[Move]) -> bool {
+    let mut cur = pos.clone();
+    for mv in moves {
+        if !rules::is_legal(&cur, *mv) {
+            return false;
+        }
+        cur = cur.after(*mv);
+    }
+    true
+}
+
+/// 候选的主变化不能合法回放时的说明（变化已从候选中移除）。
+fn illegal_line_warnings(pos: &Position, engine: &EngineEvidence) -> Vec<String> {
+    engine
+        .candidates
+        .iter()
+        .chain(engine.actual.iter())
+        .filter(|l| !line_is_legal(pos, &l.pv))
+        .map(|l| {
+            let name = notation::move_to_chinese(pos, l.mv).unwrap_or_else(|_| l.mv.iccs());
+            format!("候选{name}的主变化无法在当前局面合法回放，已移除")
+        })
+        .collect()
+}
+
+/// 候选进入展示数据前统一检查主变化：不能合法回放的变化整条移除，不提供演示。
 fn view_of(pos: &Position, line: &EngineLine, rank: Option<u32>, is_actual: bool, source: CandidateSource) -> CandidateView {
+    let pv = if line_is_legal(pos, &line.pv) { line.pv.clone() } else { Vec::new() };
     CandidateView {
         mv: line.mv,
         notation: notation::move_to_chinese(pos, line.mv).unwrap_or_else(|_| line.mv.iccs()),
         score: line.score,
         bound: line.bound,
         depth: line.depth,
-        pv: line.pv.clone(),
-        pv_notation: notation::line_to_chinese(pos, &line.pv),
+        pv_notation: notation::line_to_chinese(pos, &pv),
+        pv,
         rank,
         is_actual,
         source,
@@ -988,6 +1016,7 @@ pub fn explain_move(
         conditions = Some(engine.conditions.clone());
         warnings.extend(engine.notes.iter().cloned());
         candidates = candidate_views(before, engine, Some(mv));
+        warnings.extend(illegal_line_warnings(before, engine));
         let best = &engine.candidates[0];
         let rank = engine.candidates.iter().position(|c| c.mv == mv).map(|i| i as u32 + 1);
         let actual_line = rank.map(|r| &engine.candidates[r as usize - 1]).or(engine.actual.as_ref());
@@ -1248,19 +1277,11 @@ fn audit(evidence: &mut [Evidence], warnings: &mut Vec<String>, parent: &Positio
     const OVERCLAIM: [&str; 5] = ["唯一", "必胜", "必然", "无论怎么走", "一定能"];
     for e in evidence.iter_mut() {
         if let Some(line) = &e.line {
-            let mut cur = match line.base {
-                LineBase::Parent => parent.clone(),
-                LineBase::Node => node.clone(),
+            let start = match line.base {
+                LineBase::Parent => parent,
+                LineBase::Node => node,
             };
-            let mut ok = true;
-            for mv in &line.moves {
-                if !rules::is_legal(&cur, *mv) {
-                    ok = false;
-                    break;
-                }
-                cur = cur.after(*mv);
-            }
-            if !ok {
+            if !line_is_legal(start, &line.moves) {
                 warnings.push(format!("证据 {} 的变化无法在当前局面合法回放，已移除", e.id));
                 e.line = None;
             }
@@ -1417,6 +1438,7 @@ pub fn explain_position(pos: &Position, ctx: &ExplainContext, engine: Option<&En
     if let Some(engine) = engine.filter(|e| !e.candidates.is_empty()) {
         conditions = Some(engine.conditions.clone());
         candidates = candidate_views(pos, engine, None);
+        warnings.extend(illegal_line_warnings(pos, engine));
         warnings.extend(engine.notes.iter().cloned());
     }
     if let Some(engine) = engine.filter(|e| !e.candidates.is_empty() && !e.complete) {
@@ -1680,6 +1702,12 @@ mod tests {
         let e = explain_move(&Position::startpos(), mv("h0g2"), &CTX, Some(&engine)).unwrap();
         assert!(e.warnings.iter().any(|w| w.contains("无法在当前局面合法回放")), "{:?}", e.warnings);
         assert!(e.evidence.iter().all(|x| x.line.as_ref().is_none_or(|l| l.moves.len() < 2 || l.moves[1] != mv("h0g2"))));
+        // 候选同样移除这条变化，界面与其他展示路径都不能再回放它
+        assert!(e.candidates[0].pv.is_empty() && e.candidates[0].pv_notation.is_empty(), "{:?}", e.candidates[0]);
+        assert!(e.warnings.iter().any(|w| w.contains("候选马二进三的主变化")), "{:?}", e.warnings);
+        let p = explain_position(&Position::startpos(), &CTX, Some(&engine));
+        assert!(p.candidates[0].pv.is_empty());
+        assert!(p.evidence.iter().all(|x| x.line.is_none()), "{:?}", p.evidence);
     }
 
     #[test]

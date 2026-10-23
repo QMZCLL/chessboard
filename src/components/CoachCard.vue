@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // AI 讲解：由语言模型根据规则事实与引擎证据组织文字。每段都引用程序给出的结论，
-// 点击可在棋盘上高亮或回放；等级、分差仍以上方程序给出的评价为准。
+// 点击可在棋盘上高亮或回放；评分、分差、深度与将杀步数不由模型书写，只出现在每段下方由程序给出的依据中。
 import { computed } from "vue";
 import { NButton, NSpin, NTag } from "naive-ui";
 import type { Claim, CoachResult, CoachText, ExplainLevel } from "../api/types";
@@ -53,8 +53,14 @@ function asClaim(t: CoachText): Claim {
   return { text: t.text, evidence: [...new Set(evidence)] };
 }
 
+/** 段落引用的程序结论原文（含评分等数字）。 */
+function basisOf(t: CoachText): string[] {
+  const claims = result.value?.claims ?? [];
+  return t.claim_ids.map((id) => claims.find((c) => c.id === id)?.statement).filter((s): s is string => !!s);
+}
+
 const sections = computed(() =>
-  (result.value?.output.sections ?? []).map((s) => ({ title: SECTION[s.kind] ?? "", claim: asClaim(s) })),
+  (result.value?.output.sections ?? []).map((s) => ({ title: SECTION[s.kind] ?? "", claim: asClaim(s), basis: basisOf(s) })),
 );
 
 function follow(id: string | null) {
@@ -87,6 +93,9 @@ function follow(id: string | null) {
         <template v-for="(s, i) in sections" :key="i">
           <h5 v-if="s.title">{{ s.title }}</h5>
           <ClaimList :claims="[s.claim]" :evidence="result.evidence" />
+          <ul v-if="s.basis.length" class="basis" data-testid="coach-basis">
+            <li v-for="(b, j) in s.basis" :key="j">依据：{{ b }}</li>
+          </ul>
         </template>
         <template v-if="result.output.lesson.text">
           <h5>学习要点</h5>
@@ -98,7 +107,9 @@ function follow(id: string | null) {
           </n-button>
         </div>
       </div>
-      <p class="source">由 {{ result.model_label }} 根据程序给出的事实与引擎证据组织文字，点击段落查看依据；等级与分差以上方程序评价为准。</p>
+      <p class="source">
+        由 {{ result.model_label }} 根据程序给出的事实与引擎证据组织文字，点击段落查看依据；评分、分差等数字只出现在程序给出的“依据”中，等级以上方程序评价为准。
+      </p>
     </template>
   </section>
 </template>
@@ -147,6 +158,14 @@ h5 {
   font-size: 12px;
   color: var(--text-muted);
   font-weight: 600;
+}
+.basis {
+  list-style: none;
+  margin: 0 0 2px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
 }
 .faded {
   opacity: 0.65;
