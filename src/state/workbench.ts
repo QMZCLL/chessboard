@@ -60,8 +60,11 @@ export const wb = reactive({
   preview: null as Preview | null,
   highlight: null as Highlight | null,
   focus: null as ClaimFocus | null,
-  /** 试走：从棋谱中某个局面开始走出自己的着法，走法保存在分支中 */
-  trial: null as { origin: number } | null,
+  /**
+   * 试走：从棋谱中某个局面（origin）开始走出自己的着法，走法保存在分支中。
+   * roots 是试走中从起点走出的各条分支的第一着；在这些分支里前后移动、回到起点都仍在试走中。
+   */
+  trial: null as { origin: number; roots: number[] } | null,
   illegal: null as T.IllegalMove | null,
   mode: "auto" as "auto" | "think",
   revealed: {} as Record<number, boolean>,
@@ -379,6 +382,9 @@ function setView(view: T.StudyView) {
     wb.records = {};
     wb.coach = {};
     wb.analysis = null;
+    // 节点编号只在同一个会话内有意义
+    wb.trial = null;
+    wb.collapsed = {};
   }
   wb.view = view;
   if (view.explain_seq < wb.explainSeq) void refreshView(view.study.id);
@@ -454,7 +460,22 @@ export async function flipBoard() {
 
 // ---------- 节点与讲解 ----------
 
-export async function selectNode(id: number, opts: { keepTrial?: boolean } = {}) {
+/**
+ * 节点是否在试走范围内：试走起点本身，或试走分支（从起点走出的试走着法及其后续）中的着法。
+ * 从起点沿原有着法前进、选择棋谱中其他着法，都离开试走。
+ */
+function inTrial(id: number): boolean {
+  const t = wb.trial;
+  if (!t) return false;
+  if (id === t.origin) return true;
+  for (let cur = nodeOf(id); cur; cur = cur.parent === null ? null : nodeOf(cur.parent)) {
+    if (t.roots.includes(cur.id)) return true;
+    if (cur.id === t.origin) return false;
+  }
+  return false;
+}
+
+export async function selectNode(id: number) {
   const s = study.value;
   if (!s || !nodeOf(id)) return;
   const changed = wb.selected !== id;
@@ -463,7 +484,7 @@ export async function selectNode(id: number, opts: { keepTrial?: boolean } = {})
   wb.highlight = null;
   wb.focus = null;
   wb.illegal = null;
-  if (!opts.keepTrial) wb.trial = null;
+  if (wb.trial && !inTrial(id)) wb.trial = null;
   // 选中的着法在折叠的分支里时展开它
   for (let cur = nodeOf(id); cur && cur.parent !== null; cur = nodeOf(cur.parent)) {
     if (wb.collapsed[cur.id]) wb.collapsed[cur.id] = false;
@@ -586,8 +607,10 @@ export async function playMove(mv: T.Move) {
       await loadDetail();
       return;
     }
-    if (trialOrigin !== null) wb.trial = { origin: trialOrigin };
-    await selectNode(target, { keepTrial: true });
+    if (trialOrigin !== null) wb.trial = { origin: trialOrigin, roots: [] };
+    // 从试走起点走出的着法是一条试走分支的开头
+    if (wb.trial && parent === wb.trial.origin && !wb.trial.roots.includes(target)) wb.trial.roots.push(target);
+    await selectNode(target);
   } catch (e) {
     notify("error", errorMessage(e));
   }
@@ -596,7 +619,7 @@ export async function playMove(mv: T.Move) {
 /** 从当前局面开始试走：之后的走法保存在分支中，可以随时返回。 */
 export function startTrial() {
   wb.preview = null;
-  wb.trial = { origin: wb.selected };
+  wb.trial = { origin: wb.selected, roots: [] };
 }
 
 /** 结束试走，回到开始试走的局面；已经建立的分支保留在棋谱中。 */
@@ -769,11 +792,13 @@ export async function promote(id: number) {
   setView(await api.promoteNode(s.id, id));
 }
 
-/** 保存笔记。节点由调用方给出：保存的始终是编辑时对应的那一着。 */
-export async function saveNote(nodeId: number, note: string, starred: boolean) {
-  const s = study.value;
-  if (!s) return;
-  setView(await api.setNote(s.id, nodeId, note, starred));
+/**
+ * 保存笔记。会话与着法由调用方给出（见 state/notes.ts）。保存期间切换了会话，或界面已有更新的视图时，
+ * 不用这次的响应覆盖当前视图。
+ */
+export async function saveNote(studyId: string, nodeId: number, note: string, starred: boolean) {
+  const view = await api.setNote(studyId, nodeId, note, starred);
+  if (wb.view?.study.id === studyId && view.study.revision >= wb.view.study.revision) setView(view);
 }
 
 /** 主线（从起始局面沿第一个子节点）上的节点。 */

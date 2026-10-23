@@ -2,7 +2,7 @@
 // 右侧讲解面板。本步讲解按阅读顺序组织：当前着法与程序评价 → 一句话要点 → 讲解正文
 // （有 AI 讲解时用 AI 讲解，否则用规则讲解）→ 关键操作 → 详细分析（可折叠）→ 学习点与笔记。
 // 局面分析在起始局面上直接给出分析入口；笔记显示保存状态，并始终保存到编辑时对应的那一着。
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { NAlert, NButton, NCollapse, NCollapseItem, NInput, NScrollbar, NSpin, NSwitch, NTabPane, NTabs, NTag } from "naive-ui";
 import AttemptCard from "./AttemptCard.vue";
 import Icon from "./Icon.vue";
@@ -22,12 +22,12 @@ import {
   nodeOf,
   retryExplanation,
   reveal,
-  saveNote,
   selectedNode,
+  study,
   thinking,
   wb,
 } from "../state/workbench";
-import { errorMessage } from "../api/backend";
+import { editNote, noteView, persistNote } from "../state/notes";
 import { sideLabel } from "../utils/board";
 
 const tab = ref<"move" | "position" | "notes">("move");
@@ -82,7 +82,6 @@ watch(
   () => {
     if (!isMove.value && tab.value === "move") tab.value = "position";
     if (isMove.value && tab.value === "position" && !wb.analysis) tab.value = "move";
-    loadNote();
   },
 );
 // 先想后讲时，思考提示在本步讲解中，切到其他标签会看不到
@@ -91,33 +90,26 @@ watch(thinking, (t) => {
 });
 
 // ---------- 笔记 ----------
-// 记住正在编辑的是哪一着：切换节点后，未保存的内容仍保存到原来那一着
-const noteNode = ref<number>(wb.selected);
-const note = ref(node.value?.note ?? "");
-const starred = ref(node.value?.starred ?? false);
-const noteState = ref<"idle" | "saving" | "saved" | "failed">("idle");
-const noteError = ref("");
+// 草稿与保存状态在 state/notes.ts 中按（会话, 着法）保存，面板重建（如跨布局断点）后不丢失也不回写旧值
+const noteKey = computed(() => (study.value ? { studyId: study.value.id, nodeId: wb.selected } : null));
+const noteShown = computed(() => (noteKey.value ? noteView(noteKey.value.studyId, noteKey.value.nodeId) : null));
 
-function loadNote() {
-  noteNode.value = wb.selected;
-  note.value = node.value?.note ?? "";
-  starred.value = node.value?.starred ?? false;
-  noteState.value = "idle";
+function onNoteText(text: string) {
+  if (noteKey.value) editNote(noteKey.value.studyId, noteKey.value.nodeId, { text });
 }
 
-async function persistNote() {
-  const id = noteNode.value;
-  const target = nodeOf(id);
-  if (!target || (note.value === target.note && starred.value === target.starred)) return;
-  noteState.value = "saving";
-  try {
-    await saveNote(id, note.value, starred.value);
-    if (noteNode.value === id) noteState.value = "saved";
-  } catch (e) {
-    noteError.value = errorMessage(e);
-    if (noteNode.value === id) noteState.value = "failed";
-  }
+function onStarred(starred: boolean) {
+  if (!noteKey.value) return;
+  editNote(noteKey.value.studyId, noteKey.value.nodeId, { starred });
+  void persistNote(noteKey.value.studyId, noteKey.value.nodeId);
 }
+
+function saveCurrentNote() {
+  if (noteKey.value) void persistNote(noteKey.value.studyId, noteKey.value.nodeId);
+}
+
+// 面板被移除（例如窗口跨过布局断点）时，保存正在编辑的内容；草稿本身仍在共享状态中
+onBeforeUnmount(saveCurrentNote);
 
 const moverLabel = computed(() => (expl.value ? sideLabel(expl.value.mover) : ""));
 const LEVEL = {
@@ -284,20 +276,22 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
         <div class="content notes">
           <div class="note-head">
             <span>收藏这一步</span>
-            <n-switch v-model:value="starred" size="small" @update:value="persistNote" />
+            <n-switch :value="noteShown?.starred ?? false" size="small" @update:value="onStarred" />
           </div>
           <n-input
-            v-model:value="note"
+            :value="noteShown?.text ?? ''"
             type="textarea"
             :autosize="{ minRows: 6, maxRows: 16 }"
             placeholder="记录你的想法、疑问或要复习的要点"
             data-testid="note-input"
-            @blur="persistNote"
+            @update:value="onNoteText"
+            @blur="saveCurrentNote"
           />
           <p class="muted" data-testid="note-state">
-            <template v-if="noteState === 'saving'">保存中…</template>
-            <template v-else-if="noteState === 'saved'">已保存</template>
-            <span v-else-if="noteState === 'failed'" class="error">保存失败：{{ noteError }}</span>
+            <template v-if="noteShown?.state === 'saving'">保存中…</template>
+            <template v-else-if="noteShown?.state === 'saved'">已保存</template>
+            <span v-else-if="noteShown?.state === 'failed'" class="error">保存失败：{{ noteShown.error }}（离开输入框时会再次保存）</span>
+            <template v-else-if="noteShown?.state === 'editing'">有未保存的修改，离开输入框时保存。</template>
             <template v-else>离开输入框时自动保存。</template>
           </p>
         </div>
