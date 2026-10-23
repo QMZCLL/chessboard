@@ -30,3 +30,6 @@ dist-ssr
 *.dylib
 __pycache__
 !pikafish-windows.exe
+
+# 端到端场景的截图与日志
+tests/e2e/.out

@@ -1,0 +1,21 @@
+// 场景 5：评审用例——移走唯一炮架解将，界面讲解应说明“移开炮架”，而不是“垫子”。
+import { BASE, check, launch, move, snap, waitText } from "../lib.mjs";
+const { browser, page, problems } = await launch();
+await page.goto(BASE);
+await waitText(page, "建立学习局面");
+await page.locator(".n-tabs-tab", { hasText: "FEN" }).click();
+await page.getByPlaceholder("粘贴 FEN，如 3k5/9/9/9/9/9/9/9/4R4/4K4 w").fill("3k5/9/4c4/9/9/9/9/4N4/9/4K4 w");
+await page.getByRole("button", { name: "导入" }).click();
+await page.locator("[data-testid=board-context] .n-tag", { hasText: "正被将军" }).waitFor();
+await move(page, "e2c3");
+await page.locator(".move.active").waitFor();
+await page.getByTestId("key-point").waitFor();
+await page.locator(".panel .n-tag", { hasText: /引擎分析完整|分析不完整/ }).waitFor({ timeout: 60000 });
+const basis = await page.locator(".panel h3:has-text('为什么这样走') + .claims").innerText();
+console.log(`  依据：${basis.replace(/\n/g, " | ")}`);
+check(basis.includes("唯一的炮架"), "说明移开了唯一的炮架");
+check(!basis.includes("挡在"), "没有误称为垫子挡住");
+await snap(page, "escape-remove-screen");
+console.log(problems.length ? `控制台问题：\n${problems.join("\n")}` : "  ✓ 控制台无错误");
+if (problems.length) process.exitCode = 1;
+await browser.close();

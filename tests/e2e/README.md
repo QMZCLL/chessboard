@@ -1,0 +1,82 @@
+# 浏览器端到端场景
+
+用无头 Chromium 操作真实界面：Vite 提供前端，开发桥（`xq-devserver`）提供后台服务与仓库自带的 Pikafish，
+AI 讲解使用本地的模拟模型服务。场景检查的是用户看到的结果与实际发出的请求，而不只是进程能否启动。
+
+## 准备
+
+```bash
+pnpm install
+pnpm exec playwright-core install chromium        # Linux 首次运行可加 --with-deps 安装系统依赖
+```
+
+还需要 Rust 工具链（运行器会构建开发桥与模拟引擎）。引擎与模型文件已在仓库的 `libs/` 中。
+
+## 运行
+
+```bash
+pnpm test:e2e              # 运行全部场景
+pnpm test:e2e s7 s10       # 只运行指定场景（可写编号或全名）
+pnpm test:e2e --no-build  # 已经构建过开发桥时跳过构建
+pnpm test:e2e --keep      # 保留临时数据目录
+```
+
+运行器（`run.mjs`）会：
+
+1. 构建 `xq-devserver` 与模拟引擎 `xq-mock-uci`；
+2. 选择空闲端口，启动模拟模型服务与 Vite（不占用 `pnpm dev` 的 1420 与 `pnpm bridge` 的 1422）；
+3. 按组启动开发桥，每组使用新的临时数据目录，依次运行组内场景；
+4. 汇总每个场景的结果，有失败时以非零状态退出。
+
+使用自带 Pikafish 的一组改为单线程、按固定深度搜索（快速分析深度 12、深入分析深度 16，时间上限放宽）。
+应用默认按时间搜索，在较慢或繁忙的机器上，一轮搜索可能在中途停止，这时讲解会如实标为“分析不完整”，
+场景结果就会随机器快慢变化；固定深度让每次搜索都完成整轮，结果稳定。
+
+截图写在 `tests/e2e/.out/`，开发桥、Vite 与模拟模型服务的日志写在 `tests/e2e/.out/logs/`。
+失败时保留临时数据目录，路径打印在结果末尾。
+
+### 环境变量
+
+| 变量 | 作用 |
+|---|---|
+| `E2E_CHROMIUM` | 使用指定的 Chromium 可执行文件，而不是 playwright-core 安装的版本 |
+| `PLAYWRIGHT_BROWSERS_PATH` | playwright-core 安装与查找浏览器的目录 |
+| `E2E_OUT` | 截图与日志目录（默认 `tests/e2e/.out`；运行前只清理其中的截图与 `logs/`） |
+| `CARGO` / `CARGO_TARGET_DIR` | 构建开发桥使用的 cargo 命令与构建目录 |
+
+## 场景
+
+| 场景 | 开发桥 | 内容 |
+|---|---|---|
+| `s1-record` | 自带 Pikafish | 导入棋谱、逐着讲解、依据高亮、演示候选并保存为分支、非法走法提示 |
+| `s2-endgame` | 自带 Pikafish | 重新打开已保存的会话（依赖 s1）、残局摆棋、FEN 缺少行棋方、将死与困毙、先想后讲、设置换算 |
+| `s3-capture` | 自带 Pikafish | 屏幕连接（模拟画面）：框选、确认起始局面、实时记录、漏帧补全、缺口确认、停止 |
+| `s4-layout` | 自带 Pikafish | 1024×680 深色窗口下的布局与棋谱浮层（依赖 s1） |
+| `s5-escape` | 自带 Pikafish | 移开唯一炮架解将的讲解用词 |
+| `s6-retry` | 模拟引擎 | 不完整的搜索不下结论，“重试”带上重试标记并得到完整讲解 |
+| `s7-coach` | 自带 Pikafish | AI 讲解：设置与密钥、生成、依据、缓存复用、输出不合格、上次结果的显示、旧版依据 |
+| `s8-bounds` | 模拟引擎 | 评分边界值不显示成确定的杀棋步数 |
+| `s9-workflow` | 自带 Pikafish | 学习工作台的操作逻辑：选中与演示、落子前依据、快捷键范围、试走、分支、设置、三种宽度 |
+| `s10-review` | 自带 Pikafish | 笔记跨布局断点、试走中的前后移动、行内按钮的键盘操作 |
+
+使用模拟引擎的场景各自使用一个开发桥，引擎输出写在 `fixtures/` 中。
+
+## 单独运行一个场景
+
+运行器之外也可以直接运行场景，便于调试。先自行启动开发桥与 Vite，再指定地址：
+
+```bash
+pnpm bridge                                   # 另开终端
+pnpm dev                                      # 另开终端
+node tests/e2e/mock-llm.mjs                   # s7 需要，默认端口 1440
+E2E_BASE=http://127.0.0.1:1420/ MOCK_LLM=http://127.0.0.1:1440 node tests/e2e/scenarios/s9-workflow.mjs
+```
+
+注意：场景会在开发桥的数据目录中建立会话并修改设置，不要指向保存了真实数据的目录。
+
+## 编写新场景
+
+- 场景放在 `scenarios/`，使用 `lib.mjs` 中的 `launch`、`check`、`snap`、`bridge`、`move`。
+- 定位元素优先使用 `data-testid` 与用户可见的文字，不依赖样式类名的细节。
+- 在 `run.mjs` 的 `GROUPS` 中登记；需要其他场景建立的数据时写入 `NEEDS`。
+- 需要特定引擎输出时，在 `fixtures/` 中添加模拟引擎脚本，并为它新建一组。

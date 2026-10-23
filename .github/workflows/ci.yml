@@ -46,6 +46,38 @@ jobs:
       - run: pnpm test:unit
       - run: pnpm exec vite build
 
+  e2e:
+    name: 浏览器端到端场景
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 中文字体只影响截图与排版宽度，不影响按文字定位
+      - name: 安装 Chromium 与中文字体
+        run: |
+          pnpm exec playwright-core install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+      - name: 运行场景
+        run: pnpm test:e2e
+      - name: 保存截图与日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-output
+          path: tests/e2e/.out
+          retention-days: 7
+
   desktop-windows:
     name: 桌面程序编译检查（Windows）
     runs-on: windows-latest

@@ -1,0 +1,11 @@
+# 第一次搜索：深度 2 只更新了第一名，最终着法与深度 1 的首位不一致 → 不完整
+@go
+info depth 1 seldepth 1 multipv 1 score cp 400 nodes 10 time 1 pv h2e2
+info depth 1 seldepth 1 multipv 2 score cp -100 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 500 nodes 20 time 2 pv h0g2
+bestmove h0g2
+# 第二次搜索（重试）：完整一致
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+bestmove h2e2

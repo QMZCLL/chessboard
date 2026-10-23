@@ -1,0 +1,5 @@
+# 评分边界值：首选是“将杀分上界”（不能显示成几步杀），第二候选是普通分下界
+@go
+info depth 1 seldepth 1 multipv 1 score mate 3 upperbound nodes 10 time 1 pv h0g2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 lowerbound nodes 10 time 1 pv h2e2
+bestmove h0g2
