@@ -274,7 +274,8 @@ impl Inner {
                 Ok(_) => (CoachStatus::None, record.as_ref().and_then(|r| r.error.clone())),
             },
         };
-        CoachView { seq, study_id: study_id.to_string(), node_id, status, reason, record }
+        let result_current = record.as_ref().and_then(|r| r.result.as_ref()).is_some_and(is_current);
+        CoachView { seq, study_id: study_id.to_string(), node_id, status, reason, record, result_current }
     }
 
     fn emit_coach(&self, study_id: &str, node_id: NodeId) {

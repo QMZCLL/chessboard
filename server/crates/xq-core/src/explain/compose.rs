@@ -74,11 +74,11 @@ pub struct Evidence {
     /// `squares` 与 `arrows` 所在的局面：讲解某一着时，落子前（如当前需求、应将、首选候选）
     /// 或落子后（如吃子、攻击、保护、对方应对）；说明某个局面时总是该局面。
     /// 界面据此决定能否直接画在当前棋盘上，避免把落子前的箭头叠在落子后的局面上。
-    #[serde(default = "on_node")]
-    pub on: LineBase,
+    /// 早期保存的证据（如旧版 AI 讲解的证据快照）没有这一项，读取后为 `None`，表示所在局面未知：
+    /// 界面不把它画在任何棋盘上，而不是猜测一个局面。
+    #[serde(default)]
+    pub on: Option<LineBase>,
 }
-
-fn on_node() -> LineBase { LineBase::Node }
 
 /// 讲解某一着时，各类证据的格子与箭头所在的局面。
 fn board_of(topic: &str) -> LineBase {
@@ -238,7 +238,7 @@ impl EvidenceSet {
         };
         self.counters[slot] += 1;
         let id = format!("{prefix}{}", self.counters[slot]);
-        let on = if self.for_move { board_of(topic) } else { LineBase::Node };
+        let on = Some(if self.for_move { board_of(topic) } else { LineBase::Node });
         self.items.push(Evidence { id: id.clone(), kind, topic: topic.to_string(), text, squares, arrows, line, certainty, on });
         id
     }
@@ -1557,14 +1557,25 @@ mod tests {
             notes: vec![],
         };
         let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
-        let on = |topic: &str| e.evidence.iter().find(|x| x.topic == topic).map(|x| x.on);
+        let on = |topic: &str| e.evidence.iter().find(|x| x.topic == topic).and_then(|x| x.on);
         assert_eq!(on("best"), Some(LineBase::Parent));
         assert_eq!(on("quiet").or(on("threat")), Some(LineBase::Parent));
         assert_eq!(on("capture"), Some(LineBase::Node));
         assert_eq!(on("reply"), Some(LineBase::Node));
         // 说明一个局面时，证据都在这个局面上
         let p = explain_position(&pos, &CTX, Some(&engine));
-        assert!(p.evidence.iter().all(|x| x.on == LineBase::Node), "{:?}", p.evidence);
+        assert!(p.evidence.iter().all(|x| x.on == Some(LineBase::Node)), "{:?}", p.evidence);
+    }
+
+    #[test]
+    fn evidence_saved_without_board_reads_as_unknown() {
+        // 早期保存的证据没有 on：读取后为未知，不默认成落子后的局面
+        let old = r#"{"id":"k1","kind":"variation","topic":"candidate","text":"首选","squares":["b0","c2"],
+            "arrows":["b0c2"],"line":null,"certainty":"supported"}"#;
+        let ev: Evidence = serde_json::from_str(old).unwrap();
+        assert_eq!(ev.on, None);
+        let new = serde_json::to_value(Evidence { on: Some(LineBase::Parent), ..ev }).unwrap();
+        assert_eq!(new["on"], "parent");
     }
 
     #[test]

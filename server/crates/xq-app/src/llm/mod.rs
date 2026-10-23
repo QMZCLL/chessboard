@@ -173,4 +173,7 @@ pub struct CoachView {
     /// 状态说明（未启用的原因、失败原因、过期原因、等待引擎等）。
     pub reason: Option<String>,
     pub record: Option<CoachRecord>,
+    /// 记录中保留的结果是否对应当前的证据、模型与讲解设置。排队、生成中或更新失败时，
+    /// 界面据此区分“仍然有效的结果”与“只能作为参考的上次结果”。
+    pub result_current: bool,
 }

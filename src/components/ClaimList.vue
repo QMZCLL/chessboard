@@ -56,9 +56,18 @@ function demo(claim: Claim, i: number) {
   demoEvidence(ev);
 }
 
+function hasMarks(ev: Evidence | null): ev is Evidence {
+  return !!ev && (ev.squares.length > 0 || ev.arrows.length > 0);
+}
+
 /** 依据标出的棋子在落子前的局面上（与棋盘此刻是否在演示无关）。 */
 function onParent(ev: Evidence | null): boolean {
-  return !!ev && ev.on === "parent" && (ev.squares.length > 0 || ev.arrows.length > 0);
+  return hasMarks(ev) && ev.on === "parent";
+}
+
+/** 早期保存的依据没有记录所在局面：不画在棋盘上，并说明原因。 */
+function boardUnknown(ev: Evidence | null): boolean {
+  return hasMarks(ev) && !ev.on;
 }
 
 function short(text: string) {
@@ -103,6 +112,9 @@ function short(text: string) {
         <p v-if="onParent(focusedEvidence(c))" class="before">
           这条依据在落子前的局面上。
           <n-button v-if="!wb.preview" text size="tiny" type="info" @click="viewEvidenceBoard(focusedEvidence(c)!)">在落子前局面查看</n-button>
+        </p>
+        <p v-else-if="boardUnknown(focusedEvidence(c))" class="before" data-testid="evidence-board-unknown">
+          这条依据来自旧版讲解，没有记录所在的局面，因此不在棋盘上标出；重新生成 AI 讲解后可以标出。
         </p>
       </div>
     </li>

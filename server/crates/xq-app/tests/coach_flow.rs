@@ -645,3 +645,48 @@ fn learning_settings_change_bumps_view_version() {
     assert_eq!(llm.count(), 1, "只改学习偏好不会自动调用模型");
     service.shutdown();
 }
+
+#[test]
+fn failed_update_marks_kept_result_as_not_current() {
+    // 第一次生成成功，之后的请求都失败
+    let llm = mock_llm(|i| match i {
+        0 => (Reply::Content(valid_output), 0),
+        _ => (Reply::Raw(401, r#"{"error":{"message":"invalid api key"}}"#.into()), 0),
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start(dir.path(), &format!("@go\n{ROUND}"), &llm, rec.clone());
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk".into()) }).unwrap();
+    let sid = standard_study(&service);
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+    let node_ref = NodeRef { study_id: sid.clone(), node_id: node };
+    explain(&service, &sid, node, false);
+    rec.coach("AI 讲解完成", node, "ready");
+    assert!(service.coach_view(node_ref.clone()).unwrap().result_current);
+
+    // 结果仍然有效、只是重新生成失败：仍是 ready，结果对应当前条件
+    rec.clear();
+    explain(&service, &sid, node, true);
+    rec.coach("重新生成失败", node, "ready");
+    let view = service.coach_view(node_ref.clone()).unwrap();
+    assert_eq!(view.status, CoachStatus::Ready);
+    assert!(view.result_current && view.reason.as_deref().is_some_and(|r| r.contains("最近一次重新生成失败")), "{:?}", view.reason);
+
+    // 设置改变后结果不再对应当前条件：最近一次请求失败，状态为失败，保留的是上次的结果
+    let mut cfg = service.status().config;
+    cfg.coach.audience = xq_app::config::Audience::Advanced;
+    service.update_config(cfg).unwrap();
+    let outdated = service.coach_view(node_ref.clone()).unwrap();
+    assert_eq!(outdated.status, CoachStatus::Failed);
+    assert!(outdated.record.as_ref().and_then(|r| r.result.as_ref()).is_some() && !outdated.result_current);
+    // 再次更新仍然失败
+    rec.clear();
+    explain(&service, &sid, node, false);
+    rec.coach("更新失败", node, "failed");
+    let failed = service.coach_view(node_ref).unwrap();
+    assert_eq!(failed.status, CoachStatus::Failed);
+    assert!(failed.record.as_ref().and_then(|r| r.result.as_ref()).is_some(), "上次的结果保留");
+    assert!(!failed.result_current, "保留的结果不对应当前设置，界面不能当作已生成");
+    service.shutdown();
+}

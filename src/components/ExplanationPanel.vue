@@ -27,6 +27,7 @@ import {
   thinking,
   wb,
 } from "../state/workbench";
+import { coachDisplay } from "../state/coachDisplay";
 import { editNote, noteView, persistNote } from "../state/notes";
 import { sideLabel } from "../utils/board";
 
@@ -49,8 +50,8 @@ const keyPoint = computed(() => {
   const prefix = `${e.notation}：`;
   return e.summary.startsWith(prefix) ? e.summary.slice(prefix.length) : e.summary;
 });
-/** 有 AI 讲解结果时，由它承担正文；规则讲解的依据移到详细分析中。 */
-const coachBody = computed(() => !!coachView.value?.record?.result);
+/** AI 讲解的结果对应当前条件时才承担正文，规则讲解的依据移到详细分析中；上次的结果不作为正文。 */
+const coachBody = computed(() => coachDisplay(coachView.value).kind === "current");
 const replyEvidence = computed(() => expl.value?.evidence.find((e) => e.topic === "reply" && canDemo(e)) ?? null);
 
 // 详细分析的展开状态在本机记住

@@ -15,7 +15,7 @@ function view(seq: number, status: CoachView["status"], updatedAt: number): Coac
     error: null,
     updated_at: updatedAt,
   };
-  return { seq, study_id: "s", node_id: 1, status, reason: null, record };
+  return { seq, study_id: "s", node_id: 1, status, reason: null, record, result_current: false };
 }
 
 test("先到的新状态不会被后到的旧响应覆盖", () => {

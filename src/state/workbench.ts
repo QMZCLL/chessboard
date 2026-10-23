@@ -732,8 +732,9 @@ export function demoEvidence(ev: T.Evidence) {
   startPreview(shortLabel(ev.text), line.base, line.moves, line.notation, marks);
 }
 
-/** 在依据所在的局面（落子前）上查看它标出的棋子与关系。 */
+/** 在依据所在的局面（落子前）上查看它标出的棋子与关系；所在局面未知的依据不标出。 */
 export function viewEvidenceBoard(ev: T.Evidence) {
+  if (!ev.on) return;
   startPreview(shortLabel(ev.text), ev.on, [], [], { squares: ev.squares, arrows: ev.arrows });
 }
 

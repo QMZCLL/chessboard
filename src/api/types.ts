@@ -104,8 +104,11 @@ export interface Evidence {
   arrows: Move[];
   line: LineRef | null;
   certainty: Certainty;
-  /** squares 与 arrows 所在的局面：parent 为落子前，node 为当前节点的局面。 */
-  on: "parent" | "node";
+  /**
+   * squares 与 arrows 所在的局面：parent 为落子前，node 为当前节点的局面。
+   * 早期保存的证据没有这一项（null）：所在局面未知，不画在任何棋盘上。
+   */
+  on: "parent" | "node" | null;
 }
 
 export interface Claim {
@@ -446,6 +449,8 @@ export interface CoachView {
   status: CoachStatus;
   reason: string | null;
   record: CoachRecord | null;
+  /** 记录中保留的结果是否对应当前的证据与设置；否则只能作为“上次的讲解”参考 */
+  result_current: boolean;
 }
 
 export interface AppStatus {
