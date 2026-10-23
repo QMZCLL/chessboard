@@ -27,28 +27,45 @@ pub struct Threat {
 
 fn value(board: &Board, sq: Square) -> i32 { board.get(sq).map(|p| p.value_at(sq)).unwrap_or(0) }
 
-pub fn defenders(board: &Board, sq: Square) -> Vec<Square> {
-    match board.get(sq) {
-        Some(p) => rules::attackers(board, sq, p.color),
-        None => Vec::new(),
-    }
+/// `by` 一方能合法走到 `sq` 吃子的棋子（排除被牵制、走后送将的棋子）。
+pub fn legal_attackers(board: &Board, sq: Square, by: Color) -> Vec<Square> {
+    let pos = Position::new(board.clone(), by);
+    rules::attackers(board, sq, by).into_iter().filter(|from| rules::is_legal(&pos, Move::new(*from, sq))).collect()
 }
 
-pub fn is_defended(board: &Board, sq: Square) -> bool { !defenders(board, sq).is_empty() }
+/// 假设对方棋子来到 `sq`，`owner` 能否合法吃回。
+///
+/// 只看几何控制会把被牵制的棋子也当作保护；这里用合法走法判断，保护才是真实可用的。
+pub fn can_recapture(board: &Board, sq: Square, owner: Color) -> bool {
+    let mut hypothetical = board.clone();
+    hypothetical.set(sq, Some(Piece::new(owner.opposite(), PieceKind::Pawn)));
+    !legal_attackers(&hypothetical, sq, owner).is_empty()
+}
+
+/// 该点上的棋子是否有可以合法回吃的保护。
+pub fn is_defended(board: &Board, sq: Square) -> bool {
+    board.get(sq).is_some_and(|p| can_recapture(board, sq, p.color))
+}
+
+/// 对方能合法吃掉该点棋子。
+pub fn is_attacked_legally(board: &Board, sq: Square) -> bool {
+    board.get(sq).is_some_and(|p| !legal_attackers(board, sq, p.color.opposite()).is_empty())
+}
 
 /// 某方处于受攻击状态的棋子，按价值从高到低。
+///
+/// 只计入对方能合法吃子的攻击；“有保护”指对方用最便宜的攻击者吃下后，己方能合法吃回。
 pub fn en_prise(board: &Board, color: Color) -> Vec<Threat> {
     let mut out = Vec::new();
     for (sq, piece) in board.pieces() {
         if piece.color != color || piece.kind == PieceKind::King {
             continue;
         }
-        let defended = is_defended(board, sq);
-        let mut attackers = rules::attackers(board, sq, color.opposite());
-        // 将帅只能吃没有保护的棋子
-        attackers.retain(|a| board.get(*a).is_some_and(|x| x.kind != PieceKind::King || !defended));
-        let Some(cheapest) = attackers.iter().map(|a| value(board, *a)).min() else { continue };
-        if !defended || cheapest < piece.value_at(sq) {
+        let attackers = legal_attackers(board, sq, color.opposite());
+        let Some(&cheapest) = attackers.iter().min_by_key(|a| value(board, **a)) else { continue };
+        let after = Position::new(board.applied(Move::new(cheapest, sq)), color);
+        let defended = !legal_attackers(&after.board, sq, color).is_empty();
+        if !defended || value(board, cheapest) < piece.value_at(sq) {
             out.push(Threat { square: sq, piece, attackers, defended });
         }
     }
@@ -56,12 +73,46 @@ pub fn en_prise(board: &Board, color: Color) -> Vec<Threat> {
     out
 }
 
+/// 应将方式：按走子前后攻击关系为什么消失来区分。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckResolution {
+    /// 移动将帅。
     KingMove,
+    /// 吃掉正在将军的棋子。
     Capture,
-    Block,
+    /// 挡在车（或兵以外直线攻击者）与将帅之间。
+    BlockLine,
+    /// 别住将军之马的马腿。
+    BlockLeg,
+    /// 移走炮与将帅之间唯一的炮架。
+    RemoveScreen,
+    /// 在炮与将帅之间增加棋子，炮隔两子无法吃将。
+    AddScreen,
+    /// 其他方式（理论上不应出现，保留以免误判）。
+    Other,
+}
+
+/// 判断这一步为什么解除了将军。以第一个将军的棋子为准（双将只能动将或吃子化解）。
+fn resolve_check(before: &Board, mv: Move, piece: Piece, checkers: &[Square]) -> CheckResolution {
+    if piece.kind == PieceKind::King {
+        return CheckResolution::KingMove;
+    }
+    if checkers.contains(&mv.to) {
+        return CheckResolution::Capture;
+    }
+    let (Some(&checker_sq), Some(king)) = (checkers.first(), before.find_king(piece.color)) else {
+        return CheckResolution::Other;
+    };
+    let Some(checker) = before.get(checker_sq) else { return CheckResolution::Other };
+    let line = rules::squares_between(checker_sq, king);
+    match checker.kind {
+        PieceKind::Horse if rules::horse_leg(checker_sq, king) == Some(mv.to) => CheckResolution::BlockLeg,
+        PieceKind::Cannon if line.contains(&mv.from) && !line.contains(&mv.to) => CheckResolution::RemoveScreen,
+        PieceKind::Cannon if line.contains(&mv.to) => CheckResolution::AddScreen,
+        PieceKind::Rook if line.contains(&mv.to) => CheckResolution::BlockLine,
+        _ => CheckResolution::Other,
+    }
 }
 
 /// 走动的棋子与另一个棋子之间新建立或失去的关系。
@@ -161,6 +212,10 @@ fn line_changes(before: &Board, after: &Board, owner: Color, mv: Move) -> Vec<Li
             if target_piece.color == owner || target_piece.kind == PieceKind::King {
                 continue;
             }
+            // 被牵制的棋子得到的线路并不能实际用来吃子
+            if !rules::is_legal(&Position::new(after.clone(), owner), Move::new(sq, target)) {
+                continue;
+            }
             let via = if piece.kind == PieceKind::Cannon && strictly_between(sq, target, mv.to) {
                 LineVia::Screen
             } else {
@@ -191,15 +246,7 @@ pub fn move_facts(pos: &Position, mv: Move) -> Option<MoveFacts> {
     let was_in_check = rules::in_check(before, mover);
     let checkers_before = rules::checkers(before, mover);
     let captured = before.get(mv.to);
-    let check_resolution = was_in_check.then(|| {
-        if piece.kind == PieceKind::King {
-            CheckResolution::KingMove
-        } else if checkers_before.contains(&mv.to) {
-            CheckResolution::Capture
-        } else {
-            CheckResolution::Block
-        }
-    });
+    let check_resolution = was_in_check.then(|| resolve_check(before, mv, piece, &checkers_before));
 
     let ctrl_before: HashSet<Square> = rules::controls(before, mv.from).into_iter().collect();
     let ctrl_after = rules::controls(after, mv.to);
@@ -211,11 +258,19 @@ pub fn move_facts(pos: &Position, mv: Move) -> Option<MoveFacts> {
         if target_piece.kind == PieceKind::King || ctrl_before.contains(target) {
             continue;
         }
+        // 走到新位置的棋子若被牵制，它的攻击或保护并不能实际兑现
+        let mut probe = after.clone();
+        if target_piece.color == mover {
+            probe.set(*target, Some(Piece::new(enemy, PieceKind::Pawn)));
+        }
+        if !rules::is_legal(&Position::new(probe, mover), Move::new(mv.to, *target)) {
+            continue;
+        }
         let relation = Relation {
             target: *target,
             target_piece,
             defended: is_defended(after, *target),
-            attacked: rules::is_attacked(after, *target, target_piece.color.opposite()),
+            attacked: is_attacked_legally(after, *target),
             defended_before: before.get(*target) == Some(target_piece) && is_defended(before, *target),
         };
         if target_piece.color == enemy {
@@ -241,7 +296,7 @@ pub fn move_facts(pos: &Position, mv: Move) -> Option<MoveFacts> {
                 target: *target,
                 target_piece,
                 defended,
-                attacked: rules::is_attacked(after, *target, enemy),
+                attacked: is_attacked_legally(after, *target),
                 defended_before: true,
             });
         }
@@ -399,6 +454,39 @@ mod tests {
         let g = move_facts(&pos, mv("d9e9")).unwrap();
         assert!(g.was_in_check);
         assert_eq!(g.check_resolution, Some(CheckResolution::KingMove));
+    }
+
+    #[test]
+    fn check_resolution_mechanisms() {
+        let cases = [
+            // 评审中的用例：红马是黑炮与红帅之间唯一的炮架，跳开后炮不能再将军
+            ("3k5/9/4c4/9/9/9/9/4N4/9/4K4 w", "e2c3", CheckResolution::RemoveScreen),
+            // 车走到炮与帅之间，炮前变成两个棋子
+            ("3k5/9/4c4/9/9/3R5/9/4N4/9/4K4 w", "d4e4", CheckResolution::AddScreen),
+            // 车挡住黑车的将军线路
+            ("3k5/4r4/9/9/9/9/R8/9/9/4K4 w", "a3e3", CheckResolution::BlockLine),
+            // 车别住黑马的马腿
+            ("3k5/9/9/9/9/9/9/3n5/R8/4K4 w", "a1d1", CheckResolution::BlockLeg),
+            ("3k5/9/9/9/9/9/9/9/3R5/5K3 b", "d9e9", CheckResolution::KingMove),
+        ];
+        for (fen, m, expected) in cases {
+            let pos = parse_position(fen).unwrap();
+            assert!(rules::is_legal(&pos, mv(m)), "{fen} {m}");
+            let f = move_facts(&pos, mv(m)).unwrap();
+            assert!(f.was_in_check, "{fen}");
+            assert_eq!(f.check_resolution, Some(expected), "{fen} {m}");
+        }
+    }
+
+    #[test]
+    fn pinned_piece_is_not_a_defender() {
+        // 红马几何上保护 g3 兵，但被 e8 黑车牵制在帅前，黑车吃兵后马不能合法吃回
+        let pos = parse_position("3k2r2/4r4/9/9/9/9/6P2/4N4/9/4K4 w").unwrap();
+        assert!(rules::attackers(&pos.board, sq("g3"), Color::Red).contains(&sq("e2")));
+        assert!(!is_defended(&pos.board, sq("g3")));
+        let threats = en_prise(&pos.board, Color::Red);
+        let pawn = threats.iter().find(|t| t.square == sq("g3")).expect("兵应被视为受攻击且无有效保护");
+        assert!(!pawn.defended);
     }
 
     #[test]

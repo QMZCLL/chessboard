@@ -86,14 +86,19 @@ pub struct AnalysisRecord {
     pub created_at: i64,
 }
 
-/// 某个走子节点的讲解状态。“已建任务”“已有基本解释”“详细解释完成”分别记录，
-/// 排队中的任务不计为已讲解。
+/// 某个走子节点的讲解状态。排队中的任务不计为已讲解，缺少环节的讲解不计为完成。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplainStatus {
+    /// 已建立任务，还没有任何讲解。
     Queued,
+    /// 只有规则事实（引擎分析尚未开始或进行中）。
     Basic,
+    /// 有部分引擎证据，或某个环节失败；保留已有内容，可以重试。
+    Partial,
+    /// 候选比较与实际走法分析都已完成。
     Detailed,
+    /// 无法生成任何讲解。
     Failed,
 }
 
@@ -102,10 +107,14 @@ pub struct ExplanationRecord {
     pub study_id: String,
     pub node_id: NodeId,
     pub explanation: Option<MoveExplanation>,
-    /// 详细讲解所用的分析预算。
+    /// 引擎证据所用的分析预算。
     pub budget: Option<Budget>,
+    /// 引擎证据所用分析条件的键；设置改变后据此判断讲解是否需要更新。
+    #[serde(default)]
+    pub conditions_key: Option<String>,
     /// 是否还有未完成的引擎任务。
     pub pending: bool,
+    /// 未完成环节的原因。
     pub error: Option<String>,
     pub updated_at: i64,
 }
@@ -117,6 +126,7 @@ impl ExplanationRecord {
             node_id,
             explanation: None,
             budget: None,
+            conditions_key: None,
             pending: false,
             error: None,
             updated_at: now,
@@ -124,16 +134,17 @@ impl ExplanationRecord {
     }
 
     pub fn status(&self) -> ExplainStatus {
-        match (&self.explanation, &self.error) {
-            (Some(e), _) if e.level == ExplainLevel::Detailed => ExplainStatus::Detailed,
-            (_, Some(_)) if !self.pending => ExplainStatus::Failed,
-            (Some(_), _) => ExplainStatus::Basic,
-            (None, _) => ExplainStatus::Queued,
+        let failed = self.error.is_some() && !self.pending;
+        match &self.explanation {
+            None if failed => ExplainStatus::Failed,
+            None => ExplainStatus::Queued,
+            Some(e) => match e.level {
+                ExplainLevel::Detailed => ExplainStatus::Detailed,
+                ExplainLevel::Partial => ExplainStatus::Partial,
+                ExplainLevel::Basic if failed => ExplainStatus::Partial,
+                ExplainLevel::Basic => ExplainStatus::Basic,
+            },
         }
-    }
-
-    pub fn is_detailed_for(&self, budget: Budget) -> bool {
-        self.status() == ExplainStatus::Detailed && (budget == Budget::Quick || self.budget == Some(Budget::Deep))
     }
 }
 

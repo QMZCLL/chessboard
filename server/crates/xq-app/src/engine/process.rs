@@ -24,8 +24,9 @@ pub(super) struct EngineProcess {
 
 impl EngineProcess {
     /// 启动引擎并开启读取线程：每行输出带上代次发送给服务线程，输出结束时发送 Eof。
-    pub fn spawn(binary: &Path, generation: u64, tx: Sender<Msg>) -> io::Result<Self> {
+    pub fn spawn(binary: &Path, args: &[String], generation: u64, tx: Sender<Msg>) -> io::Result<Self> {
         let mut cmd = Command::new(binary);
+        cmd.args(args);
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
         if let Some(dir) = binary.parent() {
             cmd.current_dir(dir);

@@ -45,6 +45,7 @@ function status(id: number): ExplainStatus | undefined {
 const STATUS_TEXT: Record<ExplainStatus, string> = {
   queued: "讲解排队中",
   basic: "已有基本讲解",
+  partial: "讲解不完整，可重试",
   detailed: "详细讲解已完成",
   failed: "详细讲解未完成",
 };
@@ -165,6 +166,9 @@ function onMenu(id: number, key: string) {
 }
 .dot.detailed {
   background: var(--accent-green);
+}
+.dot.partial {
+  border: 2px solid var(--accent-amber);
 }
 .dot.failed {
   background: var(--accent-amber);

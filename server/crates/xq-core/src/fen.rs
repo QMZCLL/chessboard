@@ -38,6 +38,8 @@ impl std::error::Error for FenError {}
 pub struct ParsedFen {
     pub board: Board,
     pub side: Option<Color>,
+    /// FEN 末尾的计数字段（未吃子半回合数、回合数），给出时保留，涉及限着规则时引擎需要它们。
+    pub counters: Option<(u32, u32)>,
 }
 
 pub fn parse_side(s: &str) -> Result<Color, FenError> {
@@ -48,7 +50,7 @@ pub fn parse_side(s: &str) -> Result<Color, FenError> {
     }
 }
 
-/// 解析棋子布局和可选的行棋方；其余字段（回合计数等）被忽略。
+/// 解析棋子布局、可选的行棋方与可选的计数字段（`- -` 占位字段被跳过）。
 pub fn parse_fen(text: &str) -> Result<ParsedFen, FenError> {
     let mut fields = text.split_whitespace();
     let placement = fields.next().ok_or(FenError::Empty)?;
@@ -83,7 +85,12 @@ pub fn parse_fen(text: &str) -> Result<ParsedFen, FenError> {
         Some(s) => Some(parse_side(s)?),
         None => None,
     };
-    Ok(ParsedFen { board, side })
+    let numbers: Vec<u32> = fields.filter(|f| *f != "-").filter_map(|f| f.parse().ok()).collect();
+    let counters = match numbers.as_slice() {
+        [half, full, ..] => Some((*half, *full)),
+        _ => None,
+    };
+    Ok(ParsedFen { board, side, counters })
 }
 
 /// 解析完整局面，必须给出行棋方。
@@ -121,6 +128,17 @@ pub fn board_fen(board: &Board) -> String {
 
 pub fn position_fen(pos: &Position) -> String { format!("{} {}", board_fen(&pos.board), pos.side.fen_char()) }
 
+/// 带计数字段的 FEN；没有计数字段时与 `position_fen` 相同。
+pub fn position_fen_with_counters(pos: &Position, counters: Option<(u32, u32)>) -> String {
+    match counters {
+        Some((half, full)) => format!("{} - - {half} {full}", position_fen(pos)),
+        None => position_fen(pos),
+    }
+}
+
+/// 只含棋子布局与行棋方的部分，用于比较两个 FEN 是否同一局面。
+pub fn position_key(fen: &str) -> String { fen.split_whitespace().take(2).collect::<Vec<_>>().join(" ") }
+
 pub const START_FEN: &str = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w";
 
 #[cfg(test)]
@@ -135,9 +153,16 @@ mod tests {
     }
 
     #[test]
-    fn extra_fields_ignored() {
-        let pos = parse_position("4k4/9/9/9/9/9/9/9/9/4K4 b - - 0 1").unwrap();
-        assert_eq!(pos.side, Color::Black);
+    fn counters_are_kept() {
+        let parsed = parse_fen("4k4/9/9/9/9/9/9/9/9/3K5 b - - 12 40").unwrap();
+        assert_eq!(parsed.side, Some(Color::Black));
+        assert_eq!(parsed.counters, Some((12, 40)));
+        assert_eq!(parse_fen("4k4/9/9/9/9/9/9/9/9/3K5 w 3 7").unwrap().counters, Some((3, 7)));
+        assert_eq!(parse_fen("4k4/9/9/9/9/9/9/9/9/3K5 w").unwrap().counters, None);
+        let pos = parse_position("4k4/9/9/9/9/9/9/9/9/3K5 b - - 12 40").unwrap();
+        let text = position_fen_with_counters(&pos, Some((12, 40)));
+        assert_eq!(text, "4k4/9/9/9/9/9/9/9/9/3K5 b - - 12 40");
+        assert_eq!(position_key(&text), position_fen(&pos));
     }
 
     #[test]

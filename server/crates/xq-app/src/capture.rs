@@ -413,26 +413,49 @@ fn process(shared: &mut Shared, frame: Result<Frame, FrameError>, errors: &mut u
         Phase::AwaitingStart(_) | Phase::Stopped { .. } => Action::None,
         Phase::Tracking(t) => {
             let board = capture::to_board(&obs, t.orientation);
+            let changed_from_confirmed = |t: &Tracking, board: &Board| -> Vec<Square> {
+                let confirmed = &t.tracker.confirmed().board;
+                Square::all().filter(|sq| confirmed.get(*sq) != board.get(*sq)).collect()
+            };
             match t.tracker.feed(board) {
                 TrackEvent::Moves(moves) => {
+                    // 跟踪器在等待确认期间不会给出走法，这里只会在没有待确认请求时到达
                     t.pending = None;
                     Action::Record { study_id: t.study_id.clone(), from: t.node_id, moves }
                 }
-                TrackEvent::NewGame => {
-                    let mut seen = observed(&Board::startpos(), Some(t.orientation), Some(&obs), threshold);
+                TrackEvent::NewGame { board } => {
+                    let mut seen = observed(&board, Some(t.orientation), Some(&obs), threshold);
                     seen.suggested_side = Some(Color::Red);
+                    seen.changed = changed_from_confirmed(t, &board);
                     t.pending = Some(Pending {
                         observed: seen,
                         kind: ConfirmationKind::NewGame,
-                        reason: "画面回到了开局，是否作为新的一局开始记录？".into(),
+                        reason: "画面回到了开局，是否作为新的一局开始记录？确认前不会向当前棋谱记录走子".into(),
                     });
                     Action::Notify
                 }
                 TrackEvent::NeedsConfirmation { board, reason } => {
                     let mut seen = observed(&board, Some(t.orientation), Some(&obs), threshold);
-                    let confirmed = &t.tracker.confirmed().board;
-                    seen.changed = Square::all().filter(|sq| confirmed.get(*sq) != board.get(*sq)).collect();
+                    seen.changed = changed_from_confirmed(t, &board);
                     t.pending = Some(Pending { observed: seen, kind: ConfirmationKind::Unexplained, reason });
+                    Action::Notify
+                }
+                TrackEvent::PendingUpdate { board } => {
+                    // 等待确认期间画面继续变化：只更新待确认画面（例如新一局已走出第一步）
+                    let changed = changed_from_confirmed(t, &board);
+                    if let Some(p) = t.pending.as_mut() {
+                        let mut seen = observed(&board, Some(t.orientation), Some(&obs), threshold);
+                        seen.changed = changed;
+                        if p.kind == ConfirmationKind::NewGame && board != Board::startpos() {
+                            // 已不在开局，无法从画面判断轮到谁走
+                            seen.suggested_side = None;
+                        }
+                        p.observed = seen;
+                    }
+                    Action::Notify
+                }
+                TrackEvent::Resolved => {
+                    t.pending = None;
                     Action::Notify
                 }
                 TrackEvent::Idle => {

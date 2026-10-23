@@ -8,7 +8,8 @@ export type Move = string;
 export type Square = string;
 export type GameStatus = "ongoing" | "checkmate" | "stalemate";
 export type Budget = "quick" | "deep";
-export type ExplainStatus = "queued" | "basic" | "detailed" | "failed";
+/** queued 已排队；basic 只有规则事实；partial 有部分引擎证据或某环节失败（可重试）；detailed 完整；failed 无法生成 */
+export type ExplainStatus = "queued" | "basic" | "partial" | "detailed" | "failed";
 export type StudySource = "standard" | "setup" | "fen" | "record" | "capture";
 export type MoveSource = "user" | "record" | "capture" | "variation";
 
@@ -63,6 +64,7 @@ export interface ExplainStats {
   pending: number;
   basic: number;
   detailed: number;
+  partial: number;
   failed: number;
 }
 
@@ -134,7 +136,7 @@ export interface Verdict {
 
 export interface MoveExplanation {
   generator_version: number;
-  level: "basic" | "detailed";
+  level: "basic" | "partial" | "detailed";
   mover: Color;
   mv: Move;
   notation: string;
@@ -168,6 +170,7 @@ export interface ExplanationRecord {
   node_id: number;
   explanation: MoveExplanation | null;
   budget: Budget | null;
+  conditions_key: string | null;
   pending: boolean;
   error: string | null;
   updated_at: number;

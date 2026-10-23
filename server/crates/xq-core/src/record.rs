@@ -25,6 +25,8 @@ pub struct ParsedRecord {
     pub start: Position,
     /// 起始局面是否来自棋谱中的 FEN（否则为标准开局）。
     pub custom_start: bool,
+    /// 起始 FEN 中的计数字段。
+    pub counters: Option<(u32, u32)>,
     pub moves: Vec<Move>,
     pub tags: Vec<(String, String)>,
     pub stopped: Option<RecordStop>,
@@ -143,12 +145,12 @@ pub fn parse_record(text: &str) -> Result<ParsedRecord, RecordError> {
     }
 
     let custom_start = start_fen.is_some();
-    let start = match &start_fen {
+    let (start, counters) = match &start_fen {
         Some(f) => {
             let parsed = fen::parse_fen(f).map_err(|e| RecordError::BadFen(e.to_string()))?;
-            Position::new(parsed.board, parsed.side.unwrap_or(crate::types::Color::Red))
+            (Position::new(parsed.board, parsed.side.unwrap_or(crate::types::Color::Red)), parsed.counters)
         }
-        None => Position::startpos(),
+        None => (Position::startpos(), None),
     };
     let report = validate::validate_position(&start);
     if !report.ok {
@@ -181,7 +183,7 @@ pub fn parse_record(text: &str) -> Result<ParsedRecord, RecordError> {
     if moves.is_empty() && !custom_start && stopped.is_none() {
         return Err(RecordError::Empty);
     }
-    Ok(ParsedRecord { start, custom_start, moves, tags, stopped })
+    Ok(ParsedRecord { start, custom_start, counters, moves, tags, stopped })
 }
 
 #[cfg(test)]

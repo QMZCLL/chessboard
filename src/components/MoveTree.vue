@@ -28,11 +28,11 @@ const SOURCE: Record<string, string> = {
           <div class="stats">
             讲解 {{ stats.detailed }}/{{ stats.moves }}
             <span v-if="stats.pending" class="pending">· 进行中 {{ stats.pending }}</span>
-            <span v-if="stats.failed" class="failed">· 未完成 {{ stats.failed }}</span>
+            <span v-if="stats.partial + stats.failed" class="failed">· 不完整 {{ stats.partial + stats.failed }}</span>
           </div>
         </template>
         共 {{ stats.moves }} 着：详细讲解 {{ stats.detailed }}，至少有基本讲解 {{ stats.basic }}，
-        正在分析 {{ stats.pending }}，详细讲解未完成 {{ stats.failed }}
+        正在分析 {{ stats.pending }}，部分完成可重试 {{ stats.partial }}，无法生成 {{ stats.failed }}
       </n-tooltip>
     </header>
     <n-scrollbar class="body">

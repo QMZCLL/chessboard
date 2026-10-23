@@ -53,6 +53,12 @@ async function persistNote() {
 }
 
 const moverLabel = computed(() => (expl.value ? sideLabel(expl.value.mover) : ""));
+const LEVEL = {
+  basic: { text: "基本讲解", type: "info" },
+  partial: { text: "部分讲解", type: "warning" },
+  detailed: { text: "详细讲解", type: "success" },
+} as const;
+
 // 该着的走棋方就是落子前局面的行棋方
 const thinkSide = computed(() => {
   const parent = nodeOf(node.value?.parent);
@@ -80,14 +86,14 @@ const thinkSide = computed(() => {
                 <div class="headline">
                   <n-tag size="small" :bordered="false" :type="expl.mover === 'red' ? 'error' : 'default'">{{ moverLabel }}</n-tag>
                   <VerdictTag v-if="expl.verdict" :verdict="expl.verdict" />
-                  <n-tag size="small" :bordered="false" :type="expl.level === 'detailed' ? 'success' : 'info'">
-                    {{ expl.level === "detailed" ? (record?.budget === "deep" ? "深入分析" : "详细讲解") : "基本讲解" }}
+                  <n-tag size="small" :bordered="false" :type="LEVEL[expl.level].type">
+                    {{ expl.level === "detailed" && record?.budget === "deep" ? "深入分析" : LEVEL[expl.level].text }}
                   </n-tag>
                 </div>
                 <p class="summary">{{ expl.summary }}</p>
                 <div v-if="record?.pending" class="pending"><n-spin size="small" /> 正在用引擎比较候选与主要应对，完成后自动补充…</div>
-                <n-alert v-if="record?.error && !record.pending" type="warning" :show-icon="false" class="alert">
-                  详细讲解未完成：{{ record.error }}
+                <n-alert v-if="!record?.pending && (record?.error || expl.level === 'partial')" type="warning" :show-icon="false" class="alert">
+                  讲解尚不完整{{ record?.error ? `：${record.error}` : "，下面的提示说明了缺少的部分" }}
                   <n-button size="tiny" quaternary @click="loadDetail">重试</n-button>
                 </n-alert>
 

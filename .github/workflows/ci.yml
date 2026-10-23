@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    name: 规则、讲解与引擎服务测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Clippy
+        run: cargo clippy --manifest-path server/Cargo.toml -p xq-core -p xq-app -p xq-devserver --all-targets -- -D warnings
+      # 包含使用仓库自带 Pikafish 的流程测试；缺少引擎时测试失败而不是跳过
+      - name: 测试
+        run: cargo test --manifest-path server/Cargo.toml -p xq-core -p xq-app
+
+  frontend:
+    name: 前端类型检查与构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vue-tsc --noEmit
+      - run: pnpm exec vite build
+
+  desktop-windows:
+    name: 桌面程序编译检查（Windows）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Clippy
+        run: cargo clippy --manifest-path server/Cargo.toml -p xqlink -- -D warnings

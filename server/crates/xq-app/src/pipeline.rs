@@ -4,6 +4,9 @@
 //! 实际走法不在候选中时，用 searchmoves 在相同预算下单独分析。搜索结果按完整条件缓存。
 
 use serde::Serialize;
+use std::sync::atomic::Ordering;
+
+use tracing::debug;
 use tracing::warn;
 use xq_core::Move;
 use xq_core::Position;
@@ -18,6 +21,7 @@ use xq_core::study::Study;
 
 use crate::api::AnalyzeRequest;
 use crate::api::ExplainStats;
+use crate::engine::EngineExpectation;
 use crate::engine::EngineIdentity;
 use crate::engine::EngineState;
 use crate::engine::JobSpec;
@@ -25,6 +29,7 @@ use crate::engine::Priority;
 use crate::engine::SearchOutcome;
 use crate::engine::SearchProgress;
 use crate::engine::SearchRequest;
+use crate::engine::SearchResult;
 use crate::events;
 use crate::records::AnalysisConditions;
 use crate::records::AnalysisOutcome;
@@ -44,6 +49,9 @@ struct ExplainJob {
     node_id: NodeId,
     mv: Move,
     budget: Budget,
+    priority: Priority,
+    /// 该节点讲解请求的代次，用于识别被更新请求取代的旧结果。
+    generation: u64,
     before: Position,
     ctx: ExplainContext,
 }
@@ -136,6 +144,12 @@ impl Inner {
             depth: Some(conditions.depth),
             movetime_ms: Some(conditions.movetime_ms),
             searchmoves: conditions.searchmoves.clone(),
+            expect: Some(EngineExpectation {
+                engine: conditions.engine.clone(),
+                nnue: conditions.nnue.clone(),
+                score_type: conditions.score_type.clone(),
+                rules: conditions.rules.clone(),
+            }),
         };
         let weak = self.weak.clone();
         self.engine.submit(JobSpec {
@@ -169,7 +183,7 @@ impl Inner {
             if let Ok(Some(record)) = self.store.load_analysis(&cond.key())
                 && let AnalysisOutcome::Completed { result } = record.outcome
             {
-                return Some(EngineEvidence { candidates: result.lines, actual: None, conditions: cond.describe() });
+                return Some(evidence(result, None, &cond));
             }
         }
         None
@@ -180,7 +194,6 @@ impl Inner {
         let pos = study.position(req.node_id)?;
         let ctx = self.context_at(&study, req.node_id)?;
         let conditions = self.conditions(&study, req.node_id, req.budget, Vec::new())?;
-        let describe = conditions.describe();
         let events_sink = self.events.clone();
         let progress_pos = pos.clone();
         let (rid, sid, nid) = (req.request_id.clone(), req.study_id.clone(), req.node_id);
@@ -197,14 +210,23 @@ impl Inner {
         });
         let events_sink = self.events.clone();
         let budget = req.budget;
+        let weak = self.weak.clone();
+        let cond = conditions.clone();
         self.search(conditions, Priority::Interactive, format!("analyze:{}", req.request_id), Some(progress), move |outcome| {
             let (engine, error, cancelled) = match outcome {
-                SearchOutcome::Completed(r) => {
-                    (Some(EngineEvidence { candidates: r.lines, actual: None, conditions: describe }), None, false)
-                }
+                SearchOutcome::Completed(r) => (Some(evidence(r, None, &cond)), None, false),
                 SearchOutcome::Terminal(_) => (None, None, false),
                 SearchOutcome::Cancelled => (None, None, true),
                 SearchOutcome::Failed(e) => (None, Some(e), false),
+                SearchOutcome::Stale(reason) => {
+                    // 设置在排队期间改变：按新设置重新分析，界面继续等待同一个请求
+                    let retry = weak.upgrade().map(|inner| inner.analyze_position(req.clone()));
+                    match retry {
+                        Some(Ok(())) => return,
+                        Some(Err(e)) => (None, Some(format!("{reason}，重新分析失败：{}", e.message)), false),
+                        None => (None, Some(reason), false),
+                    }
+                }
             };
             let position = explain::explain_position(&pos, &ctx, engine.as_ref());
             events::emit(events_sink.as_ref(), events::ANALYSIS_DONE, &AnalysisDoneEvent {
@@ -260,6 +282,41 @@ impl Inner {
             .unwrap_or_else(|| ExplanationRecord::new(study_id, node_id, now_ms()))
     }
 
+    /// 已有的详细讲解是否仍对应当前设置：模板版本、分析预算与分析条件都要一致。
+    /// 引擎暂不可用时无法核对，保留已有讲解。
+    fn record_is_current(&self, record: &ExplanationRecord, study: &Study, parent: NodeId, requested: Budget) -> bool {
+        if record.status() != ExplainStatus::Detailed {
+            return false;
+        }
+        let Some(budget) = record.budget else { return false };
+        if requested == Budget::Deep && budget != Budget::Deep {
+            return false;
+        }
+        if record.explanation.as_ref().is_some_and(|e| e.generator_version != explain::GENERATOR_VERSION) {
+            return false;
+        }
+        match self.conditions(study, parent, budget, Vec::new()) {
+            Ok(c) => record.conditions_key.as_deref() == Some(c.key().as_str()),
+            Err(_) => true,
+        }
+    }
+
+    /// 结束讲解任务前确认它仍是该节点最新的请求；被更新的请求取代时丢弃结果。
+    fn take_inflight(&self, job: &ExplainJob) -> bool {
+        let key = (job.study_id.clone(), job.node_id);
+        let mut inflight = self.inflight.lock().unwrap_or_else(|p| p.into_inner());
+        match inflight.get(&key) {
+            Some((_, generation)) if *generation == job.generation => {
+                inflight.remove(&key);
+                true
+            }
+            _ => {
+                debug!("节点 {} 的讲解结果已被更新的请求取代，丢弃", job.node_id);
+                false
+            }
+        }
+    }
+
     pub(crate) fn process_explain(&self, task: ExplainTask) {
         let Ok(study) = self.with_study(&task.study_id, |s| Ok(s.clone())) else { return };
         let Some(node) = study.nodes.get(&task.node_id) else { return };
@@ -269,12 +326,16 @@ impl Inner {
             _ => return,
         };
         let mut record = self.load_record(&task.study_id, task.node_id);
+        // 只有记录确实变化时才写入并推送，避免每次查看节点都产生写入
+        let mut changed = false;
         // 讲解模板更新后，旧版本的讲解重新生成
         if record.explanation.as_ref().is_some_and(|e| e.generator_version != explain::GENERATOR_VERSION) {
             record.explanation = None;
             record.budget = None;
+            record.conditions_key = None;
         }
         if record.explanation.is_none() {
+            changed = true;
             record.explanation = explain::explain_move(&before, mv, &ctx, None);
             if record.explanation.is_none() {
                 record.pending = false;
@@ -283,39 +344,57 @@ impl Inner {
                 return;
             }
         }
-        if !task.detailed || record.is_detailed_for(task.budget) {
-            record.pending = false;
-            self.save_and_emit(&mut record);
-            return;
-        }
         let key = (task.study_id.clone(), task.node_id);
         let group = explain_group(&task.study_id, task.node_id);
-        {
-            let mut inflight = self.inflight.lock().unwrap_or_else(|p| p.into_inner());
-            if let Some(running) = inflight.get(&key)
-                && (*running == Budget::Deep || task.budget == Budget::Quick)
-            {
-                if task.priority == Priority::Interactive {
-                    self.engine.reprioritize(&group, Priority::Interactive);
-                }
-                return;
+        let running = self.inflight.lock().unwrap_or_else(|p| p.into_inner()).get(&key).copied();
+        if !task.detailed || self.record_is_current(&record, &study, parent, task.budget) {
+            if running.is_none() && record.pending {
+                record.pending = false;
+                changed = true;
             }
-            inflight.insert(key.clone(), task.budget);
+            if changed {
+                self.save_and_emit(&mut record);
+            }
+            return;
+        }
+        if let Some((budget, _)) = running
+            && (budget == Budget::Deep || task.budget == Budget::Quick)
+        {
+            // 已有覆盖本次请求的任务在进行
+            if task.priority == Priority::Interactive {
+                self.engine.reprioritize(&group, Priority::Interactive);
+            }
+            if changed {
+                self.save_and_emit(&mut record);
+            }
+            return;
         }
         let conditions = match self.conditions(&study, parent, task.budget, Vec::new()) {
             Ok(c) => c,
             Err(e) => {
-                self.inflight.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
-                record.pending = false;
+                if running.is_none() {
+                    record.pending = false;
+                }
                 record.error = Some(e.message);
                 self.save_and_emit(&mut record);
                 return;
             }
         };
+        let generation = self.explain_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.inflight.lock().unwrap_or_else(|p| p.into_inner()).insert(key, (task.budget, generation));
         record.pending = true;
         record.error = None;
         self.save_and_emit(&mut record);
-        let job = ExplainJob { study_id: task.study_id, node_id: task.node_id, mv, budget: task.budget, before, ctx };
+        let job = ExplainJob {
+            study_id: task.study_id,
+            node_id: task.node_id,
+            mv,
+            budget: task.budget,
+            priority: task.priority,
+            generation,
+            before,
+            ctx,
+        };
         let weak = self.weak.clone();
         let cond = conditions.clone();
         self.search(conditions, task.priority, group, None, move |outcome| {
@@ -329,7 +408,7 @@ impl Inner {
         match outcome {
             SearchOutcome::Completed(result) => {
                 if result.lines.iter().any(|l| l.mv == job.mv) {
-                    self.finish_explain(job, &cond, result.lines, None);
+                    self.finish_explain(job, &cond, result, None, None);
                     return;
                 }
                 // 实际走法不在候选中：相同预算下单独分析它
@@ -337,46 +416,77 @@ impl Inner {
                 let priority = self.priority_for(&job.study_id, job.node_id);
                 let group = explain_group(&job.study_id, job.node_id);
                 let weak = self.weak.clone();
-                let lines = result.lines;
                 self.search(single, priority, group, None, move |outcome| {
-                    if let Some(inner) = weak.upgrade() {
-                        let actual = match outcome {
-                            SearchOutcome::Completed(r) => r.lines.into_iter().next(),
-                            SearchOutcome::Cancelled => {
-                                inner.finish_without_engine(job, None);
-                                return;
-                            }
-                            _ => None,
-                        };
-                        inner.finish_explain(job, &cond, lines, actual);
+                    let Some(inner) = weak.upgrade() else { return };
+                    match outcome {
+                        SearchOutcome::Completed(r) => {
+                            let actual = r.lines.into_iter().next();
+                            let error = actual.is_none().then(|| "实际着法单独分析没有返回结果".to_string());
+                            inner.finish_explain(job, &cond, result, actual, error);
+                        }
+                        SearchOutcome::Cancelled => inner.finish_without_engine(job, None),
+                        SearchOutcome::Stale(_) => inner.restart_explain(job),
+                        SearchOutcome::Terminal(_) => {
+                            inner.finish_explain(job, &cond, result, None, Some("实际着法单独分析没有返回结果".into()))
+                        }
+                        SearchOutcome::Failed(e) => {
+                            inner.finish_explain(job, &cond, result, None, Some(format!("实际着法单独分析失败：{e}")))
+                        }
                     }
                 });
             }
             SearchOutcome::Cancelled => self.finish_without_engine(job, None),
+            SearchOutcome::Stale(_) => self.restart_explain(job),
             SearchOutcome::Terminal(_) => self.finish_without_engine(job, Some("落子前的局面已经终局，无法分析".into())),
-            SearchOutcome::Failed(e) => self.finish_without_engine(job, Some(e)),
+            SearchOutcome::Failed(e) => self.finish_without_engine(job, Some(format!("候选分析失败：{e}"))),
         }
     }
 
-    fn finish_explain(&self, job: ExplainJob, cond: &AnalysisConditions, candidates: Vec<EngineLine>, actual: Option<EngineLine>) {
-        let engine = EngineEvidence { candidates, actual, conditions: cond.describe() };
+    /// 引擎设置在排队期间改变：按新设置重新排队，讲解仍保持进行中。
+    fn restart_explain(&self, job: ExplainJob) {
+        if self.take_inflight(&job) {
+            self.enqueue(&job.study_id, job.node_id, job.budget, job.priority, true);
+        }
+    }
+
+    fn finish_explain(
+        &self, job: ExplainJob, cond: &AnalysisConditions, result: SearchResult, actual: Option<EngineLine>,
+        stage_error: Option<String>,
+    ) {
+        if !self.take_inflight(&job) {
+            return;
+        }
+        let engine = evidence(result, actual, cond);
         let mut record = self.load_record(&job.study_id, job.node_id);
         if let Some(expl) = explain::explain_move(&job.before, job.mv, &job.ctx, Some(&engine)) {
             record.explanation = Some(expl);
             record.budget = Some(job.budget);
+            record.conditions_key = Some(cond.key());
         }
         record.pending = false;
-        record.error = None;
-        self.inflight.lock().unwrap_or_else(|p| p.into_inner()).remove(&(job.study_id.clone(), job.node_id));
+        record.error = stage_error;
         self.save_and_emit(&mut record);
     }
 
-    /// 引擎任务没有完成：保留基本讲解，记录原因（取消时不算失败）。
+    /// 引擎任务没有完成：保留已有讲解，记录原因（取消时不算失败）。
     fn finish_without_engine(&self, job: ExplainJob, error: Option<String>) {
+        if !self.take_inflight(&job) {
+            return;
+        }
         let mut record = self.load_record(&job.study_id, job.node_id);
         record.pending = false;
         record.error = error;
-        self.inflight.lock().unwrap_or_else(|p| p.into_inner()).remove(&(job.study_id.clone(), job.node_id));
         self.save_and_emit(&mut record);
+    }
+}
+
+/// 把搜索结果整理成讲解用的引擎证据，保留候选是否完整一致的信息。
+fn evidence(result: SearchResult, actual: Option<EngineLine>, cond: &AnalysisConditions) -> EngineEvidence {
+    EngineEvidence {
+        candidates: result.lines,
+        actual,
+        conditions: cond.describe(),
+        complete: result.complete,
+        notes: result.notes,
     }
 }

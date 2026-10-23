@@ -28,6 +28,7 @@ use crate::events;
 use crate::service::ApiResult;
 use crate::service::AppService;
 use crate::service::Inner;
+use crate::service::StudyStart;
 use crate::service::now_ms;
 
 impl CaptureHost for Inner {
@@ -172,8 +173,7 @@ impl AppService {
                 let view = self.inner.new_study(
                     name,
                     StudySource::Capture,
-                    pos.clone(),
-                    pos.is_startpos(),
+                    StudyStart { pos: pos.clone(), counters: None, history_complete: pos.is_startpos() },
                     Some(req.orientation),
                     Some(bottom_side(req.orientation)),
                     &[],
@@ -211,8 +211,7 @@ impl AppService {
                 let view = self.inner.new_study(
                     "屏幕对局".into(),
                     StudySource::Capture,
-                    pos.clone(),
-                    pos.is_startpos(),
+                    StudyStart { pos: pos.clone(), counters: None, history_complete: pos.is_startpos() },
                     Some(orientation),
                     Some(bottom_side(orientation)),
                     &[],

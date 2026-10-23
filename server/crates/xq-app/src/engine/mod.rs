@@ -24,6 +24,8 @@ pub type JobId = u64;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineSpec {
     pub binary: PathBuf,
+    /// 启动引擎时的命令行参数（自带的 Pikafish 不需要）。
+    pub args: Vec<String>,
     pub nnue: Option<PathBuf>,
     pub threads: u32,
     pub hash_mb: u32,
@@ -71,6 +73,17 @@ pub struct SearchRequest {
     pub movetime_ms: Option<u64>,
     /// 只搜索这些根走法（用于分析未进入候选的实际走法）。
     pub searchmoves: Vec<Move>,
+    /// 提交任务时依据的引擎与规则。执行时若引擎设置已改变，任务以 `Stale` 结束，
+    /// 避免结果按旧条件写入缓存。
+    pub expect: Option<EngineExpectation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EngineExpectation {
+    pub engine: String,
+    pub nnue: String,
+    pub score_type: String,
+    pub rules: RuleSet,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -84,12 +97,19 @@ pub struct SearchProgress {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchResult {
+    /// 一轮完整搜索的候选（按名次）；没有完整一轮时为最后一轮的部分结果。
     pub lines: Vec<EngineLine>,
     pub bestmove: Option<Move>,
     pub depth: u32,
     pub nodes: u64,
     pub time_ms: u64,
     pub identity: EngineIdentity,
+    /// 候选来自同一深度的完整一轮，首着互不重复，且与引擎最终着法一致。
+    #[serde(default)]
+    pub complete: bool,
+    /// 候选不完整或不一致的说明。
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -99,4 +119,6 @@ pub enum SearchOutcome {
     Terminal(GameStatus),
     Cancelled,
     Failed(String),
+    /// 提交后引擎设置已改变，任务没有执行；调用方应按新设置重新提交。
+    Stale(String),
 }

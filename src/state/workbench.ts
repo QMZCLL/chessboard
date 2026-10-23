@@ -363,8 +363,8 @@ export async function loadDetail() {
     detail.explanation = newestRecord(detail.explanation, wb.records[nodeId]);
     wb.detail = detail;
     wb.detailError = null;
-    // 走子节点：确保有讲解任务（已有详细讲解时不会重复分析）
-    if (detail.node.mv && !detail.explanation?.pending && detail.explanation?.explanation?.level !== "detailed") {
+    // 走子节点：由后台判断讲解是否缺失、不完整或因设置改变而过期，需要时重新排队
+    if (detail.node.mv && !detail.explanation?.pending) {
       const record = await api.explainMove(s.id, nodeId, "quick");
       if (seq === detailSeq && record && wb.detail) {
         wb.detail.explanation = newestRecord(newestRecord(wb.detail.explanation, record), wb.records[nodeId]);
@@ -375,12 +375,17 @@ export async function loadDetail() {
   }
 }
 
+let thinkSeq = 0;
+
 async function loadThinkBase() {
   const s = study.value;
   const node = selectedNode.value;
   if (!s || !node || node.parent === null) return;
+  const seq = ++thinkSeq;
   try {
-    wb.thinkBase = await api.nodeDetail(s.id, node.parent);
+    const base = await api.nodeDetail(s.id, node.parent);
+    // 快速切换节点时，只采用最后一次请求、且仍对应当前节点的结果
+    if (seq === thinkSeq && study.value?.id === s.id && selectedNode.value?.parent === base.node.id) wb.thinkBase = base;
   } catch (e) {
     notify("error", errorMessage(e));
   }
@@ -398,9 +403,12 @@ export async function setMode(mode: "auto" | "think") {
 export async function explainDeeper() {
   const s = study.value;
   if (!s || !selectedNode.value?.mv) return;
+  const nodeId = wb.selected;
   try {
-    const record = await api.explainMove(s.id, wb.selected, "deep");
-    if (record && wb.detail?.node.id === wb.selected) {
+    const record = await api.explainMove(s.id, nodeId, "deep");
+    // 返回时用户可能已切换到其他节点或会话，只更新对应的节点
+    const same = wb.detail?.study_id === s.id && wb.detail.node.id === nodeId;
+    if (record && same && record.study_id === s.id && record.node_id === nodeId && wb.detail) {
       wb.detail.explanation = newestRecord(wb.detail.explanation, { ...record, pending: true });
     }
     notify("info", "已安排深入分析，完成后自动更新讲解");

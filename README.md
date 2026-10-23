@@ -17,7 +17,8 @@ B站：[https://www.bilibili.com/video/BV1TQVBzuE7C?t=3.4](https://www.bilibili.
 
 ## 下载安装
 
-[点击下载](https://github.com/atopx/chessboard/releases/latest)
+本分支（学习助手 0.2）暂未发布安装包，请按下面“开发”一节从源码构建。
+旧版 0.1.x（屏幕识别 + 走法提示）的安装包见原作者的发布页：<https://github.com/atopx/chessboard/releases>
 
 ## 🎯 核心功能
 
@@ -58,6 +59,10 @@ pnpm install
 pnpm tauri dev                     # 桌面应用
 cargo test --manifest-path server/Cargo.toml -p xq-core -p xq-app   # 规则、讲解、引擎服务与流程测试
 ```
+
+流程测试会运行仓库自带的 Pikafish，缺少引擎时测试失败而不是跳过；确实无法运行（如 CPU 不支持 BMI2）时，
+可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。引擎服务的异常情况（候选排名变化、部分更新、崩溃、设置变更）
+由可编排的模拟引擎 `xq-mock-uci` 稳定复现，不依赖真实引擎。
 
 在浏览器中调试界面（使用真实引擎，屏幕识别为模拟输入）：
 

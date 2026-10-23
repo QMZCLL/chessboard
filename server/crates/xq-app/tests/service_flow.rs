@@ -57,8 +57,26 @@ impl Recorder {
 
 fn repo_root() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..") }
 
-fn engine_available() -> bool {
-    cfg!(all(target_os = "linux", target_arch = "x86_64")) && repo_root().join("libs/pikafish/pikafish-linux").exists()
+/// 这些流程依赖真实引擎；缺少引擎时服务启动会失败并报告原因，而不是静默通过。
+/// 确实无法运行时可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。
+fn skip_engine_tests() -> bool {
+    let skip = std::env::var_os("XQ_SKIP_ENGINE_TESTS").is_some();
+    if skip {
+        eprintln!("已按 XQ_SKIP_ENGINE_TESTS 跳过依赖真实引擎的流程测试");
+    }
+    skip
+}
+
+fn wait_engine(service: &AppService) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        match service.status().engine {
+            EngineState::Ready { .. } => return,
+            EngineState::Failed { reason } => panic!("引擎不可用：{reason}"),
+            other => assert!(Instant::now() < deadline, "{other:?}"),
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn start(dir: &std::path::Path, recorder: Arc<Recorder>, sim: Arc<SimBackend>) -> AppService {
@@ -70,11 +88,7 @@ fn start(dir: &std::path::Path, recorder: Arc<Recorder>, sim: Arc<SimBackend>) -
         legacy_config: None,
     };
     let service = AppService::start(paths, recorder, sim).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while !matches!(service.status().engine, EngineState::Ready { .. }) {
-        assert!(Instant::now() < deadline, "{:?}", service.status().engine);
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    wait_engine(&service);
     // 测试中缩短搜索预算
     let mut cfg = service.status().config;
     cfg.analysis.quick_time_ms = 300;
@@ -89,7 +103,7 @@ fn mv(s: &str) -> Move { Move::parse_iccs(s).unwrap() }
 
 #[test]
 fn endgame_mate_and_terminal_analysis() {
-    if !engine_available() {
+    if skip_engine_tests() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -172,7 +186,7 @@ fn endgame_mate_and_terminal_analysis() {
 
 #[test]
 fn branches_persist_across_restart_and_export() {
-    if !engine_available() {
+    if skip_engine_tests() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -226,7 +240,7 @@ fn wait_capture(rec: &Recorder, state: &str) -> Value {
 
 #[test]
 fn capture_flow_with_simulated_screen() {
-    if !engine_available() {
+    if skip_engine_tests() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -295,7 +309,7 @@ fn capture_flow_with_simulated_screen() {
 
 #[test]
 fn record_import_reports_stop_point() {
-    if !engine_available() {
+    if skip_engine_tests() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -308,5 +322,251 @@ fn record_import_reports_stop_point() {
     let validate = service.validate_position(ValidateRequest { fen: "4k4/9/9/9/9/9/9/9/9/4K4".into(), side: None });
     assert!(validate.needs_side);
     assert!(validate.report.unwrap().issues.iter().any(|i| i.code == "kings_facing"));
+    service.shutdown();
+}
+
+#[test]
+fn failed_line_insert_leaves_study_unchanged() {
+    if skip_engine_tests() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start(dir.path(), rec.clone(), Arc::new(SimBackend::new()));
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let before = service.study_view(&sid).unwrap();
+    // 第一步合法，第二步非法（红方连走两步）
+    let result = service.add_line(LineRequest { study_id: sid.clone(), parent: ROOT, moves: vec![mv("h2e2"), mv("h0g2")] });
+    assert!(result.is_err());
+    let after = service.study_view(&sid).unwrap();
+    assert_eq!(after.study.nodes.len(), before.study.nodes.len(), "内存中的棋谱不应留下第一步");
+    assert_eq!(after.study.revision, before.study.revision);
+    assert_eq!(after.stats.moves, 0);
+    service.shutdown();
+    drop(service);
+    // 数据库中同样没有变化
+    let service = start(dir.path(), rec, Arc::new(SimBackend::new()));
+    assert_eq!(service.load_study(&sid).unwrap().study.nodes.len(), 1);
+    service.shutdown();
+}
+
+#[test]
+fn new_game_on_screen_is_not_written_to_old_study() {
+    if skip_engine_tests() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let sim = Arc::new(SimBackend::new());
+    let service = start(dir.path(), rec.clone(), sim.clone());
+    let mut cfg = service.status().config;
+    cfg.capture.interval_ms = 40;
+    cfg.capture.stable_frames = 2;
+    cfg.capture.unexplained_frames = 2;
+    cfg.analysis.auto_explain = false;
+    service.update_config(cfg).unwrap();
+
+    let mut screen = Board::startpos();
+    sim.show(Some(screen.clone()), Orientation::RedBottom);
+    service.start_capture(StartCaptureRequest { window_id: 1, rect: Rect { x: 0.0, y: 0.0, w: 800.0, h: 900.0 } }).unwrap();
+    let awaiting = rec.wait("起始局面", |e, v| e == "capture_state" && v["state"] == "awaiting_start");
+    let view = service
+        .confirm_capture_start(ConfirmStartRequest {
+            board: awaiting["observed"]["board"].as_str().unwrap().into(),
+            side: Color::Red,
+            orientation: Orientation::RedBottom,
+            name: None,
+            attach: None,
+        })
+        .unwrap();
+    let sid = view.study.id.clone();
+    for m in ["h2e2", "h9g7"] {
+        screen.apply(mv(m));
+        sim.show(Some(screen.clone()), Orientation::RedBottom);
+        let n = service.study_view(&sid).unwrap().study.nodes.len();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while service.study_view(&sid).unwrap().study.nodes.len() == n {
+            assert!(Instant::now() < deadline, "没有记录 {m}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    rec.clear();
+    // 外部棋盘开始新的一局，并且在用户确认前已经走出第一步
+    sim.show(Some(Board::startpos()), Orientation::RedBottom);
+    let ask = rec.wait("新一局确认", |e, v| e == "capture_state" && v["state"] == "awaiting_confirmation");
+    assert_eq!(ask["kind"], "new_game");
+    let first = Board::startpos().applied(mv("b2e2"));
+    sim.show(Some(first.clone()), Orientation::RedBottom);
+    let updated = rec.wait("待确认画面更新", |e, v| {
+        e == "capture_state" && v["state"] == "awaiting_confirmation" && v["observed"]["board"] == fen::board_fen(&first)
+    });
+    assert!(updated["observed"]["suggested_side"].is_null(), "已不在开局时不猜测行棋方");
+    std::thread::sleep(Duration::from_millis(400));
+    let old = service.study_view(&sid).unwrap().study;
+    assert_eq!(old.move_nodes().count(), 2, "确认之前不能向旧棋谱写入新一局的着法");
+    // 确认为新的一局后，切换到新会话继续记录
+    let state = service
+        .resolve_capture(ResolveCaptureRequest::NewStudy { board: fen::board_fen(&first), side: Color::Black })
+        .unwrap();
+    let CaptureState::Tracking { study_id, .. } = state else { panic!("{state:?}") };
+    assert_ne!(study_id, sid);
+    assert_eq!(service.study_view(&sid).unwrap().study.move_nodes().count(), 2);
+    service.stop_capture();
+    service.shutdown();
+}
+
+#[test]
+fn explanation_reruns_after_settings_change() {
+    if skip_engine_tests() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start(dir.path(), rec.clone(), Arc::new(SimBackend::new()));
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("第一次详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+    rec.clear();
+    // 修改分析深度后，旧讲解的分析条件不再有效，再次查看时按新条件重新分析
+    let mut cfg = service.status().config;
+    cfg.analysis.quick_depth = 7;
+    service.update_config(cfg).unwrap();
+    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Quick }).unwrap();
+    let ev = rec.wait("按新设置重新讲解", |e, v| {
+        e == "explanation_updated"
+            && v["node_id"] == node
+            && v["status"] == "detailed"
+            && v["record"]["explanation"]["conditions"].as_str().is_some_and(|c| c.contains("深度≤7"))
+    });
+    assert_eq!(ev["record"]["budget"], "quick");
+    service.shutdown();
+}
+
+/// 使用模拟引擎启动服务：把模拟引擎与脚本放到同一目录（引擎在自身目录下运行，默认读取该目录的脚本）。
+fn start_with_mock(dir: &std::path::Path, script: &str, rec: Arc<Recorder>) -> AppService {
+    let engine_dir = dir.join("engine");
+    std::fs::create_dir_all(&engine_dir).unwrap();
+    let exe = PathBuf::from(env!("CARGO_BIN_EXE_xq-mock-uci"));
+    let binary = engine_dir.join(exe.file_name().unwrap());
+    std::fs::copy(&exe, &binary).unwrap();
+    std::fs::write(engine_dir.join("mock-uci-script.txt"), script).unwrap();
+    let mut cfg = xq_app::config::AppConfig::default();
+    cfg.engine.binary = Some(binary);
+    cfg.analysis.multipv = 2;
+    cfg.analysis.quick_time_ms = 300;
+    xq_app::config::save(&dir.join("config").join("config.json"), &cfg).unwrap();
+    let paths = AppPaths {
+        data_dir: dir.join("data"),
+        config_dir: dir.join("config"),
+        log_dir: dir.join("logs"),
+        resource_dir: repo_root(),
+        legacy_config: None,
+    };
+    let service = AppService::start(paths, rec, Arc::new(SimBackend::new())).unwrap();
+    wait_engine(&service);
+    service
+}
+
+#[test]
+fn failed_actual_move_analysis_is_partial_not_detailed() {
+    // 候选搜索正常完成，但实际走法（马八进七）不在候选中，单独分析时引擎崩溃
+    let script = "@go\n\
+        info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2\n\
+        info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2\n\
+        bestmove h2e2\n\
+        @go\n\
+        exit 3\n";
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("b0c2"), variation: false }).unwrap().node_id.unwrap();
+    let ev = rec.wait("部分讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "partial");
+    assert_eq!(ev["record"]["explanation"]["level"], "partial");
+    assert!(ev["record"]["error"].as_str().unwrap().contains("实际着法单独分析失败"), "{ev}");
+    assert_eq!(ev["stats"]["detailed"], 0);
+    assert_eq!(ev["stats"]["partial"], 1);
+    assert!(ev["record"]["explanation"]["verdict"].is_null(), "没有实际走法分析时不给出优劣结论");
+    service.shutdown();
+}
+
+#[test]
+fn late_quick_result_never_overwrites_deep() {
+    // 第一次（快速）搜索等待 stop：深入分析请求会抢占它，被抢占的快速任务随后重新执行并晚于深入分析结束
+    let round = "info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2\n\
+        info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2\n\
+        bestmove h2e2\n";
+    let script = format!("@go\nwait-stop\n{round}@go\n{round}@go\n{round}");
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), &script, rec.clone());
+    // 棋谱导入的着法以后台优先级排队讲解
+    let created = service
+        .create_study(CreateStudyRequest {
+            name: None,
+            kind: CreateKind::Record { text: "炮二平五".into() },
+            orientation: None,
+            user_side: None,
+        })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let node = 1;
+    std::thread::sleep(Duration::from_millis(300));
+    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Deep }).unwrap();
+    rec.wait("深入分析完成", |e, v| {
+        e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed" && v["record"]["budget"] == "deep"
+    });
+    // 等被抢占的快速任务重新执行完
+    std::thread::sleep(Duration::from_millis(800));
+    let detail = service.node_detail(NodeRef { study_id: sid.clone(), node_id: node }).unwrap();
+    let record = detail.explanation.unwrap();
+    assert_eq!(record.budget, Some(Budget::Deep), "较晚结束的快速分析不能覆盖深入分析");
+    assert!(!record.pending);
+    service.shutdown();
+}
+
+#[test]
+fn engine_unavailable_keeps_basic_explanation_with_reason() {
+    // 资源目录里没有引擎：服务照常启动，摆棋、走子与规则讲解仍可用
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let paths = AppPaths {
+        data_dir: dir.path().join("data"),
+        config_dir: dir.path().join("config"),
+        log_dir: dir.path().join("logs"),
+        resource_dir: dir.path().join("no-resources"),
+        legacy_config: None,
+    };
+    let service = AppService::start(paths, rec.clone(), Arc::new(SimBackend::new())).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !matches!(service.status().engine, EngineState::Failed { .. }) {
+        assert!(Instant::now() < deadline, "{:?}", service.status().engine);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let created = service
+        .create_study(CreateStudyRequest {
+            name: None,
+            kind: CreateKind::Setup { board: "3k5/9/9/9/9/9/9/9/4R4/4K4".into(), side: Color::Red },
+            orientation: None,
+            user_side: None,
+        })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("e1d1"), variation: false }).unwrap().node_id.unwrap();
+    let ev = rec.wait("基本讲解与原因", |e, v| e == "explanation_updated" && v["node_id"] == node && !v["record"]["pending"].as_bool().unwrap_or(true));
+    assert_eq!(ev["status"], "partial");
+    assert!(ev["record"]["explanation"]["summary"].as_str().unwrap().contains("将死对方"));
+    assert!(ev["record"]["error"].as_str().unwrap().contains("引擎不可用"), "{ev}");
+    let detail = service.node_detail(NodeRef { study_id: sid, node_id: node }).unwrap();
+    assert_eq!(detail.status, GameStatus::Checkmate);
     service.shutdown();
 }

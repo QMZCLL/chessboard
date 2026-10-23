@@ -117,6 +117,13 @@ pub(crate) fn now_ms() -> i64 {
 
 pub(crate) fn explain_group(study: &str, node: NodeId) -> String { format!("explain:{study}:{node}") }
 
+/// 新会话的起点：局面、导入时给出的计数字段，以及此前历史是否完整。
+pub(crate) struct StudyStart {
+    pub pos: Position,
+    pub counters: Option<(u32, u32)>,
+    pub history_complete: bool,
+}
+
 pub(crate) struct ExplainTask {
     pub study_id: String,
     pub node_id: NodeId,
@@ -135,8 +142,9 @@ pub(crate) struct Inner {
     pub(crate) studies: Mutex<HashMap<String, Study>>,
     pub(crate) engine: EngineService,
     pub(crate) events: Arc<dyn EventSink>,
-    /// 正在进行的详细讲解：(会话, 节点) → 预算。
-    pub(crate) inflight: Mutex<HashMap<(String, NodeId), Budget>>,
+    /// 正在进行的详细讲解：(会话, 节点) → (预算, 请求代次)。
+    pub(crate) inflight: Mutex<HashMap<(String, NodeId), (Budget, u64)>>,
+    pub(crate) explain_generation: AtomicU64,
     pub(crate) focus: Mutex<Option<(String, NodeId)>>,
     /// 每次讲解记录变化递增；视图与事件都带上它，界面据此识别过期的视图。
     pub(crate) explain_seq: AtomicU64,
@@ -158,6 +166,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> { m.lock().unwrap_or_else(|poisone
 pub(crate) fn engine_spec(paths: &AppPaths, cfg: &AppConfig) -> EngineSpec {
     EngineSpec {
         binary: cfg.engine.binary.clone().unwrap_or_else(|| paths.bundled_engine()),
+        args: Vec::new(),
         nnue: Some(cfg.engine.nnue.clone().unwrap_or_else(|| paths.engine_dir().join("pikafish.nnue"))),
         threads: cfg.engine.threads,
         hash_mb: cfg.engine.hash_mb,
@@ -185,6 +194,7 @@ impl AppService {
             engine,
             events,
             inflight: Mutex::new(HashMap::new()),
+            explain_generation: AtomicU64::new(0),
             focus: Mutex::new(None),
             explain_seq: AtomicU64::new(0),
             explain_tx: Mutex::new(tx),
@@ -297,19 +307,29 @@ impl AppService {
     pub fn create_study(&self, req: CreateStudyRequest) -> ApiResult<ImportResponse> {
         let mut notes = Vec::new();
         let mut stopped = None;
-        let (pos, source, history_complete, moves, default_name) = match req.kind {
-            CreateKind::Standard => (Position::startpos(), StudySource::Standard, true, Vec::new(), "标准开局".to_string()),
+        let (start, source, moves, default_name) = match req.kind {
+            CreateKind::Standard => (
+                StudyStart { pos: Position::startpos(), counters: None, history_complete: true },
+                StudySource::Standard,
+                Vec::new(),
+                "标准开局".to_string(),
+            ),
             CreateKind::Fen { fen: text, side } => {
                 let parsed = fen::parse_fen(&text).map_err(|e| e.to_string())?;
                 let side = side.or(parsed.side).ok_or("FEN 没有给出行棋方，请选择红走或黑走")?;
                 let pos = Position::new(parsed.board, side);
                 let name = if pos.is_startpos() { "标准开局".to_string() } else { format!("残局（{}走）", side_short(side)) };
-                (pos, StudySource::Fen, false, Vec::new(), name)
+                (StudyStart { pos, counters: parsed.counters, history_complete: false }, StudySource::Fen, Vec::new(), name)
             }
             CreateKind::Setup { board, side } => {
                 let parsed = fen::parse_fen(&board).map_err(|e| e.to_string())?;
                 let pos = Position::new(parsed.board, side);
-                (pos, StudySource::Setup, false, Vec::new(), format!("摆棋局面（{}走）", side_short(side)))
+                (
+                    StudyStart { pos, counters: None, history_complete: false },
+                    StudySource::Setup,
+                    Vec::new(),
+                    format!("摆棋局面（{}走）", side_short(side)),
+                )
             }
             CreateKind::Record { text } => {
                 let parsed = record::parse_record(&text).map_err(|e| e.to_string())?;
@@ -322,11 +342,13 @@ impl AppService {
                     .find_map(|k| parsed.tags.iter().find(|(key, _)| key.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone()))
                     .filter(|v| !v.is_empty())
                     .unwrap_or_else(|| "导入的棋谱".to_string());
-                (parsed.start, StudySource::Record, !parsed.custom_start, parsed.moves, title)
+                let start =
+                    StudyStart { pos: parsed.start, counters: parsed.counters, history_complete: !parsed.custom_start };
+                (start, StudySource::Record, parsed.moves, title)
             }
         };
         let name = req.name.filter(|n| !n.trim().is_empty()).unwrap_or(default_name);
-        let study = self.inner.new_study(name, source, pos, history_complete, req.orientation, req.user_side, &moves)?;
+        let study = self.inner.new_study(name, source, start, req.orientation, req.user_side, &moves)?;
         Ok(ImportResponse { study, notes, stopped })
     }
 
@@ -478,9 +500,8 @@ impl AppService {
     /// 返回已有讲解，并在需要时排队生成更详细的讲解。
     pub fn explain_move(&self, req: ExplainRequest) -> ApiResult<Option<ExplanationRecord>> {
         let record = self.inner.store.load_explanation(&req.study_id, req.node_id)?;
-        if !record.as_ref().is_some_and(|r| r.is_detailed_for(req.budget)) {
-            self.inner.enqueue(&req.study_id, req.node_id, req.budget, Priority::Interactive, true);
-        }
+        // 是否需要重新分析（设置是否改变、上次是否不完整）由讲解线程判断
+        self.inner.enqueue(&req.study_id, req.node_id, req.budget, Priority::Interactive, true);
         Ok(record)
     }
 
@@ -508,27 +529,30 @@ impl Inner {
         }
     }
 
-    /// 在会话锁内修改会话；版本变化时写回数据库。
+    /// 在会话锁内修改会话。修改在副本上进行：闭包成功且写入数据库后才替换缓存，
+    /// 任何一步失败时内存与数据库都保持原样。
     pub(crate) fn with_study<R>(&self, id: &str, f: impl FnOnce(&mut Study) -> ApiResult<R>) -> ApiResult<R> {
         let mut studies = lock(&self.studies);
-        if !studies.contains_key(id) {
-            let study = self.store.load_study(id)?.ok_or_else(|| ApiError::from(format!("找不到学习会话 {id}")))?;
-            studies.insert(id.to_string(), study);
-        }
-        let study = studies.get_mut(id).expect("刚刚插入");
-        let before = study.revision;
-        let result = f(study)?;
-        if study.revision != before {
-            self.store.save_study(study)?;
+        let current = match studies.get(id) {
+            Some(s) => s.clone(),
+            None => self.store.load_study(id)?.ok_or_else(|| ApiError::from(format!("找不到学习会话 {id}")))?,
+        };
+        let mut draft = current.clone();
+        let result = f(&mut draft)?;
+        if draft.revision != current.revision {
+            self.store.save_study(&draft)?;
+            studies.insert(id.to_string(), draft);
+        } else if !studies.contains_key(id) {
+            studies.insert(id.to_string(), current);
         }
         Ok(result)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_study(
-        &self, name: String, source: StudySource, pos: Position, history_complete: bool, orientation: Option<Orientation>,
+        &self, name: String, source: StudySource, start: StudyStart, orientation: Option<Orientation>,
         user_side: Option<Color>, moves: &[xq_core::Move],
     ) -> ApiResult<StudyView> {
+        let StudyStart { pos, counters, history_complete } = start;
         let user_side = user_side.unwrap_or(if pos.is_startpos() { Color::Red } else { pos.side });
         let orientation = orientation.unwrap_or(match user_side {
             Color::Red => Orientation::RedBottom,
@@ -539,6 +563,7 @@ impl Inner {
             name,
             source,
             start: pos,
+            counters,
             history_complete,
             orientation,
             user_side,
@@ -618,6 +643,7 @@ impl Inner {
             }
             match status {
                 ExplainStatus::Detailed => stats.detailed += 1,
+                ExplainStatus::Partial => stats.partial += 1,
                 ExplainStatus::Failed => stats.failed += 1,
                 _ => {}
             }

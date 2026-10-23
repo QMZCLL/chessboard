@@ -3,6 +3,9 @@ import vue from "@vitejs/plugin-vue";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+// 开发桥端口，默认 1422（与 pnpm bridge 一致）
+// @ts-expect-error process is a nodejs global
+const bridgePort = process.env.XQ_BRIDGE_PORT ?? "1422";
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
@@ -31,7 +34,7 @@ export default defineConfig(async () => ({
     // 4. 在浏览器中调试界面时，把调用转发给开发桥（pnpm bridge）
     proxy: {
       "/__bridge": {
-        target: "http://127.0.0.1:1422",
+        target: `http://127.0.0.1:${bridgePort}`,
         changeOrigin: true,
         rewrite: (path: string) => path.replace(/^\/__bridge/, ""),
       },

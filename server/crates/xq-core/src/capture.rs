@@ -189,10 +189,14 @@ pub enum TrackEvent {
     Idle,
     /// 确认的一步或连续两步合法走法（两步时说明漏掉了中间一帧）。
     Moves(Vec<Move>),
-    /// 画面回到标准开局。
-    NewGame,
+    /// 画面回到标准开局，等待用户确认是否开始新的一局；确认前保持原来的局面与棋谱。
+    NewGame { board: Board },
     /// 画面稳定但无法用合法走法解释，需要确认或校正；确认前不改写棋局。
     NeedsConfirmation { board: Board, reason: String },
+    /// 等待确认期间画面又发生变化：只更新待确认的画面，不记录走子。
+    PendingUpdate { board: Board },
+    /// 等待确认期间画面回到了已确认局面，确认请求不再需要。
+    Resolved,
 }
 
 pub struct CaptureTracker {
@@ -200,23 +204,26 @@ pub struct CaptureTracker {
     confirmed: Position,
     candidate: Option<Board>,
     count: u32,
-    waiting: bool,
+    /// 正在等待用户确认的画面。等待期间不提交任何走子。
+    pending: Option<Board>,
+    /// 用户选择“暂不处理”的画面：保持原局面，不再为同一画面重复提示。
+    dismissed: Option<Board>,
 }
 
 impl CaptureTracker {
     pub fn new(confirmed: Position, cfg: TrackerConfig) -> Self {
-        Self { cfg, confirmed, candidate: None, count: 0, waiting: false }
+        Self { cfg, confirmed, candidate: None, count: 0, pending: None, dismissed: None }
     }
 
     pub fn confirmed(&self) -> &Position { &self.confirmed }
 
-    pub fn is_waiting(&self) -> bool { self.waiting }
+    pub fn is_waiting(&self) -> bool { self.pending.is_some() }
 
-    /// 用户暂不处理当前的确认请求：画面仍无法解释时，过一段时间再次提示。
+    /// 用户暂不处理当前的确认请求：保持原来的已确认局面；同一画面不再提示，画面变化后照常处理。
     pub fn resume(&mut self) {
+        self.dismissed = self.pending.take();
         self.candidate = None;
         self.count = 0;
-        self.waiting = false;
     }
 
     /// 用户确认或校正后，从新的已确认局面继续。
@@ -224,7 +231,8 @@ impl CaptureTracker {
         self.confirmed = pos;
         self.candidate = None;
         self.count = 0;
-        self.waiting = false;
+        self.pending = None;
+        self.dismissed = None;
     }
 
     pub fn feed(&mut self, board: Board) -> TrackEvent {
@@ -237,9 +245,28 @@ impl CaptureTracker {
         if self.count < self.cfg.stable_frames {
             return TrackEvent::Idle;
         }
-        if board == self.confirmed.board {
-            self.waiting = false;
+        if let Some(pending) = &self.pending {
+            if board == self.confirmed.board {
+                self.pending = None;
+                return TrackEvent::Resolved;
+            }
+            if *pending != board {
+                self.pending = Some(board.clone());
+                return TrackEvent::PendingUpdate { board };
+            }
             return TrackEvent::Idle;
+        }
+        if board == self.confirmed.board {
+            self.dismissed = None;
+            return TrackEvent::Idle;
+        }
+        if self.dismissed.as_ref() == Some(&board) {
+            return TrackEvent::Idle;
+        }
+        // 画面恰好回到开局几乎总是新的一局；先于走法解释判断，避免把“新开局”当成退回的着法
+        if board == Board::startpos() {
+            self.pending = Some(board.clone());
+            return TrackEvent::NewGame { board };
         }
         if let Some(moves) = explain_change(&self.confirmed, &board) {
             let mut pos = self.confirmed.clone();
@@ -249,12 +276,8 @@ impl CaptureTracker {
             self.reset(pos);
             return TrackEvent::Moves(moves);
         }
-        if board == Board::startpos() {
-            self.reset(Position::startpos());
-            return TrackEvent::NewGame;
-        }
-        if !self.waiting && self.count >= self.cfg.stable_frames + self.cfg.unexplained_frames {
-            self.waiting = true;
+        if self.count >= self.cfg.stable_frames + self.cfg.unexplained_frames {
+            self.pending = Some(board.clone());
             let reason = describe_unexplained(&self.confirmed, &board);
             return TrackEvent::NeedsConfirmation { board, reason };
         }
@@ -382,6 +405,43 @@ mod tests {
             events.iter().filter(|e| matches!(e, TrackEvent::NeedsConfirmation { .. })).collect();
         assert_eq!(asks.len(), 1);
         assert!(t.is_waiting());
+    }
+
+    #[test]
+    fn new_game_waits_for_confirmation_without_committing() {
+        let mut t = CaptureTracker::new(Position::startpos(), TrackerConfig { stable_frames: 1, unexplained_frames: 0 });
+        // 先在一盘棋里走两步
+        let played = Board::startpos().applied(mv("h2e2"));
+        assert_eq!(t.feed(played.clone()), TrackEvent::Moves(vec![mv("h2e2")]));
+        let played = played.applied(mv("h9g7"));
+        assert_eq!(t.feed(played.clone()), TrackEvent::Moves(vec![mv("h9g7")]));
+        let confirmed = t.confirmed().clone();
+        // 外部棋盘回到开局：提示新一局，但保持原局面
+        assert!(matches!(t.feed(Board::startpos()), TrackEvent::NewGame { .. }));
+        assert_eq!(t.confirmed(), &confirmed);
+        // 用户尚未确认，新一局已经走出第一步：只更新待确认画面，不能接到旧棋谱后面
+        let first = Board::startpos().applied(mv("b2e2"));
+        assert_eq!(t.feed(first.clone()), TrackEvent::PendingUpdate { board: first.clone() });
+        assert_eq!(t.feed(first), TrackEvent::Idle);
+        assert_eq!(t.confirmed(), &confirmed);
+        // 画面回到原局面，确认请求自动取消
+        assert_eq!(t.feed(played), TrackEvent::Resolved);
+        assert!(!t.is_waiting());
+    }
+
+    #[test]
+    fn dismissed_board_is_not_asked_again() {
+        let mut t = CaptureTracker::new(Position::startpos(), TrackerConfig { stable_frames: 1, unexplained_frames: 1 });
+        let weird = parse_position("3k5/9/9/9/9/9/9/9/4R4/4K4 w").unwrap().board;
+        assert_eq!(t.feed(weird.clone()), TrackEvent::Idle);
+        assert!(matches!(t.feed(weird.clone()), TrackEvent::NeedsConfirmation { .. }));
+        t.resume();
+        for _ in 0..5 {
+            assert_eq!(t.feed(weird.clone()), TrackEvent::Idle);
+        }
+        assert_eq!(t.confirmed(), &Position::startpos(), "暂不处理时保持原局面");
+        // 画面恢复后仍能正常记录走子
+        assert_eq!(t.feed(Board::startpos().applied(mv("h2e2"))), TrackEvent::Moves(vec![mv("h2e2")]));
     }
 
     #[test]

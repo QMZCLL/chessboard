@@ -74,7 +74,7 @@ async function stopCapture() {
     <span v-if="stats && stats.moves" class="item muted" data-testid="explain-stats">
       讲解：详细 {{ stats.detailed }} / 共 {{ stats.moves }} 着
       <template v-if="stats.pending"> · 分析中 {{ stats.pending }}</template>
-      <template v-if="stats.failed"> · 未完成 {{ stats.failed }}</template>
+      <template v-if="stats.partial + stats.failed"> · 不完整 {{ stats.partial + stats.failed }}</template>
     </span>
 
     <span class="spacer" />

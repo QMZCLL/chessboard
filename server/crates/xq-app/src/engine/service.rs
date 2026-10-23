@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -15,6 +16,7 @@ use std::time::Instant;
 
 use tracing::info;
 use tracing::warn;
+use xq_core::Move;
 use xq_core::Position;
 use xq_core::explain::EngineLine;
 use xq_core::fen;
@@ -147,7 +149,13 @@ impl Drop for EngineService {
 
 struct Running {
     job: Job,
-    lines: BTreeMap<u32, EngineLine>,
+    /// 本次搜索应给出的候选数。
+    expected: u32,
+    /// 当前深度正在更新的一轮候选。
+    round: BTreeMap<u32, EngineLine>,
+    round_depth: u32,
+    /// 最近一轮完整候选（深度、按名次排列）。
+    complete: Option<(u32, Vec<EngineLine>)>,
     depth: u32,
     nodes: u64,
     time_ms: u64,
@@ -344,13 +352,28 @@ impl Worker {
             }
             let depth = info.depth.unwrap_or(0);
             let deeper = depth > r.depth;
-            r.lines.insert(info.multipv.unwrap_or(1), EngineLine {
+            let rank = info.multipv.unwrap_or(1);
+            // 低于当前轮次深度的信息（如停止搜索时补发的未更新候选）不并入本轮
+            if rank == 0 || rank > r.expected || depth < r.round_depth {
+                return;
+            }
+            if depth > r.round_depth {
+                r.round.clear();
+                r.round_depth = depth;
+            }
+            r.round.insert(rank, EngineLine {
                 mv: info.pv[0],
                 score: info.score.expect("is_search_line 已确认有评分"),
                 bound: info.bound.unwrap_or(Bound::Exact),
                 depth,
                 pv: info.pv,
             });
+            if r.round.len() as u32 == r.expected {
+                let firsts: HashSet<_> = r.round.values().map(|l| l.mv).collect();
+                if firsts.len() == r.round.len() {
+                    r.complete = Some((depth, r.round.values().cloned().collect()));
+                }
+            }
             r.depth = r.depth.max(depth);
             r.nodes = info.nodes.unwrap_or(r.nodes);
             r.time_ms = info.time_ms.unwrap_or(r.time_ms);
@@ -358,13 +381,11 @@ impl Worker {
                 && let Some(progress) = r.job.spec.on_progress.as_mut()
             {
                 r.last_progress = Instant::now();
-                let update = SearchProgress {
-                    job: r.job.id,
-                    depth: r.depth,
-                    nodes: r.nodes,
-                    time_ms: r.time_ms,
-                    lines: r.lines.values().cloned().collect(),
+                let lines = match &r.complete {
+                    Some((_, lines)) => lines.clone(),
+                    None => r.round.values().cloned().collect(),
                 };
+                let update = SearchProgress { job: r.job.id, depth: r.depth, nodes: r.nodes, time_ms: r.time_ms, lines };
                 run_callback("进度", || progress(update));
             }
         } else if let Some(best) = uci::parse_bestmove(line) {
@@ -389,15 +410,22 @@ impl Worker {
                 }
                 _ => SearchOutcome::Failed("引擎没有给出着法".into()),
             },
-            BestMove::Move { mv, .. } if !r.lines.is_empty() => SearchOutcome::Completed(SearchResult {
-                lines: r.lines.into_values().collect(),
-                bestmove: Some(mv),
-                depth: r.depth,
-                nodes: r.nodes,
-                time_ms: r.time_ms,
-                identity: self.identity.clone().unwrap_or_else(unknown_identity),
-            }),
-            BestMove::Move { .. } => SearchOutcome::Failed("引擎没有返回评分和主变化".into()),
+            BestMove::Move { mv, .. } => {
+                let identity = self.identity.clone().unwrap_or_else(unknown_identity);
+                match collect_round(r.complete, r.round, r.round_depth, mv) {
+                    Some((lines, depth, complete, notes)) => SearchOutcome::Completed(SearchResult {
+                        lines,
+                        bestmove: Some(mv),
+                        depth,
+                        nodes: r.nodes,
+                        time_ms: r.time_ms,
+                        identity,
+                        complete,
+                        notes,
+                    }),
+                    None => SearchOutcome::Failed("引擎没有返回评分和主变化".into()),
+                }
+            }
         };
         finish_job(r.job, outcome);
     }
@@ -493,7 +521,7 @@ impl Worker {
         self.set_state(EngineState::Starting);
         self.kill_process();
         self.failure = None;
-        let process = match EngineProcess::spawn(&self.spec.binary, self.generation, self.tx.clone()) {
+        let process = match EngineProcess::spawn(&self.spec.binary, &self.spec.args, self.generation, self.tx.clone()) {
             Ok(p) => p,
             Err(e) => {
                 self.fail(format!("无法启动引擎 {}：{e}", self.spec.binary.display()));
@@ -673,8 +701,23 @@ impl Worker {
                 finish_job(job, SearchOutcome::Failed(format!("引擎不可用：{reason}")));
                 continue;
             }
+            if let Some(reason) = self.stale_reason(&job.spec.request) {
+                finish_job(job, SearchOutcome::Stale(reason));
+                continue;
+            }
             self.launch(job, &pos);
         }
+    }
+
+    /// 任务提交时依据的引擎与规则是否仍然有效。
+    fn stale_reason(&self, req: &SearchRequest) -> Option<String> {
+        let expect = req.expect.as_ref()?;
+        let identity = self.identity.as_ref()?;
+        let same = expect.engine == identity.name
+            && expect.nnue == identity.nnue
+            && expect.score_type == identity.score_type
+            && expect.rules == self.spec.rules;
+        (!same).then(|| "提交分析后引擎或规则设置已改变".to_string())
     }
 
     fn launch(&mut self, job: Job, pos: &Position) {
@@ -713,7 +756,10 @@ impl Worker {
         let now = Instant::now();
         self.running = Some(Running {
             job,
-            lines: BTreeMap::new(),
+            expected: multipv,
+            round: BTreeMap::new(),
+            round_depth: 0,
+            complete: None,
             depth: 0,
             nodes: 0,
             time_ms: 0,
@@ -727,6 +773,31 @@ impl Worker {
             self.on_crash("无法向引擎发送命令");
         }
     }
+}
+
+/// 选出用于比较的候选：优先使用最近一轮完整候选，并检查与最终着法是否一致。
+fn collect_round(
+    complete: Option<(u32, Vec<EngineLine>)>, round: BTreeMap<u32, EngineLine>, round_depth: u32, bestmove: Move,
+) -> Option<(Vec<EngineLine>, u32, bool, Vec<String>)> {
+    let mut notes = Vec::new();
+    let (lines, depth, mut complete) = match complete {
+        Some((depth, lines)) => {
+            if round_depth > depth {
+                notes.push(format!("深度 {round_depth} 的一轮搜索没有完成，候选比较使用深度 {depth} 的完整结果"));
+            }
+            (lines, depth, true)
+        }
+        None if !round.is_empty() => {
+            notes.push("引擎没有完成一轮完整的多候选搜索，候选只是部分结果".to_string());
+            (round.into_values().collect(), round_depth, false)
+        }
+        None => return None,
+    };
+    if lines.first().map(|l| l.mv) != Some(bestmove) {
+        complete = false;
+        notes.push("引擎最终着法与候选首位不一致，比较结果可能不稳定".to_string());
+    }
+    Some((lines, depth, complete, notes))
 }
 
 fn unknown_identity() -> EngineIdentity {

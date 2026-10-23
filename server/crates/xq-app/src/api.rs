@@ -125,6 +125,9 @@ pub struct ExplainStats {
     /// 至少有基本讲解的走子数。
     pub basic: usize,
     pub detailed: usize,
+    /// 有部分引擎证据或某个环节失败、可以重试的走子数。
+    pub partial: usize,
+    /// 无法生成任何讲解的走子数。
     pub failed: usize,
 }
 

@@ -295,7 +295,11 @@ pub fn illegal_reason(pos: &Position, mv: Move) -> Option<IllegalMove> {
     None
 }
 
-fn between(from: Square, to: Square) -> Vec<Square> {
+/// 同一直线上两点之间（不含两端）的交叉点；不在同一直线时为空。
+pub fn squares_between(from: Square, to: Square) -> Vec<Square> {
+    if from.file() != to.file() && from.rank() != to.rank() {
+        return Vec::new();
+    }
     let df = (to.file() as i8 - from.file() as i8).signum();
     let dr = (to.rank() as i8 - from.rank() as i8).signum();
     let mut out = Vec::new();
@@ -308,6 +312,17 @@ fn between(from: Square, to: Square) -> Vec<Square> {
         cur = next;
     }
     out
+}
+
+/// 马从 `from` 跳到 `to` 时的马腿位置；不是“日”字时为空。
+pub fn horse_leg(from: Square, to: Square) -> Option<Square> {
+    let df = to.file() as i8 - from.file() as i8;
+    let dr = to.rank() as i8 - from.rank() as i8;
+    match (df.abs(), dr.abs()) {
+        (1, 2) => from.offset(0, dr.signum()),
+        (2, 1) => from.offset(df.signum(), 0),
+        _ => None,
+    }
 }
 
 fn movement_reason(board: &Board, piece: Piece, mv: Move) -> IllegalMove {
@@ -344,16 +359,10 @@ fn movement_reason(board: &Board, piece: Piece, mv: Move) -> IllegalMove {
             illegal("elephant_shape", format!("{name}只能走“田”字"), vec![mv.from, mv.to])
         }
         PieceKind::Horse => {
-            if (df.abs(), dr.abs()) == (1, 2) || (df.abs(), dr.abs()) == (2, 1) {
-                let leg = if dr.abs() == 2 {
-                    mv.from.offset(0, dr.signum())
-                } else {
-                    mv.from.offset(df.signum(), 0)
-                }
-                .expect("马腿在棋盘内");
-                if let Some(blocker) = board.get(leg) {
-                    return illegal("horse_leg", format!("蹩马腿：{}挡住了马腿", describe(blocker, leg)), vec![leg]);
-                }
+            if let Some(leg) = horse_leg(mv.from, mv.to)
+                && let Some(blocker) = board.get(leg)
+            {
+                return illegal("horse_leg", format!("蹩马腿：{}挡住了马腿", describe(blocker, leg)), vec![leg]);
             }
             illegal("horse_shape", "马只能走“日”字", vec![mv.from, mv.to])
         }
@@ -361,7 +370,7 @@ fn movement_reason(board: &Board, piece: Piece, mv: Move) -> IllegalMove {
             if !straight {
                 return illegal("rook_line", "车只能沿横线或纵线走", vec![mv.from, mv.to]);
             }
-            let blocked = blockers(&between(mv.from, mv.to));
+            let blocked = blockers(&squares_between(mv.from, mv.to));
             let first = blocked.first().copied();
             let message = match first.and_then(|sq| board.get(sq).map(|p| describe(p, sq))) {
                 Some(desc) => format!("车的路线被{desc}挡住"),
@@ -373,7 +382,7 @@ fn movement_reason(board: &Board, piece: Piece, mv: Move) -> IllegalMove {
             if !straight {
                 return illegal("cannon_line", "炮只能沿横线或纵线走", vec![mv.from, mv.to]);
             }
-            let screens = blockers(&between(mv.from, mv.to));
+            let screens = blockers(&squares_between(mv.from, mv.to));
             if board.get(mv.to).is_none() {
                 illegal("cannon_blocked", "炮不吃子时，路线上不能有棋子", screens)
             } else if screens.is_empty() {

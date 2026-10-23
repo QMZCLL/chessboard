@@ -139,6 +139,8 @@ pub struct NewStudy {
     pub name: String,
     pub source: StudySource,
     pub start: Position,
+    /// 导入的 FEN 中给出的计数字段，保存在根节点 FEN 中并传给引擎。
+    pub counters: Option<(u32, u32)>,
     pub history_complete: bool,
     pub orientation: Orientation,
     pub user_side: Color,
@@ -158,7 +160,7 @@ impl Study {
         if !report.ok {
             return Err(StudyError::InvalidPosition(report));
         }
-        let root_fen = fen::position_fen(&spec.start);
+        let root_fen = fen::position_fen_with_counters(&spec.start, spec.counters);
         let root = Node {
             id: ROOT,
             parent: None,
@@ -318,9 +320,10 @@ impl Study {
     pub fn repetition_count(&self, id: NodeId) -> Result<usize, StudyError> {
         let start = self.segment_start(id)?;
         let path = self.path(id)?;
-        let target = &self.node(id)?.fen;
+        // 根节点 FEN 可能带计数字段，只比较布局与行棋方
+        let target = fen::position_key(&self.node(id)?.fen);
         let from = path.iter().position(|n| *n == start).unwrap_or(0);
-        Ok(path[from..].iter().filter(|n| self.nodes.get(n).is_some_and(|x| &x.fen == target)).count())
+        Ok(path[from..].iter().filter(|n| self.nodes.get(n).is_some_and(|x| fen::position_key(&x.fen) == target)).count())
     }
 
     pub fn mainline(&self) -> Vec<NodeId> {
@@ -390,6 +393,7 @@ mod tests {
             name: "测试".into(),
             source: StudySource::Fen,
             start,
+            counters: None,
             history_complete: true,
             orientation: Orientation::RedBottom,
             user_side: Color::Red,
@@ -444,6 +448,7 @@ mod tests {
             name: "x".into(),
             source: StudySource::Fen,
             start: bad,
+            counters: None,
             history_complete: false,
             orientation: Orientation::RedBottom,
             user_side: Color::Red,
@@ -451,6 +456,33 @@ mod tests {
             now: 0,
         });
         assert!(matches!(result, Err(StudyError::InvalidPosition(_))));
+    }
+
+    #[test]
+    fn root_counters_are_kept_for_engine() {
+        let parsed = fen::parse_fen("3k5/9/9/9/9/9/9/9/4R4/4K4 w - - 30 55").unwrap();
+        let start = Position::new(parsed.board, parsed.side.unwrap());
+        let mut s = Study::new(NewStudy {
+            id: "c".into(),
+            name: "计数".into(),
+            source: StudySource::Fen,
+            start,
+            counters: parsed.counters,
+            history_complete: false,
+            orientation: Orientation::RedBottom,
+            user_side: Color::Red,
+            rules: RuleSet::default(),
+            now: 0,
+        })
+        .unwrap();
+        let mut cur = ROOT;
+        for m in ["e1e2", "d9d8", "e2e1", "d8d9"] {
+            cur = s.apply_move(cur, mv(m), MoveSource::User, 1).unwrap().node;
+        }
+        let (base, moves) = s.engine_history(cur).unwrap();
+        assert_eq!(base, "3k5/9/9/9/9/9/9/9/4R4/4K4 w - - 30 55");
+        assert_eq!(moves.len(), 4);
+        assert_eq!(s.repetition_count(cur).unwrap(), 2, "根节点带计数字段时仍能识别重复局面");
     }
 
     #[test]

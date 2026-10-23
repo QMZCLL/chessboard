@@ -125,7 +125,11 @@ pub struct Verdict {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplainLevel {
+    /// 只有规则事实。
     Basic,
+    /// 已有引擎证据，但缺少某一部分（候选不完整或实际走法未分析），结论不完整，可以重试。
+    Partial,
+    /// 候选比较与实际走法分析都已完成。
     Detailed,
 }
 
@@ -180,6 +184,12 @@ pub struct EngineEvidence {
     pub actual: Option<EngineLine>,
     /// 分析条件的文字说明（引擎、深度、时间、候选数等）。
     pub conditions: String,
+    /// 候选来自同一轮完整搜索，且与引擎最终着法一致。
+    #[serde(default)]
+    pub complete: bool,
+    /// 候选不完整或不一致的原因。
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -311,6 +321,7 @@ fn points(f: &MoveFacts) -> Vec<Point> {
     if let Some(resolution) = f.check_resolution {
         let checkers = rules::checkers(before, mover);
         let checker_text = labels(before, &checkers);
+        let own_king = Piece::new(mover, PieceKind::King).name();
         let (short, text) = match resolution {
             CheckResolution::KingMove => {
                 ("躲开将军".to_string(), format!("{}移动位置，躲开了{}的将军", f.piece.name(), checker_text))
@@ -318,11 +329,26 @@ fn points(f: &MoveFacts) -> Vec<Point> {
             CheckResolution::Capture => {
                 ("吃掉将军的棋子".to_string(), format!("吃掉正在将军的{}，化解将军", checker_text))
             }
-            CheckResolution::Block => {
-                ("垫子化解将军".to_string(), format!("{}挡在将军线路上，化解了{}的将军", moved_after, checker_text))
-            }
+            CheckResolution::BlockLine => (
+                "垫子挡住将军".to_string(),
+                format!("{moved_after}挡在{checker_text}与{own_king}之间，切断了将军线路"),
+            ),
+            CheckResolution::BlockLeg => (
+                "别马腿解将".to_string(),
+                format!("{moved_after}别住了{checker_text}的马腿，马无法再将军"),
+            ),
+            CheckResolution::RemoveScreen => (
+                "移开炮架解将".to_string(),
+                format!("{moved_before}原本是{checker_text}与{own_king}之间唯一的炮架，移开后炮无法再隔子将军"),
+            ),
+            CheckResolution::AddScreen => (
+                "增加阻隔解将".to_string(),
+                format!("{moved_after}走到{checker_text}与{own_king}之间，炮前变成两个棋子，无法再隔子将军"),
+            ),
+            CheckResolution::Other => ("化解将军".to_string(), format!("这步化解了{checker_text}的将军")),
         };
         let mut squares = checkers;
+        squares.push(f.mv.from);
         squares.push(f.mv.to);
         push(85, "escape", short, text, squares, vec![], EvidenceKind::Fact, Certainty::Certain, true);
     }
@@ -678,50 +704,92 @@ fn view_of(pos: &Position, line: &EngineLine, rank: Option<u32>, is_actual: bool
 
 fn exact_cp(line: &EngineLine) -> Option<i32> { if line.bound == Bound::Exact { line.score.cp() } else { None } }
 
-/// 比较实际走法与首选。将杀分与普通分不相减；边界分只给方向不给分差。
+/// 普通分的取值区间：精确分为单点，下界只知道不低于该值，上界只知道不高于该值。
+fn cp_interval(line: &EngineLine) -> Option<(Option<i32>, Option<i32>)> {
+    let cp = line.score.cp()?;
+    Some(match line.bound {
+        Bound::Exact => (Some(cp), Some(cp)),
+        Bound::Lower => (Some(cp), None),
+        Bound::Upper => (None, Some(cp)),
+    })
+}
+
+fn unstable(note: &str) -> Verdict {
+    Verdict { tone: VerdictTone::Unclear, label: "比较尚不稳定".into(), delta: None, note: note.to_string() }
+}
+
+fn severity(loss: i32) -> (VerdictTone, &'static str) {
+    match loss {
+        i32::MIN..=30 => (VerdictTone::Close, "与首选接近"),
+        31..=80 => (VerdictTone::Inaccuracy, "略逊于首选"),
+        81..=200 => (VerdictTone::Mistake, "明显不如首选"),
+        _ => (VerdictTone::Blunder, "严重失误"),
+    }
+}
+
+/// 比较实际走法与首选。
+///
+/// 将杀分与普通分不相减；涉及搜索边界值时把评分当作区间，只给出区间关系能够证明的结论，
+/// 证明不了时标记为“比较尚不稳定”。“首选”只表示搜索排名，不代表其他走法一定有失误。
 pub fn judge(best: &EngineLine, actual: &EngineLine, actual_rank: Option<u32>) -> Verdict {
     if actual_rank == Some(1) || best.mv == actual.mv {
         return Verdict { tone: VerdictTone::Best, label: "当前分析的首选".into(), delta: None, note: String::new() };
     }
-    let bounded = best.bound != Bound::Exact || actual.bound != Bound::Exact;
-    let note = if bounded { "其中有分数是搜索边界值，差距只表示方向".to_string() } else { String::new() };
-    let verdict = |tone, label: &str, delta| Verdict { tone, label: label.to_string(), delta, note: note.clone() };
-    match (best.score, actual.score) {
-        (Score::Mate(b), Score::Mate(a)) if b > 0 && a > 0 => {
-            if a <= b + 1 {
-                verdict(VerdictTone::Close, "同样可以形成杀棋", None)
-            } else {
-                verdict(VerdictTone::Inaccuracy, "也能杀棋，但比首选更慢", None)
+    let exact = best.bound == Bound::Exact && actual.bound == Bound::Exact;
+    if best.score.is_mate() || actual.score.is_mate() {
+        if !exact {
+            return unstable("涉及将杀分的搜索边界值，需要继续搜索才能比较");
+        }
+        let verdict = |tone, label: &str| Verdict { tone, label: label.to_string(), delta: None, note: String::new() };
+        return match (best.score, actual.score) {
+            (Score::Mate(b), Score::Mate(a)) if b > 0 && a > 0 => {
+                if a <= b + 1 {
+                    verdict(VerdictTone::Close, "同样可以形成杀棋")
+                } else {
+                    verdict(VerdictTone::Inaccuracy, "也能杀棋，但比首选更慢")
+                }
+            }
+            (Score::Mate(b), _) if b > 0 => verdict(VerdictTone::Blunder, "错过了杀棋"),
+            (_, Score::Mate(a)) if a <= 0 => match best.score {
+                Score::Mate(b) if b <= 0 => verdict(VerdictTone::Close, "两者都难以避免被杀"),
+                _ => verdict(VerdictTone::Blunder, "会导致被对方杀棋"),
+            },
+            (Score::Mate(_), Score::Cp(_)) => verdict(VerdictTone::Close, "首选同样处于被杀局面，本步至少拖延"),
+            _ => unstable("两次搜索的将杀判断不一致"),
+        };
+    }
+    let (Some((best_lo, best_hi)), Some((actual_lo, actual_hi))) = (cp_interval(best), cp_interval(actual)) else {
+        return unstable("评分无法比较");
+    };
+    if exact {
+        let d = best_lo.unwrap_or(0) - actual_lo.unwrap_or(0);
+        if d < -20 {
+            return unstable("单独分析该着法的得分高于首选，可能因搜索预算不同，需要增加搜索预算");
+        }
+        let d = d.max(0);
+        let (tone, label) = severity(d);
+        return Verdict { tone, label: label.to_string(), delta: Some(d), note: String::new() };
+    }
+    // 损失 = 首选 - 实际，可证明的范围是 [首选下界 - 实际上界, 首选上界 - 实际下界]
+    let min_loss = best_lo.zip(actual_hi).map(|(b, a)| b - a);
+    let max_loss = best_hi.zip(actual_lo).map(|(b, a)| b - a);
+    match (min_loss, max_loss) {
+        (Some(m), _) if m > 30 => {
+            let (tone, label) = severity(m);
+            Verdict {
+                tone,
+                label: label.to_string(),
+                delta: None,
+                note: format!("按搜索边界值，至少比首选低约 {m} 分"),
             }
         }
-        (Score::Mate(b), _) if b > 0 => verdict(VerdictTone::Blunder, "错过了杀棋", None),
-        (_, Score::Mate(a)) if a <= 0 => match best.score {
-            Score::Mate(b) if b <= 0 => verdict(VerdictTone::Close, "两者都难以避免被杀", None),
-            _ => verdict(VerdictTone::Blunder, "会导致被对方杀棋", None),
+        (_, Some(m)) if m <= 30 => Verdict {
+            tone: VerdictTone::Close,
+            label: "与首选接近".into(),
+            delta: None,
+            note: format!("按搜索边界值，最多比首选低约 {} 分", m.max(0)),
         },
-        (Score::Mate(_), Score::Cp(_)) => verdict(VerdictTone::Close, "首选同样处于被杀局面，本步至少拖延", None),
-        (Score::Cp(_), Score::Mate(_)) | (Score::Mate(_), Score::Mate(_)) => {
-            verdict(VerdictTone::Unclear, "两次搜索结论不一致", None)
-        }
-        (Score::Cp(b), Score::Cp(a)) => {
-            let d = b - a;
-            if d < -20 {
-                return Verdict {
-                    tone: VerdictTone::Unclear,
-                    label: "两次搜索结论不一致".into(),
-                    delta: None,
-                    note: "单独分析该着法的得分高于首选，可能因搜索预算不同，结论尚不稳定".into(),
-                };
-            }
-            let d = d.max(0);
-            let (tone, label) = match d {
-                0..=30 => (VerdictTone::Close, "与首选接近"),
-                31..=80 => (VerdictTone::Inaccuracy, "略逊于首选"),
-                81..=200 => (VerdictTone::Mistake, "明显不如首选"),
-                _ => (VerdictTone::Blunder, "严重失误"),
-            };
-            verdict(tone, label, (!bounded).then_some(d))
-        }
+        _ => unstable("评分是搜索边界值，区间相互重叠，无法确定差距"),
     }
 }
 
@@ -865,10 +933,11 @@ pub fn explain_move(
     let mut reply_captures = false;
     let mut swing_loss: Option<String> = None;
     let mut conditions = None;
-    let level = if engine.is_some() { ExplainLevel::Detailed } else { ExplainLevel::Basic };
+    let mut level = if engine.is_some() { ExplainLevel::Partial } else { ExplainLevel::Basic };
 
     if let Some(engine) = engine.filter(|e| !e.candidates.is_empty()) {
         conditions = Some(engine.conditions.clone());
+        warnings.extend(engine.notes.iter().cloned());
         candidates = candidate_views(before, engine, Some(mv));
         let best = &engine.candidates[0];
         let rank = engine.candidates.iter().position(|c| c.mv == mv).map(|i| i as u32 + 1);
@@ -1035,12 +1104,20 @@ pub fn explain_move(
         } else {
             warnings.push(format!("{}没有进入候选，单独分析未完成，暂时无法比较优劣", f.notation));
         }
+        // 只有候选完整一致、且实际走法也有分析时，才算详细讲解
+        if engine.complete && actual_line.is_some() {
+            level = ExplainLevel::Detailed;
+        } else if !engine.complete {
+            warnings.push("候选比较尚未完成：引擎没有给出一轮完整一致的候选".to_string());
+        }
     } else if engine.is_none() {
         // 无引擎时，用同一棋子的其他走法做事实层面的对照
         if let Some(text) = fact_contrast(before, &f, &pts) {
             let id = ev.add(EvidenceKind::Fact, "contrast", text.clone(), vec![], vec![], None, Certainty::Certain);
             comparison.push(claim(text, &[&id]));
         }
+    } else {
+        warnings.push("引擎没有返回候选，暂时无法比较优劣".to_string());
     }
 
     // 一句话结论
@@ -1368,6 +1445,8 @@ mod tests {
             ],
             actual: Some(line("e2e6", Score::Cp(-320), &["e2e6", "g7e6", "h0g2"])),
             conditions: "测试".into(),
+            complete: true,
+            notes: vec![],
         };
         let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
         let v = e.verdict.clone().unwrap();
@@ -1398,11 +1477,66 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_bounds_do_not_produce_a_verdict() {
+        // 评审中的用例：首选 +100 上界、实际 -200 下界，区间重叠，不能判为严重失误
+        let mut best = line("h0g2", Score::Cp(100), &["h0g2"]);
+        best.bound = Bound::Upper;
+        let mut actual = line("b0c2", Score::Cp(-200), &["b0c2"]);
+        actual.bound = Bound::Lower;
+        let v = judge(&best, &actual, None);
+        assert_eq!(v.tone, VerdictTone::Unclear, "{v:?}");
+        // 区间能证明差距时才给出等级，但不显示精确分差
+        let mut best = line("h0g2", Score::Cp(400), &["h0g2"]);
+        best.bound = Bound::Lower;
+        let mut actual = line("b0c2", Score::Cp(0), &["b0c2"]);
+        actual.bound = Bound::Upper;
+        let v = judge(&best, &actual, None);
+        assert_eq!((v.tone, v.delta), (VerdictTone::Blunder, None));
+        assert!(v.note.contains("至少"));
+        // 有边界值的将杀分不下结论
+        let mut mate = line("h0g2", Score::Mate(3), &["h0g2"]);
+        mate.bound = Bound::Lower;
+        assert_eq!(judge(&mate, &line("b0c2", Score::Cp(0), &["b0c2"]), Some(2)).tone, VerdictTone::Unclear);
+    }
+
+    #[test]
+    fn incomplete_analysis_is_partial() {
+        let pos = parse_position("rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w").unwrap();
+        let candidates = vec![line("h0g2", Score::Cp(60), &["h0g2", "i9h9"]), line("b0c2", Score::Cp(50), &["b0c2"])];
+        // 实际走法不在候选中，单独分析又失败
+        let engine = EngineEvidence { candidates: candidates.clone(), actual: None, conditions: "测试".into(), complete: true, notes: vec![] };
+        let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
+        assert_eq!(e.level, ExplainLevel::Partial);
+        assert!(e.verdict.is_none());
+        // 候选来自不完整的一轮搜索
+        let engine = EngineEvidence {
+            candidates,
+            actual: None,
+            conditions: "测试".into(),
+            complete: false,
+            notes: vec!["最后一轮搜索没有完成".into()],
+        };
+        let e = explain_move(&pos, mv("h0g2"), &CTX, Some(&engine)).unwrap();
+        assert_eq!(e.level, ExplainLevel::Partial);
+        assert!(e.warnings.iter().any(|w| w.contains("候选比较尚未完成")), "{:?}", e.warnings);
+    }
+
+    #[test]
+    fn check_escape_by_removing_screen_is_explained() {
+        let pos = parse_position("3k5/9/4c4/9/9/9/9/4N4/9/4K4 w").unwrap();
+        let e = explain_move(&pos, mv("e2c3"), &CTX, None).unwrap();
+        assert!(e.basis.iter().any(|c| c.text.contains("唯一的炮架")), "{:?}", e.basis);
+        assert!(!e.basis.iter().any(|c| c.text.contains("挡在")), "{:?}", e.basis);
+    }
+
+    #[test]
     fn invalid_engine_lines_are_dropped() {
         let engine = EngineEvidence {
             candidates: vec![line("h0g2", Score::Cp(20), &["h0g2", "h0g2"])],
             actual: None,
             conditions: "测试".into(),
+            complete: true,
+            notes: vec![],
         };
         let e = explain_move(&Position::startpos(), mv("h0g2"), &CTX, Some(&engine)).unwrap();
         assert!(e.warnings.iter().any(|w| w.contains("无法在当前局面合法回放")), "{:?}", e.warnings);
