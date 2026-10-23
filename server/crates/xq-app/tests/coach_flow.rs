@@ -555,3 +555,93 @@ fn queued_request_is_not_sent_even_before_cleanup_runs() {
     assert_eq!(llm.count(), 1);
     service.shutdown();
 }
+
+#[test]
+fn settings_read_just_before_disable_are_never_sent() {
+    // 讲解线程刚读到旧设置就关闭 AI；派发恢复后、清理执行前，工作线程也不能用旧设置发出请求
+    let llm = mock_llm(|_| (Reply::Content(valid_output), 0));
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start(dir.path(), &format!("@go\n{ROUND}"), &llm, rec.clone());
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk".into()) }).unwrap();
+    let sid = standard_study(&service);
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+
+    let (paused_tx, paused_rx) = std::sync::mpsc::channel::<&'static str>();
+    let (resume_read_tx, resume_read_rx) = std::sync::mpsc::channel::<()>();
+    let (resume_sent_tx, resume_sent_rx) = std::sync::mpsc::channel::<()>();
+    let gates = Mutex::new((Some(resume_read_rx), Some(resume_sent_rx)));
+    service.set_coach_test_hook(Some(Arc::new(move |point: &'static str| {
+        let resume = match point {
+            "settings_read" => gates.lock().unwrap().0.take(),
+            "job_sent" => gates.lock().unwrap().1.take(),
+            _ => None,
+        };
+        if let Some(resume) = resume {
+            paused_tx.send(point).unwrap();
+            resume.recv().unwrap();
+        }
+    })));
+    explain(&service, &sid, node, false);
+    assert_eq!(paused_rx.recv_timeout(Duration::from_secs(30)).unwrap(), "settings_read");
+    // 设置写入、版本递增；清理排在讲解线程上，此时讲解线程停在派发中
+    let mut cfg = service.status().config;
+    cfg.coach.enabled = false;
+    service.update_config(cfg).unwrap();
+    resume_read_tx.send(()).unwrap();
+    // 派发完成、任务已交给工作线程，讲解线程再次停住，清理仍未执行
+    assert_eq!(paused_rx.recv_timeout(Duration::from_secs(30)).unwrap(), "job_sent");
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(llm.count(), 0, "旧设置不能带着新版本发出");
+    resume_sent_tx.send(()).unwrap();
+    rec.wait("清理完成", |e, v| e == "coach_updated" && v["node_id"] == node && v["status"] == "disabled");
+    assert_eq!(llm.count(), 0);
+    service.shutdown();
+}
+
+/// 与界面合并 AI 讲解状态的规则相同（src/state/coachMerge.ts）：版本不小于当前时采用新到达的。
+fn merge(current: Option<xq_app::llm::CoachView>, incoming: xq_app::llm::CoachView) -> xq_app::llm::CoachView {
+    match current {
+        Some(c) if incoming.seq < c.seq => c,
+        _ => incoming,
+    }
+}
+
+#[test]
+fn learning_settings_change_bumps_view_version() {
+    let llm = mock_llm(|_| (Reply::Content(valid_output), 0));
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start(dir.path(), &format!("@go\n{ROUND}"), &llm, rec.clone());
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk".into()) }).unwrap();
+    let sid = standard_study(&service);
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+    explain(&service, &sid, node, false);
+    rec.coach("AI 讲解完成", node, "ready");
+
+    let node_ref = NodeRef { study_id: sid.clone(), node_id: node };
+    type Change = fn(&mut xq_app::config::CoachConfig);
+    let changes: [(&str, Change, CoachStatus); 3] = [
+        ("学习水平改为高级", |c| c.audience = xq_app::config::Audience::Advanced, CoachStatus::Stale),
+        ("学习水平改回入门", |c| c.audience = xq_app::config::Audience::Beginner, CoachStatus::Ready),
+        ("详细程度改为详细", |c| c.detail = xq_app::config::Detail::Deep, CoachStatus::Stale),
+    ];
+    for (what, change, expected) in changes {
+        let before = service.coach_view(node_ref.clone()).unwrap();
+        let mut cfg = service.status().config;
+        change(&mut cfg.coach);
+        service.update_config(cfg).unwrap();
+        let after = service.coach_view(node_ref.clone()).unwrap();
+        assert_eq!(after.status, expected, "{what}：{:?}", after.reason);
+        assert_ne!(before.status, after.status, "{what}");
+        assert!(after.seq > before.seq, "{what}：状态改变但版本没有增加（{} → {}）", before.seq, after.seq);
+        // 无论两份响应以什么顺序到达，界面最终都显示新状态
+        let first = merge(Some(merge(None, before.clone())), after.clone());
+        let second = merge(Some(merge(None, after.clone())), before.clone());
+        assert_eq!((first.status, second.status), (expected, expected), "{what}");
+    }
+    assert_eq!(llm.count(), 1, "只改学习偏好不会自动调用模型");
+    service.shutdown();
+}

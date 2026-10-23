@@ -26,6 +26,9 @@ use crate::config::Audience;
 use crate::config::Detail;
 use evidence::AllowedClaim;
 
+/// 测试用的钩子，在 AI 讲解派发过程中的固定位置调用，参数为位置名称。
+pub type CoachTestHook = std::sync::Arc<dyn Fn(&'static str) + Send + Sync>;
+
 /// 讲解中的一段文字及其引用的结论编号。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoachText {

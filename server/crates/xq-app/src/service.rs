@@ -282,10 +282,16 @@ impl AppService {
         let notes = cfg.normalize();
         config::save(&self.inner.config_path, &cfg).map_err(|e| format!("保存设置失败：{e}"))?;
         self.inner.engine.reconfigure(engine_spec(&self.inner.paths, &cfg));
-        let same_service = self.inner.config_snapshot().coach.same_service(&cfg.coach);
+        let old_coach = self.inner.config_snapshot().coach;
+        let same_service = old_coach.same_service(&cfg.coach);
+        let coach_changed = old_coach != cfg.coach;
         *self.inner.config.write().unwrap_or_else(|p| p.into_inner()) = cfg;
+        // 先写入新设置，再递增版本
         if !same_service {
             self.inner.coach_config_changed();
+        } else if coach_changed {
+            // 学习水平、详细程度等改变不影响请求，但会改变已有结果是否过期
+            self.inner.coach_view_changed();
         }
         for n in notes {
             self.inner.notice(n);

@@ -32,6 +32,7 @@ use super::CoachExplanation;
 use super::CoachRecord;
 use super::CoachResult;
 use super::CoachState;
+use super::CoachTestHook;
 use super::CoachStatus;
 use super::CoachView;
 use super::credentials;
@@ -98,6 +99,7 @@ pub(crate) struct CoachRuntime {
     config_rev: AtomicU64,
     /// 界面状态版本，见 `CoachView::seq`。
     seq: AtomicU64,
+    test_hook: Mutex<Option<CoachTestHook>>,
     active: Mutex<usize>,
     slot_free: Condvar,
 }
@@ -111,6 +113,7 @@ impl CoachRuntime {
             generation: AtomicU64::new(0),
             config_rev: AtomicU64::new(0),
             seq: AtomicU64::new(0),
+            test_hook: Mutex::new(None),
             active: Mutex::new(0),
             slot_free: Condvar::new(),
         }
@@ -301,7 +304,29 @@ impl Inner {
             && self.coach.config_rev.load(Ordering::SeqCst) == job.config_rev
     }
 
+    /// 取得一致的设置快照：先读版本，再读设置。
+    ///
+    /// 修改设置的一方总是先写入新设置（配置与凭据文件）、再递增版本，所以先读版本可以保证：
+    /// 读到的设置不会比版本旧——旧设置绝不会带着新版本号发出。若读取期间设置改变，
+    /// 拿到的是“新设置＋旧版本”，发送前的版本检查会拦下，随后按新设置重新安排。
+    fn coach_snapshot(&self) -> (u64, Result<ProviderSettings, String>) {
+        let config_rev = self.coach.config_rev.load(Ordering::SeqCst);
+        (config_rev, self.coach_settings())
+    }
+
+    /// AI 讲解的显示状态可能改变（学习水平、详细程度等设置）：递增状态版本。
+    /// 必须在新设置写入之后调用，见 `CoachView::seq`。
+    pub(crate) fn coach_view_changed(&self) { self.coach.seq.fetch_add(1, Ordering::SeqCst); }
+
+    fn coach_test_point(&self, point: &'static str) {
+        let hook = lock(&self.coach.test_hook).clone();
+        if let Some(hook) = hook {
+            hook(point);
+        }
+    }
+
     /// 模型服务设置或密钥改变：使尚未发出的请求失效，并在讲解线程上按新设置重新安排。
+    /// 必须在新设置写入之后调用（见 `coach_snapshot`）。
     pub(crate) fn coach_config_changed(&self) {
         self.coach.config_rev.fetch_add(1, Ordering::SeqCst);
         self.coach.seq.fetch_add(1, Ordering::SeqCst);
@@ -375,7 +400,8 @@ impl Inner {
     /// 登记一次 AI 讲解请求（在讲解线程上执行）。
     pub(crate) fn coach_request(&self, req: CoachRequest) {
         let (sid, nid) = (req.study_id.clone(), req.node_id);
-        if self.coach_settings().is_err() {
+        let (config_rev, settings) = self.coach_snapshot();
+        let Ok(settings) = settings else {
             // 不可用：结束可能残留的排队状态，界面据此显示原因
             if self.store.load_coach(&sid, nid).ok().flatten().is_some() {
                 self.update_coach(&sid, nid, |r| {
@@ -388,19 +414,14 @@ impl Inner {
                 self.emit_coach(&sid, nid);
             }
             return;
-        }
+        };
+        self.coach_test_point("settings_read");
         let Ok(study) = self.with_study(&sid, |s| Ok(s.clone())) else { return };
         if !study.nodes.get(&nid).is_some_and(|n| n.is_move()) {
             return;
         }
         match self.store.load_explanation(&sid, nid).ok().flatten() {
-            Some(r) if r.explanation.is_some() && !r.pending => {
-                let settings = match self.coach_settings() {
-                    Ok(s) => s,
-                    Err(_) => return,
-                };
-                self.coach_dispatch(req, &study, &r, settings);
-            }
+            Some(r) if r.explanation.is_some() && !r.pending => self.coach_dispatch(req, &study, &r, settings, config_rev),
             Some(r) if r.explanation.is_none() && !r.pending && r.error.is_some() => {
                 let error = format!("这一着没有可用的讲解：{}", r.error.unwrap_or_default());
                 self.update_coach(&sid, nid, |c| {
@@ -423,7 +444,10 @@ impl Inner {
         }
     }
 
-    fn coach_dispatch(&self, req: CoachRequest, study: &Study, record: &ExplanationRecord, settings: ProviderSettings) {
+    /// 按同一份设置快照派发：`config_rev` 是读取 `settings` 之前取得的版本，任务一直携带它。
+    fn coach_dispatch(
+        &self, req: CoachRequest, study: &Study, record: &ExplanationRecord, settings: ProviderSettings, config_rev: u64,
+    ) {
         let key = (req.study_id.clone(), req.node_id);
         let (sid, nid) = key.clone();
         lock(&self.coach.waiting).remove(&key);
@@ -476,7 +500,6 @@ impl Inner {
             c.generation = generation;
             c.error = None;
         });
-        let config_rev = self.coach.config_rev.load(Ordering::SeqCst);
         let job = CoachJob { request: req, generation, config_rev, bundle, cache_key, settings };
         if lock(&self.coach.jobs).send(job).is_err() {
             lock(&self.coach.inflight).remove(&key);
@@ -484,7 +507,9 @@ impl Inner {
                 c.state = CoachState::Failed;
                 c.error = Some("AI 讲解线程已停止".into());
             });
+            return;
         }
+        self.coach_test_point("job_sent");
     }
 
     /// 逐着讲解记录写入后调用（讲解线程）：等待证据的请求开始生成，已有的 AI 讲解刷新状态。
@@ -610,6 +635,10 @@ fn result_of(job: &CoachJob, output: CoachExplanation) -> CoachResult {
 }
 
 impl AppService {
+    /// 测试用：在派发过程中的固定位置（`settings_read`、`job_sent`）调用，用来构造并发交错。
+    #[doc(hidden)]
+    pub fn set_coach_test_hook(&self, hook: Option<CoachTestHook>) { *lock(&self.inner.coach.test_hook) = hook; }
+
     /// 生成某一着的 AI 讲解。已有对应当前证据与设置的结果时直接返回，不再调用模型；
     /// 引擎分析还在进行时先等待。结果通过 `coach_updated` 事件推送。
     pub fn coach_explain(&self, req: CoachExplainRequest) -> ApiResult<CoachView> {
