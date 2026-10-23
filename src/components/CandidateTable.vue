@@ -32,7 +32,8 @@ function previewing(c: CandidateView) {
         role="button"
         :aria-pressed="focused === keyOf(c)"
         @click="focusCandidate(keyOf(c), c, base)"
-        @keydown.enter.prevent="focusCandidate(keyOf(c), c, base)"
+        @keydown.enter.self.prevent="focusCandidate(keyOf(c), c, base)"
+        @keydown.space.self.prevent="focusCandidate(keyOf(c), c, base)"
       >
         <span class="rank">{{ c.rank ?? "—" }}</span>
         <span class="notation">{{ c.notation }}</span>

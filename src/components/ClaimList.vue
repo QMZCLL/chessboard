@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // 讲解要点列表。点击一段只选中它并突出显示依据；演示变化使用独立的按钮。
+// 行的 Enter/空格只在行本身获得焦点时处理（.self 在 .prevent 之前），行内按钮的按键保持按钮自己的作用。
 // 依据在落子前的局面上时，不把标记画在落子后的棋盘上，而是提示起点并提供查看入口。
 import { computed } from "vue";
 import { NButton } from "naive-ui";
@@ -86,8 +87,8 @@ function short(text: string) {
       role="button"
       :aria-pressed="focusedIndex === i"
       @click="select(c, i)"
-      @keydown.enter.prevent="select(c, i)"
-      @keydown.space.prevent="select(c, i)"
+      @keydown.enter.self.prevent="select(c, i)"
+      @keydown.space.self.prevent="select(c, i)"
     >
       <span class="text">{{ c.text }}</span>
       <span v-if="badge(c)" class="badge" :class="badge(c)!.cls">{{ badge(c)!.text }}</span>

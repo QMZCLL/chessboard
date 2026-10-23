@@ -73,7 +73,8 @@ watch(
           tabindex="0"
           role="button"
           @click="selectNode(0)"
-          @keydown.enter.prevent="selectNode(0)"
+          @keydown.enter.self.prevent="selectNode(0)"
+          @keydown.space.self.prevent="selectNode(0)"
         >
           <span>起始局面 · {{ sideLabel(root.side_to_move) }}先走</span>
           <n-tag v-if="study && !study.history_complete" size="tiny" type="warning" :bordered="false">此前历史未知</n-tag>

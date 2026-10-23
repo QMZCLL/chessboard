@@ -101,7 +101,8 @@ function toggle() {
           role="button"
           :aria-current="wb.selected === item.id ? 'step' : undefined"
           @click="selectNode(item.id)"
-          @keydown.enter.prevent="selectNode(item.id)"
+          @keydown.enter.self.prevent="selectNode(item.id)"
+          @keydown.space.self.prevent="selectNode(item.id)"
         >
           <span class="num">{{ label(item.id) }}</span>
           <span class="notation">{{ nodeOf(item.id)?.notation }}</span>
