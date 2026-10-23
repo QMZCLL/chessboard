@@ -195,6 +195,12 @@ impl AppService {
     pub fn start(paths: AppPaths, events: Arc<dyn EventSink>, capture_backend: Arc<dyn CaptureBackend>) -> ApiResult<Self> {
         let loaded = config::load(&paths.config_dir, paths.legacy_config.as_deref());
         let store = Store::open(&paths.data_dir.join("xqlink.redb"))?;
+        // 上次退出时尚未完成的 AI 讲解请求已经不存在，标为中断，避免界面一直显示排队或生成中
+        match store.reset_interrupted_coach(now_ms()) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} 条 AI 讲解请求在上次退出时中断，已标为可重新生成"),
+            Err(e) => warn!("整理中断的 AI 讲解请求失败：{e}"),
+        }
         let engine_events = events.clone();
         let engine = EngineService::start(
             engine_spec(&paths, &loaded.config),
@@ -276,7 +282,11 @@ impl AppService {
         let notes = cfg.normalize();
         config::save(&self.inner.config_path, &cfg).map_err(|e| format!("保存设置失败：{e}"))?;
         self.inner.engine.reconfigure(engine_spec(&self.inner.paths, &cfg));
+        let same_service = self.inner.config_snapshot().coach.same_service(&cfg.coach);
         *self.inner.config.write().unwrap_or_else(|p| p.into_inner()) = cfg;
+        if !same_service {
+            self.inner.coach_config_changed();
+        }
         for n in notes {
             self.inner.notice(n);
         }

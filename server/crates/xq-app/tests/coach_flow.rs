@@ -1,6 +1,7 @@
 //! AI 讲解流程：模拟引擎 + 模拟语言模型服务（本机 HTTP）。
 //!
-//! 覆盖：密钥不外露、缓存复用、失败回退、等待引擎分析、证据更新后旧结果不写入、取消。
+//! 覆盖：密钥不外露、缓存复用、失败回退、等待引擎分析、证据更新后旧结果不写入、取消、
+//! 关闭功能或更换设置后不再发送排队中的请求、重启后清理中断的状态。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -166,10 +167,21 @@ fn unknown_claim(_: &Value) -> String {
 const ROUND: &str = "info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7\n\
     info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2\n\
     bestmove h2e2\n";
+/// 炮二平五之后黑方的候选。
+const BLACK_ROUND: &str = "info depth 1 seldepth 1 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+    info depth 1 seldepth 1 multipv 2 score cp 5 nodes 10 time 1 pv b9c7\n\
+    bestmove h9g7\n";
 
 fn repo_root() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..") }
 
 fn start(dir: &std::path::Path, engine_script: &str, llm: &MockLlm, rec: Arc<Recorder>) -> AppService {
+    start_with(dir, engine_script, llm, rec, |_| {})
+}
+
+fn start_with(
+    dir: &std::path::Path, engine_script: &str, llm: &MockLlm, rec: Arc<Recorder>,
+    tweak: impl FnOnce(&mut xq_app::config::AppConfig),
+) -> AppService {
     let engine_dir = dir.join("engine");
     std::fs::create_dir_all(&engine_dir).unwrap();
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_xq-mock-uci"));
@@ -184,6 +196,7 @@ fn start(dir: &std::path::Path, engine_script: &str, llm: &MockLlm, rec: Arc<Rec
     cfg.coach.base_url = llm.url.clone();
     cfg.coach.model = "mock-model".into();
     cfg.coach.timeout_ms = 2_000;
+    tweak(&mut cfg);
     xq_app::config::save(&dir.join("config").join("config.json"), &cfg).unwrap();
     let paths = AppPaths {
         data_dir: dir.join("data"),
@@ -219,7 +232,8 @@ fn coach_explains_from_evidence_reuses_cache_and_keeps_key_private() {
     let llm = mock_llm(|_| (Reply::Content(valid_output), 0));
     let dir = tempfile::tempdir().unwrap();
     let rec = Arc::new(Recorder::default());
-    let service = start(dir.path(), &format!("@go\n{ROUND}"), &llm, rec.clone());
+    let deep = ROUND.replace("cp 30", "cp 45");
+    let service = start(dir.path(), &format!("@go\n{ROUND}@go\n{deep}"), &llm, rec.clone());
     let sid = standard_study(&service);
     let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
     rec.wait("详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
@@ -268,9 +282,12 @@ fn coach_explains_from_evidence_reuses_cache_and_keeps_key_private() {
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(llm.count(), 1);
     // 明确要求重新生成
+    rec.clear();
     explain(&service, &sid, node, true);
     llm.wait_calls(2);
+    rec.coach("重新生成完成", node, "ready");
     assert_eq!(service.status().coach.used_today, 2);
+
     service.shutdown();
 }
 
@@ -361,5 +378,172 @@ fn coach_waits_for_engine_and_never_commits_outdated_evidence() {
     assert_eq!(record.result.unwrap().created_at, created_at, "取消后返回的结果不能写入");
     assert_eq!(serde_json::to_value(record.state).unwrap(), "idle");
     assert_eq!(llm.count(), 3);
+    service.shutdown();
+}
+
+/// 等待第 1 着的请求发到模型服务；超时时把 AI 讲解与逐着讲解的状态写进失败信息，便于排查偶发问题。
+fn wait_first_call(service: &AppService, llm: &MockLlm, rec: &Recorder, sid: &str) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while llm.count() < 1 {
+        if Instant::now() > deadline {
+            let node = NodeRef { study_id: sid.into(), node_id: 1 };
+            let view = service.coach_view(node.clone()).unwrap();
+            let detail = service.node_detail(node).unwrap();
+            let events: Vec<String> = rec.events.lock().unwrap().iter().rev().take(10).map(|(e, v)| format!("{e}:{}:{}", v["node_id"], v["status"])).collect();
+            panic!(
+                "模型服务没有收到第 1 次请求；AI 讲解 {:?}（{:?}，记录 {:?}）；逐着讲解 {:?}；最近的事件 {events:?}",
+                view.status,
+                view.reason,
+                view.record.map(|r| (r.state, r.waiting_evidence, r.generation, r.error)),
+                detail.explanation.map(|e| (e.status(), e.pending, e.error)),
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// 两着棋（红黑各一着）都已有详细讲解，并发数为 1；第 1 次模型请求较慢。
+fn two_moves_with_slow_first_call(dir: &std::path::Path) -> (AppService, MockLlm, Arc<Recorder>, String) {
+    let llm = mock_llm(|i| (Reply::Content(valid_output), if i == 0 { 1_500 } else { 0 }));
+    let rec = Arc::new(Recorder::default());
+    // 第 3 段供第 1 着的深入分析使用
+    let deep = ROUND.replace("cp 30", "cp 45");
+    let service = start_with(dir, &format!("@go\n{ROUND}@go\n{BLACK_ROUND}@go\n{deep}"), &llm, rec.clone(), |cfg| {
+        cfg.coach.max_parallel_requests = 1;
+    });
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk-old".into()) }).unwrap();
+    let created = service
+        .create_study(CreateStudyRequest {
+            name: None,
+            kind: CreateKind::Record { text: "1. 炮二平五 马8进7".into() },
+            orientation: None,
+            user_side: None,
+        })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    rec.wait("两着详细讲解", |e, v| e == "explanation_updated" && v["study_id"] == sid.as_str() && v["stats"]["detailed"] == 2);
+    // 第 1 着的请求已发出且未返回；第 2 着已排队，等待并发名额
+    explain(&service, &sid, 1, false);
+    wait_first_call(&service, &llm, &rec, &sid);
+    explain(&service, &sid, 2, false);
+    rec.coach("第 2 着排队", 2, "queued");
+    (service, llm, rec, sid)
+}
+
+#[test]
+fn queued_requests_are_not_sent_after_ai_is_disabled_or_key_cleared() {
+    type Change = fn(&AppService);
+    let changes: [(&str, Change); 2] = [
+        ("关闭 AI 讲解", |service| {
+            let mut cfg = service.status().config;
+            cfg.coach.enabled = false;
+            service.update_config(cfg).unwrap();
+        }),
+        ("清除密钥", |service| {
+            service.set_coach_credential(CoachCredentialRequest { key: None }).unwrap();
+        }),
+    ];
+    for (what, change) in changes {
+        let dir = tempfile::tempdir().unwrap();
+        let (service, llm, _rec, sid) = two_moves_with_slow_first_call(dir.path());
+        change(&service);
+        // 第 1 着的请求返回、释放名额后，排队的第 2 着不能再发送
+        std::thread::sleep(Duration::from_millis(2_500));
+        assert_eq!(llm.count(), 1, "{what}：服务器只应收到已经发出的那一次请求");
+        for node in [1, 2] {
+            let view = service.coach_view(NodeRef { study_id: sid.clone(), node_id: node }).unwrap();
+            assert_eq!(view.status, CoachStatus::Disabled, "{what}：第 {node} 着 {:?}", view.reason);
+            assert!(view.record.is_none_or(|r| r.result.is_none()), "{what}：已发出请求的结果被丢弃");
+        }
+        service.shutdown();
+    }
+}
+
+#[test]
+fn queued_requests_use_new_model_after_switch() {
+    let dir = tempfile::tempdir().unwrap();
+    let (service, llm, rec, sid) = two_moves_with_slow_first_call(dir.path());
+    let mut cfg = service.status().config;
+    cfg.coach.model = "other-model".into();
+    service.update_config(cfg).unwrap();
+    rec.coach("第 1 着按新模型生成", 1, "ready");
+    rec.coach("第 2 着按新模型生成", 2, "ready");
+    // 旧模型只收到第 1 着已经发出的那次请求；之后的请求都使用新模型
+    let calls: Vec<Value> = (0..llm.count()).map(|i| llm.call(i).1).collect();
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert_eq!(calls[0]["model"], "mock-model");
+    assert!(calls[1..].iter().all(|c| c["model"] == "other-model"));
+    assert!(calls.iter().filter(|c| pack(c)["move_notation"] == "马8进7").all(|c| c["model"] == "other-model"));
+    for node in [1, 2] {
+        let view = service.coach_view(NodeRef { study_id: sid.clone(), node_id: node }).unwrap();
+        assert!(view.record.unwrap().result.unwrap().model_label.contains("other-model"));
+    }
+    service.shutdown();
+}
+
+#[test]
+fn interrupted_request_is_not_shown_as_running_after_restart() {
+    let llm = mock_llm(|_| (Reply::Content(valid_output), 0));
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let script = format!("@go\n{ROUND}");
+    let service = start(dir.path(), &script, &llm, rec.clone());
+    let sid = standard_study(&service);
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+    service.shutdown();
+    drop(service);
+
+    // 模拟上次退出时请求还在进行
+    {
+        let store = xq_app::storage::Store::open(&dir.path().join("data").join("xqlink.redb")).unwrap();
+        let mut record = xq_app::llm::CoachRecord::new(&sid, node, 0);
+        record.state = xq_app::llm::CoachState::Running;
+        record.generation = 7;
+        store.save_coach(&record).unwrap();
+    }
+
+    let service = start(dir.path(), &script, &llm, rec.clone());
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk".into()) }).unwrap();
+    service.load_study(&sid).unwrap();
+    let view = service.coach_view(NodeRef { study_id: sid.clone(), node_id: node }).unwrap();
+    assert_eq!(view.status, CoachStatus::None, "{:?}", view.reason);
+    assert!(view.reason.unwrap().contains("没有完成"));
+    assert_eq!(serde_json::to_value(view.record.unwrap().state).unwrap(), "idle");
+    // 可以重新生成
+    rec.clear();
+    explain(&service, &sid, node, false);
+    rec.coach("重新生成", node, "ready");
+    assert_eq!(llm.count(), 1);
+    service.shutdown();
+}
+
+#[test]
+fn queued_request_is_not_sent_even_before_cleanup_runs() {
+    // 讲解线程被占用时，关闭功能后的清理还没有执行；排队的请求取得名额后也必须停下
+    let dir = tempfile::tempdir().unwrap();
+    let (service, llm, rec, sid) = two_moves_with_slow_first_call(dir.path());
+    let (paused_tx, paused_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel::<()>();
+    let gate = Mutex::new(Some((paused_tx, resume_rx)));
+    service.set_commit_hook(Some(Arc::new(move |_: &str, _, budget| {
+        if budget == Budget::Deep
+            && let Some((paused, resume)) = gate.lock().unwrap().take()
+        {
+            paused.send(()).unwrap();
+            resume.recv().unwrap();
+        }
+    })));
+    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: 1, budget: Budget::Deep, retry: false }).unwrap();
+    paused_rx.recv_timeout(Duration::from_secs(30)).expect("讲解线程应停在深入讲解的提交处");
+    let mut cfg = service.status().config;
+    cfg.coach.enabled = false;
+    service.update_config(cfg).unwrap();
+    // 第 1 着的请求返回、释放名额；此时清理仍在排队
+    std::thread::sleep(Duration::from_millis(2_500));
+    assert_eq!(llm.count(), 1, "设置改变后，排队的请求不能用旧设置发出");
+    resume_tx.send(()).unwrap();
+    rec.wait("清理完成", |e, v| e == "coach_updated" && v["node_id"] == 2 && v["status"] == "disabled");
+    assert_eq!(llm.count(), 1);
     service.shutdown();
 }

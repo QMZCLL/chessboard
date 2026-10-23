@@ -13,6 +13,7 @@ use xq_core::study::Study;
 
 use crate::llm::CoachRecord;
 use crate::llm::CoachResult;
+use crate::llm::CoachState;
 use crate::records::AnalysisRecord;
 use crate::records::CloudRecord;
 use crate::records::ExplanationRecord;
@@ -217,6 +218,33 @@ impl Store {
 
     pub fn load_coach_cache(&self, study: &str, node: NodeId, key: &str) -> Result<Option<CoachResult>, StoreError> {
         self.get(COACH_CACHE, &coach_cache_key(study, node, key))
+    }
+
+    /// 把上次运行遗留的排队中、生成中的 AI 讲解标为中断（保留已有结果），返回处理的条数。
+    pub fn reset_interrupted_coach(&self, now: i64) -> Result<usize, StoreError> {
+        let tx = self.db.begin_write()?;
+        let mut count = 0;
+        {
+            let mut t = tx.open_table(COACH)?;
+            let mut updates = Vec::new();
+            for item in t.iter()? {
+                let (k, v) = item?;
+                let Ok(mut record) = serde_json::from_str::<CoachRecord>(v.value()) else { continue };
+                if matches!(record.state, CoachState::Queued | CoachState::Running) {
+                    record.state = CoachState::Idle;
+                    record.waiting_evidence = false;
+                    record.error = Some("上次生成在应用退出前没有完成，可以重新生成".into());
+                    record.updated_at = now;
+                    updates.push((k.value().to_string(), serde_json::to_string(&record)?));
+                }
+            }
+            for (k, v) in updates {
+                t.insert(k.as_str(), v.as_str())?;
+                count += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(count)
     }
 
     /// 某天（UTC 日序号）已经发出的 AI 讲解请求数。

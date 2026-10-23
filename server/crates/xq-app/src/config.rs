@@ -168,6 +168,17 @@ impl Default for CoachConfig {
 }
 
 impl CoachConfig {
+    /// 两份设置是否指向同一个模型服务（启用状态、接口、地址、模型、凭据引用、输出上限）。
+    /// 不同时，已排队但尚未发出的请求必须停止，不能再用旧设置发送。
+    pub fn same_service(&self, other: &CoachConfig) -> bool {
+        self.enabled == other.enabled
+            && self.provider == other.provider
+            && self.base_url() == other.base_url()
+            && self.model == other.model
+            && self.credential_ref == other.credential_ref
+            && self.max_output_tokens == other.max_output_tokens
+    }
+
     pub fn base_url(&self) -> String {
         let url = self.base_url.trim().trim_end_matches('/');
         if url.is_empty() { self.provider.default_base_url().to_string() } else { url.to_string() }

@@ -79,6 +79,8 @@ pub(crate) struct CoachRequest {
 pub(crate) struct CoachJob {
     request: CoachRequest,
     generation: u64,
+    /// 派发时的设置版本；设置改变后，尚未发出的请求不再发送。
+    config_rev: u64,
     bundle: EvidenceBundle,
     cache_key: String,
     settings: ProviderSettings,
@@ -92,6 +94,8 @@ pub(crate) struct CoachRuntime {
     /// 等待引擎分析完成的请求。
     waiting: Mutex<HashMap<(String, NodeId), CoachRequest>>,
     generation: AtomicU64,
+    /// 模型服务设置（启用、接口、模型、凭据）的版本。
+    config_rev: AtomicU64,
     active: Mutex<usize>,
     slot_free: Condvar,
 }
@@ -103,6 +107,7 @@ impl CoachRuntime {
             inflight: Mutex::new(HashMap::new()),
             waiting: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
+            config_rev: AtomicU64::new(0),
             active: Mutex::new(0),
             slot_free: Condvar::new(),
         }
@@ -237,7 +242,11 @@ impl Inner {
             }
             Some(r) if r.state == CoachState::Running => (CoachStatus::Running, None),
             Some(r) if r.result.as_ref().is_some_and(is_current) => {
-                (CoachStatus::Ready, r.error.as_ref().map(|e| format!("最近一次重新生成失败：{e}")))
+                let reason = r.error.as_ref().map(|e| match r.state {
+                    CoachState::Failed => format!("最近一次重新生成失败：{e}"),
+                    _ => e.clone(),
+                });
+                (CoachStatus::Ready, reason)
             }
             Some(r) if r.state == CoachState::Failed => (CoachStatus::Failed, r.error.clone()),
             Some(CoachRecord { result: Some(res), .. }) => {
@@ -253,7 +262,8 @@ impl Inner {
             }
             _ => match settings {
                 Err(e) => (CoachStatus::Disabled, Some(e)),
-                Ok(_) => (CoachStatus::None, None),
+                // 例如上次生成在应用退出时中断
+                Ok(_) => (CoachStatus::None, record.as_ref().and_then(|r| r.error.clone())),
             },
         };
         CoachView { study_id: study_id.to_string(), node_id, status, reason, record }
@@ -278,9 +288,41 @@ impl Inner {
         self.emit_coach(study_id, node_id);
     }
 
+    /// 任务仍是节点最新的请求，且模型服务设置没有改变。
     fn coach_current(&self, job: &CoachJob) -> bool {
         let key = (job.request.study_id.clone(), job.request.node_id);
         lock(&self.coach.inflight).get(&key).map(|(g, _)| *g) == Some(job.generation)
+            && self.coach.config_rev.load(Ordering::SeqCst) == job.config_rev
+    }
+
+    /// 模型服务设置或密钥改变：使尚未发出的请求失效，并在讲解线程上按新设置重新安排。
+    pub(crate) fn coach_config_changed(&self) {
+        self.coach.config_rev.fetch_add(1, Ordering::SeqCst);
+        self.on_explain_thread(|inner| inner.coach_settings_changed());
+    }
+
+    fn coach_settings_changed(&self) {
+        let usable = self.coach_settings().is_ok();
+        let cfg = self.config_snapshot().coach;
+        // 已经发出的请求返回后丢弃；排队中的请求不再发送
+        let mut affected: Vec<(String, NodeId)> = lock(&self.coach.inflight).drain().map(|(k, _)| k).collect();
+        if !usable {
+            affected.extend(lock(&self.coach.waiting).drain().map(|(k, _)| k));
+        }
+        for (sid, nid) in affected {
+            if usable {
+                // 按新设置重新安排；结果相同时直接使用缓存
+                let req = CoachRequest { study_id: sid, node_id: nid, audience: cfg.audience, detail: cfg.detail, refresh: false };
+                self.coach_request(req);
+            } else {
+                self.update_coach(&sid, nid, |c| {
+                    if matches!(c.state, CoachState::Queued | CoachState::Running) {
+                        c.state = CoachState::Idle;
+                    }
+                    c.waiting_evidence = false;
+                });
+            }
+        }
     }
 
     fn coach_acquire(&self) {
@@ -302,8 +344,9 @@ impl Inner {
         let mut last = String::new();
         for attempt in 0..2 {
             if !self.coach_current(job) {
-                return Err("请求已取消或已被更新的请求取代".into());
+                return Err("请求已取消、已被更新的请求取代，或模型服务设置已改变".into());
             }
+            // 取得并发名额后、扣减调用次数与发送前再确认一次：关闭功能、清除密钥或更换服务后不再发送
             match self.store.take_coach_budget(today(), budget) {
                 Ok(true) => {}
                 Ok(false) => return Err(format!("今天的 AI 讲解调用次数已达上限（{budget} 次），可在设置中调整")),
@@ -426,7 +469,8 @@ impl Inner {
             c.generation = generation;
             c.error = None;
         });
-        let job = CoachJob { request: req, generation, bundle, cache_key, settings };
+        let config_rev = self.coach.config_rev.load(Ordering::SeqCst);
+        let job = CoachJob { request: req, generation, config_rev, bundle, cache_key, settings };
         if lock(&self.coach.jobs).send(job).is_err() {
             lock(&self.coach.inflight).remove(&key);
             self.update_coach(&sid, nid, |c| {
@@ -481,7 +525,8 @@ impl Inner {
             .filter(|r| !r.pending)
             .and_then(|r| evidence::build(&study, nid, &r).ok())
             .is_some_and(|b| b.revision == job.bundle.revision);
-        let settings_same = self.coach_settings().is_ok_and(|s| s.revision() == job.settings.revision());
+        let settings_same = self.coach_settings().is_ok_and(|s| s.revision() == job.settings.revision())
+            && self.coach.config_rev.load(Ordering::SeqCst) == job.config_rev;
         if !(evidence_same && settings_same) {
             debug!("节点 {nid} 的讲解依据或模型设置在生成期间改变，按当前状态重新安排");
             self.coach_request(CoachRequest { refresh: false, ..job.request });
@@ -596,11 +641,18 @@ impl AppService {
         let key = req.key.as_deref().map(str::trim).filter(|k| !k.is_empty());
         credentials::store(&self.inner.paths.config_dir, key)?;
         let mut cfg = self.inner.config_snapshot();
+        let before = cfg.coach.credential_ref.clone();
         match key {
             Some(_) => cfg.coach.credential_ref = Some(credentials::STORE_REF.to_string()),
             None if cfg.coach.credential_ref.as_deref() == Some(credentials::STORE_REF) => cfg.coach.credential_ref = None,
             None => {}
         }
-        self.update_config(cfg)
+        let unchanged_ref = cfg.coach.credential_ref == before;
+        let status = self.update_config(cfg)?;
+        // 引用改变时 update_config 已经处理；引用不变而密钥本身换了，同样让排队中的请求按新密钥重新安排
+        if unchanged_ref {
+            self.inner.coach_config_changed();
+        }
+        Ok(status)
     }
 }

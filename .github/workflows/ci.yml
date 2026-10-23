@@ -21,6 +21,13 @@ jobs:
       # 包含使用仓库自带 Pikafish 的流程测试；缺少引擎时测试失败而不是跳过
       - name: 测试
         run: cargo test --manifest-path server/Cargo.toml -p xq-core -p xq-app
+      # 系统代理不可达时，访问本机模型服务（如 Ollama、测试用的模拟服务）仍不能经过代理
+      - name: 本机模型服务不经过系统代理
+        run: cargo test --manifest-path server/Cargo.toml -p xq-app --test coach_flow
+        env:
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+          all_proxy: socks5://127.0.0.1:9
 
   frontend:
     name: 前端类型检查与构建

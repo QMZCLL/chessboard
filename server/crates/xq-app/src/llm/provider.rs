@@ -183,13 +183,26 @@ fn shorten(text: &str) -> String {
     if text.chars().count() > 200 { format!("{t}…") } else { t }
 }
 
+/// 服务地址是否在本机（127.0.0.1、::1、localhost）。
+pub fn is_local(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url) else { return false };
+    let Some(host) = url.host_str() else { return false };
+    let host = host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_loopback(),
+        Err(_) => host == "localhost" || host.ends_with(".localhost"),
+    }
+}
+
 /// 发送一次请求，返回模型输出的文字。
 pub fn complete(settings: &ProviderSettings, messages: &[Message], schema: &Value) -> Result<String, ProviderError> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(settings.timeout)
-        .user_agent(format!("xqlink/{APP_VERSION}"))
-        .build()
-        .map_err(|e| ProviderError::Network(e.to_string()))?;
+    let mut builder = reqwest::blocking::Client::builder().timeout(settings.timeout).user_agent(format!("xqlink/{APP_VERSION}"));
+    // 云端服务按系统代理设置访问；本机服务（如 Ollama）不经过代理：代理通常只用来访问外网，
+    // 经代理转发到本机地址会失败或绕路
+    if is_local(&settings.base_url) {
+        builder = builder.no_proxy();
+    }
+    let client = builder.build().map_err(|e| ProviderError::Network(e.to_string()))?;
     let (url, body) = request(settings, messages, schema);
     let mut req = client.post(&url).header("Content-Type", "application/json").body(body.to_string());
     if let Some(key) = &settings.key {
@@ -243,6 +256,16 @@ mod tests {
         // 请求体与调试输出都不含密钥
         assert!(!body.to_string().contains("secret"));
         assert!(!format!("{:?}", settings(CoachProvider::Openai)).contains("secret"));
+    }
+
+    #[test]
+    fn local_services_are_recognized() {
+        for url in ["http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:8080/v1", "http://api.localhost"] {
+            assert!(is_local(url), "{url}");
+        }
+        for url in ["https://api.deepseek.com", "https://api.openai.com/v1", "http://192.168.1.5:11434", "not a url"] {
+            assert!(!is_local(url), "{url}");
+        }
     }
 
     #[test]
