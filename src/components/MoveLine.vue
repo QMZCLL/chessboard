@@ -1,14 +1,15 @@
 <script setup lang="ts">
-// 一段连续着法：沿第一个子节点向下展开，分支紧跟在被替代的着法之后缩进显示。
+// 一段连续着法：沿第一个子节点向下展开，分支紧跟在被替代的着法之后缩进显示，可以折叠。
 import { computed } from "vue";
-import { NDropdown } from "naive-ui";
+import { NDropdown, useDialog } from "naive-ui";
 import type { ExplainStatus } from "../api/types";
-import { deleteFrom, nodeOf, promote, selectNode, wb } from "../state/workbench";
+import { deleteFrom, nodeOf, promote, selectNode, subtreeSize, wb } from "../state/workbench";
 import { moveNumber } from "../utils/board";
 
 defineOptions({ name: "MoveLine" });
 
 const props = defineProps<{ start: number; depth: number }>();
+const dialog = useDialog();
 
 interface Item {
   id: number;
@@ -30,6 +31,8 @@ const items = computed<Item[]>(() => {
 });
 
 const rootSide = computed(() => nodeOf(0)?.side_to_move ?? "red");
+const collapsed = computed(() => props.depth > 0 && !!wb.collapsed[props.start]);
+const branchSize = computed(() => subtreeSize(props.start));
 
 function label(id: number) {
   const node = nodeOf(id)!;
@@ -44,10 +47,10 @@ function status(id: number): ExplainStatus | undefined {
 
 const STATUS_TEXT: Record<ExplainStatus, string> = {
   queued: "讲解排队中",
-  basic: "已有基本讲解",
+  basic: "已有规则讲解",
   partial: "讲解不完整，可重试",
-  detailed: "详细讲解已完成",
-  failed: "详细讲解未完成",
+  detailed: "引擎分析完整",
+  failed: "引擎分析未完成",
 };
 
 function menu(id: number) {
@@ -55,28 +58,50 @@ function menu(id: number) {
   const parent = nodeOf(node?.parent);
   const options = [];
   if (parent && parent.children[0] !== id) options.push({ label: "设为主线", key: "promote" });
-  options.push({ label: "删除此着及之后", key: "delete" });
+  options.push({ label: `删除此着及之后（共 ${subtreeSize(id)} 着）`, key: "delete" });
   return options;
 }
 
 function onMenu(id: number, key: string) {
   if (key === "promote") void promote(id);
-  if (key === "delete") void deleteFrom(id);
+  if (key === "delete") {
+    const n = subtreeSize(id);
+    dialog.warning({
+      title: "删除着法",
+      content: `删除“${nodeOf(id)?.notation ?? ""}”及之后共 ${n} 着（含其中的分支），对应的讲解与笔记一并删除，无法撤销。`,
+      positiveText: "删除",
+      negativeText: "取消",
+      onPositiveClick: () => deleteFrom(id),
+    });
+  }
+}
+
+function toggle() {
+  wb.collapsed[props.start] = !collapsed.value;
 }
 </script>
 
 <template>
   <div class="line" :class="{ variation: depth > 0 }">
-    <template v-for="item in items" :key="item.id">
-      <div v-if="nodeOf(item.id)?.gap" class="gap" :class="{ active: wb.selected === item.id }" @click="selectNode(item.id)">
-        画面缺口：{{ nodeOf(item.id)?.gap_reason }}
-      </div>
-      <div
+    <button v-if="depth > 0" type="button" class="branch-head" :aria-expanded="!collapsed" @click="toggle">
+      <span class="caret">{{ collapsed ? "▸" : "▾" }}</span>
+      分支 · 从 {{ label(start) }} {{ nodeOf(start)?.notation }} 开始 · {{ branchSize }} 着
+    </button>
+    <template v-if="!collapsed">
+      <template v-for="item in items" :key="item.id">
+        <div v-if="nodeOf(item.id)?.gap" class="gap" :class="{ active: wb.selected === item.id }" :data-node="item.id" @click="selectNode(item.id)">
+          画面缺口：{{ nodeOf(item.id)?.gap_reason }}
+        </div>
+        <div
           v-else
-          class="move"
+          class="move focusable"
           :class="{ active: wb.selected === item.id, live: wb.view?.study.live_node === item.id }"
           :data-node="item.id"
+          tabindex="0"
+          role="button"
+          :aria-current="wb.selected === item.id ? 'step' : undefined"
           @click="selectNode(item.id)"
+          @keydown.enter.prevent="selectNode(item.id)"
         >
           <span class="num">{{ label(item.id) }}</span>
           <span class="notation">{{ nodeOf(item.id)?.notation }}</span>
@@ -87,32 +112,57 @@ function onMenu(id: number, key: string) {
             <span v-if="status(item.id)" class="dot" :class="status(item.id)" :title="STATUS_TEXT[status(item.id)!]" />
           </span>
           <n-dropdown trigger="click" :options="menu(item.id)" size="small" @select="(k: string) => onMenu(item.id, k)">
-            <span class="more" title="更多操作" @click.stop>⋯</span>
+            <button type="button" class="more" title="更多操作" aria-label="更多操作" @click.stop>⋯</button>
           </n-dropdown>
         </div>
-      <MoveLine v-for="alt in item.alternatives" :key="'alt' + alt" :start="alt" :depth="depth + 1" />
+        <MoveLine v-for="alt in item.alternatives" :key="'alt' + alt" :start="alt" :depth="depth + 1" />
+      </template>
     </template>
   </div>
 </template>
 
 <style scoped>
 .line.variation {
-  margin: 2px 0 4px 10px;
-  padding-left: 8px;
+  margin: 2px 0 var(--sp-1) 10px;
+  padding-left: var(--sp-2);
   border-left: 2px solid var(--border-strong);
+}
+.branch-head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.branch-head:hover {
+  background: var(--hover-bg);
+}
+.branch-head:focus-visible {
+  outline: 2px solid var(--accent-blue);
+}
+.caret {
+  display: inline-block;
+  width: 1em;
 }
 .move {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px;
-  border-radius: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
   cursor: pointer;
-  font-size: 15px;
+  font-size: var(--fs-body);
   line-height: 1.5;
+  transition: background-color 0.12s ease;
 }
 .variation .move {
-  font-size: 14px;
+  font-size: var(--fs-group);
   color: var(--text-secondary);
 }
 .move:hover {
@@ -120,18 +170,21 @@ function onMenu(id: number, key: string) {
 }
 .move.active {
   background: var(--selected-bg);
+  box-shadow: inset 3px 0 0 var(--accent-blue);
   color: var(--text-primary);
   font-weight: 600;
 }
 .num {
   min-width: 2.6em;
   color: var(--text-muted);
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
 .notation {
   flex: 1;
   font-family: var(--piece-font);
-  letter-spacing: 1px;
+  font-size: 16px;
+  letter-spacing: 1.5px;
 }
 .flags {
   display: inline-flex;
@@ -175,20 +228,30 @@ function onMenu(id: number, key: string) {
 }
 .more {
   visibility: hidden;
+  border: none;
+  background: none;
+  font: inherit;
   padding: 0 4px;
   color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
 }
 .move:hover .more,
-.move.active .more {
+.move.active .more,
+.move:focus-within .more,
+.more:focus-visible {
   visibility: visible;
 }
+.more:focus-visible {
+  outline: 2px solid var(--accent-blue);
+}
 .gap {
-  margin: 4px 0;
-  padding: 4px 8px;
+  margin: var(--sp-1) 0;
+  padding: var(--sp-1) var(--sp-2);
   font-size: 12px;
   color: var(--accent-amber);
   border: 1px dashed var(--accent-amber);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .gap.active {

@@ -164,28 +164,38 @@ function issueSquares(): Square[] {
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
 }
+/* 调色板中的棋子与棋盘上的棋子同一质感：木质侧边、浅色棋面、刻线 */
 .chip {
   font-family: var(--piece-font);
   font-size: 18px;
   font-weight: 700;
   aspect-ratio: 1;
   border-radius: 50%;
-  border: 1.5px solid #555;
-  background: #f6e7c6;
-  color: #222;
+  border: none;
+  background: radial-gradient(circle at 38% 32%, var(--piece-face-1), var(--piece-face-2) 78%);
+  box-shadow: inset 0 0 0 2px var(--piece-rim-1), inset 0 0 0 3.5px var(--piece-rim-2), inset 0 0 0 5px var(--piece-face-2),
+    inset 0 0 0 6px var(--piece-black), 0 2px 3px var(--piece-shadow);
+  color: var(--piece-black);
   cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.chip:hover {
+  transform: translateY(-1px);
 }
 .chip.red {
-  color: #b3261e;
-  border-color: #b3261e;
+  color: var(--piece-red);
+  box-shadow: inset 0 0 0 2px var(--piece-rim-1), inset 0 0 0 3.5px var(--piece-rim-2), inset 0 0 0 5px var(--piece-face-2),
+    inset 0 0 0 6px var(--piece-red), 0 2px 3px var(--piece-shadow);
 }
 .chip.eraser {
   font-size: 14px;
   background: var(--panel-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
   color: var(--text-secondary);
 }
 .chip.active {
-  outline: 3px solid var(--accent-blue);
+  outline: 2.5px solid var(--accent-blue);
+  outline-offset: 2px;
 }
 .label {
   font-size: 12px;

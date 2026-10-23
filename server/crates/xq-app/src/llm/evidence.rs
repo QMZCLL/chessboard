@@ -257,6 +257,7 @@ pub fn build(study: &Study, node_id: NodeId, record: &ExplanationRecord) -> Resu
                 notation: c.pv_notation.clone(),
             }),
             certainty: candidate_certainty,
+            on: LineBase::Parent,
         });
         let claim_id = add("candidate".into(), "candidate", statement, vec![evidence_id], candidate_certainty);
         candidates.push(PackCandidate {

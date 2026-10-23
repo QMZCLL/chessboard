@@ -1,17 +1,21 @@
 <script setup lang="ts">
-// AI 讲解：由语言模型根据规则事实与引擎证据组织文字。每段都引用程序给出的结论，
-// 点击可在棋盘上高亮或回放；评分等数字、排名、评价等级、优劣与杀棋结论不由模型书写，只出现在每段下方由程序给出的依据中。
-import { computed } from "vue";
+// AI 讲解：由语言模型根据规则事实与引擎证据组织文字。
+// 有结果时作为讲解正文显示，每段下方紧邻显示程序给出的依据原文（评分、排名、评价与杀棋结论只在这里出现）；
+// 没有结果时只占一行，说明当前状态与下一步可以做什么。状态全部来自后台，不在界面另做判断。
+import { computed, ref } from "vue";
 import { NButton, NSpin, NTag } from "naive-ui";
 import type { Claim, CoachResult, CoachText, ExplainLevel } from "../api/types";
-import { cancelCoach, coachView, requestCoach, showEvidence, wb } from "../state/workbench";
+import { canDemo, cancelCoach, coachView, demoEvidence, openSettings, requestCoach, wb } from "../state/workbench";
 import ClaimList from "./ClaimList.vue";
+import Icon from "./Icon.vue";
 
 const props = defineProps<{ level: ExplainLevel | null; pending: boolean }>();
 
 const view = coachView;
 const result = computed<CoachResult | null>(() => view.value?.record?.result ?? null);
-const busy = computed(() => view.value?.status === "queued" || view.value?.status === "running");
+const status = computed(() => view.value?.status ?? null);
+const busy = computed(() => status.value === "queued" || status.value === "running");
+const showDetail = ref(false);
 
 const SECTION: Record<string, string> = {
   purpose: "为什么考虑这步",
@@ -20,16 +24,13 @@ const SECTION: Record<string, string> = {
   reply: "下一步注意",
   caution: "风险提示",
 };
+const AUDIENCE: Record<string, string> = { beginner: "入门", intermediate: "进阶", advanced: "高级" };
+const DETAIL: Record<string, string> = { brief: "简短", normal: "常规篇幅", deep: "详细" };
 
-const STATUS: Record<string, { text: string; type: "default" | "info" | "success" | "warning" | "error" }> = {
-  disabled: { text: "未启用", type: "default" },
-  none: { text: "尚未生成", type: "default" },
-  queued: { text: "排队中", type: "info" },
-  running: { text: "生成中", type: "info" },
-  ready: { text: "已生成", type: "success" },
-  failed: { text: "生成失败", type: "error" },
-  stale: { text: "已过期", type: "warning" },
-};
+const meta = computed(() => {
+  const c = wb.status?.config.coach;
+  return c ? `${AUDIENCE[c.audience]} · ${DETAIL[c.detail]}` : "";
+});
 
 /** 分析状态与 AI 讲解状态分开说明。 */
 const analysisText = computed(() => {
@@ -38,15 +39,21 @@ const analysisText = computed(() => {
     case "detailed":
       return "引擎分析完整";
     case "partial":
-      return "引擎证据不完整 · AI 只解释已确认的内容";
+      return "引擎证据不完整，AI 只解释已确认的内容";
     case "basic":
-      return "只有规则讲解 · AI 只解释规则事实";
+      return "只有规则讲解，AI 只解释规则事实";
     default:
       return "";
   }
 });
 
-/** 一段文字的依据：所引用结论的证据。 */
+/** 失败原因的简短说明：取第一句，详情可展开。 */
+const shortReason = computed(() => {
+  const r = view.value?.reason ?? "";
+  const first = r.split(/[；;]/)[0];
+  return first.length > 48 ? `${first.slice(0, 48)}…` : first;
+});
+
 function asClaim(t: CoachText): Claim {
   const claims = result.value?.claims ?? [];
   const evidence = t.claim_ids.flatMap((id) => claims.find((c) => c.id === id)?.evidence_ids ?? []);
@@ -63,113 +70,164 @@ const sections = computed(() =>
   (result.value?.output.sections ?? []).map((s) => ({ title: SECTION[s.kind] ?? "", claim: asClaim(s), basis: basisOf(s) })),
 );
 
+const evidenceById = (id: string | null) => result.value?.evidence.find((e) => e.id === id);
+/** 后续操作只保留有可演示变化的。 */
+const followups = computed(() => (result.value?.output.followups ?? []).filter((f) => canDemo(evidenceById(f.evidence_id))));
+
 function follow(id: string | null) {
-  const ev = result.value?.evidence.find((e) => e.id === id);
-  if (ev) showEvidence(ev);
+  const ev = evidenceById(id);
+  if (ev) demoEvidence(ev);
 }
 </script>
 
 <template>
-  <section v-if="view" class="coach" data-testid="coach-card">
+  <!-- 有结果：作为讲解正文 -->
+  <section v-if="view && result" class="coach body" data-testid="coach-card">
     <header>
-      <span class="title">AI 讲解</span>
-      <n-tag size="small" :bordered="false" :type="STATUS[view.status].type" data-testid="coach-status">{{ STATUS[view.status].text }}</n-tag>
-      <span class="muted">{{ analysisText }}</span>
+      <span class="title"><Icon name="sparkles" :size="15" /> AI 讲解</span>
+      <n-tag v-if="status === 'stale'" size="small" :bordered="false" type="warning" data-testid="coach-status">已过期</n-tag>
+      <n-tag v-else-if="busy" size="small" :bordered="false" type="info" data-testid="coach-status">
+        <n-spin :size="10" /> {{ status === "queued" ? "等待生成" : "生成中" }}
+      </n-tag>
+      <n-tag v-else size="small" :bordered="false" type="success" data-testid="coach-status">已生成</n-tag>
       <span class="spacer" />
-      <template v-if="view.status !== 'disabled'">
-        <n-button v-if="busy" size="tiny" quaternary @click="cancelCoach">取消</n-button>
-        <n-button v-else-if="!result" size="tiny" type="primary" secondary @click="requestCoach(false)">生成 AI 讲解</n-button>
-        <n-button v-else size="tiny" quaternary @click="requestCoach(view.status !== 'stale')">重新生成</n-button>
-      </template>
-      <n-button v-else size="tiny" quaternary @click="wb.dialogs.settings = true">配置 AI 讲解</n-button>
+      <n-button v-if="busy" size="tiny" quaternary @click="cancelCoach">取消</n-button>
+      <n-button v-else-if="status === 'stale'" size="tiny" type="primary" secondary @click="requestCoach(false)">更新</n-button>
+      <n-button v-else size="tiny" quaternary @click="requestCoach(true)">重新生成</n-button>
     </header>
+    <p v-if="status === 'stale' && view.reason" class="note warn">{{ view.reason }}</p>
+    <p v-else-if="view.reason && !busy" class="note warn">
+      {{ shortReason }}
+      <n-button v-if="shortReason !== view.reason" text size="tiny" @click="showDetail = !showDetail">{{ showDetail ? "收起" : "详情" }}</n-button>
+    </p>
+    <p v-if="showDetail" class="note">{{ view.reason }}</p>
 
-    <div v-if="busy" class="note"><n-spin :size="12" /> {{ view.reason ?? "正在根据上面的证据组织讲解…" }}</div>
-    <p v-else-if="view.reason" class="note" :class="{ warn: view.status === 'failed' || view.status === 'stale' }">{{ view.reason }}</p>
-
-    <template v-if="result">
-      <div :class="{ faded: view.status === 'stale' }">
-        <ClaimList :claims="[asClaim(result.output.summary)]" :evidence="result.evidence" class="lead" />
-        <ul v-if="basisOf(result.output.summary).length" class="basis" data-testid="coach-basis">
-          <li v-for="(b, j) in basisOf(result.output.summary)" :key="j">依据：{{ b }}</li>
+    <div :class="{ faded: status === 'stale' }">
+      <ClaimList scope="ai-summary" :claims="[asClaim(result.output.summary)]" :evidence="result.evidence" class="lead" />
+      <ul v-if="basisOf(result.output.summary).length" class="basis" data-testid="coach-basis">
+        <li v-for="(b, j) in basisOf(result.output.summary)" :key="j">依据：{{ b }}</li>
+      </ul>
+      <template v-for="(s, i) in sections" :key="i">
+        <h5 v-if="s.title">{{ s.title }}</h5>
+        <ClaimList :scope="`ai-${i}`" :claims="[s.claim]" :evidence="result.evidence" />
+        <ul v-if="s.basis.length" class="basis" data-testid="coach-basis">
+          <li v-for="(b, j) in s.basis" :key="j">依据：{{ b }}</li>
         </ul>
-        <template v-for="(s, i) in sections" :key="i">
-          <h5 v-if="s.title">{{ s.title }}</h5>
-          <ClaimList :claims="[s.claim]" :evidence="result.evidence" />
-          <ul v-if="s.basis.length" class="basis" data-testid="coach-basis">
-            <li v-for="(b, j) in s.basis" :key="j">依据：{{ b }}</li>
-          </ul>
-        </template>
-        <template v-if="result.output.lesson.text">
-          <h5>学习要点</h5>
-          <ClaimList :claims="[asClaim(result.output.lesson)]" :evidence="result.evidence" />
-          <ul v-if="basisOf(result.output.lesson).length" class="basis" data-testid="coach-basis">
-            <li v-for="(b, j) in basisOf(result.output.lesson)" :key="j">依据：{{ b }}</li>
-          </ul>
-        </template>
-        <div v-if="result.output.followups.length" class="followups">
-          <n-button v-for="f in result.output.followups" :key="f.action" size="tiny" secondary @click="follow(f.evidence_id)">
-            ▶ {{ f.label }}
-          </n-button>
-        </div>
+      </template>
+      <template v-if="result.output.lesson.text">
+        <h5>学习要点</h5>
+        <ClaimList scope="ai-lesson" :claims="[asClaim(result.output.lesson)]" :evidence="result.evidence" />
+        <ul v-if="basisOf(result.output.lesson).length" class="basis" data-testid="coach-basis">
+          <li v-for="(b, j) in basisOf(result.output.lesson)" :key="j">依据：{{ b }}</li>
+        </ul>
+      </template>
+      <div v-if="followups.length" class="followups">
+        <n-button v-for="f in followups" :key="f.action" size="small" secondary @click="follow(f.evidence_id)">
+          <template #icon><Icon name="play" :size="12" /></template>{{ f.label }}
+        </n-button>
       </div>
-      <p class="source">
-        由 {{ result.model_label }} 根据程序给出的事实与引擎证据组织文字，点击段落查看依据；评分、排名、评价与杀棋结论只出现在程序给出的“依据”中。
-      </p>
+    </div>
+    <p class="source">
+      {{ analysisText }}。由 {{ result.model_label }} 根据程序给出的事实与引擎证据组织文字；评分、排名、评价与杀棋结论只出现在程序给出的“依据”中。
+    </p>
+  </section>
+
+  <!-- 没有结果：一行说明当前状态 -->
+  <section v-else-if="view" class="coach entry" data-testid="coach-card">
+    <template v-if="status === 'disabled'">
+      <span class="muted" data-testid="coach-status">可开启 AI 讲解，帮助理解本步理由</span>
+      <n-button size="tiny" quaternary @click="openSettings('coach')">开启 AI 讲解</n-button>
+    </template>
+    <template v-else-if="status === 'none'">
+      <n-button size="small" type="primary" secondary data-testid="coach-generate" @click="requestCoach(false)">
+        <template #icon><Icon name="sparkles" /></template>生成 AI 讲解
+      </n-button>
+      <span class="muted" data-testid="coach-status">{{ meta }}<template v-if="view.reason"> · {{ view.reason }}</template></span>
+    </template>
+    <template v-else-if="busy">
+      <n-spin :size="12" />
+      <span class="muted" data-testid="coach-status">{{ status === "queued" ? view.reason ?? "AI 讲解等待生成…" : "AI 讲解生成中…" }}</span>
+      <n-button size="tiny" quaternary @click="cancelCoach">取消</n-button>
+    </template>
+    <template v-else-if="status === 'failed'">
+      <span class="warn" data-testid="coach-status">AI 讲解生成失败：{{ shortReason }}</span>
+      <n-button size="tiny" quaternary @click="requestCoach(true)">重试</n-button>
+      <n-button v-if="shortReason !== view.reason" text size="tiny" @click="showDetail = !showDetail">{{ showDetail ? "收起" : "详情" }}</n-button>
+      <p v-if="showDetail" class="note full">{{ view.reason }}</p>
     </template>
   </section>
 </template>
 
 <style scoped>
-.coach {
-  margin: 10px 0 4px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
+.coach.body {
+  margin: var(--sp-2) 0;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  border-radius: var(--radius-lg);
+  background: var(--panel-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.coach.entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-size: var(--fs-aux);
 }
 header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
+  margin-bottom: var(--sp-1);
 }
 .title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-group);
+  color: var(--accent-primary);
 }
 .spacer {
   flex: 1;
 }
 .muted {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-aux);
+}
+.warn {
+  color: var(--accent-amber);
 }
 .note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 6px 0 0;
-  font-size: 13px;
+  margin: var(--sp-1) 0;
+  font-size: var(--fs-aux);
   color: var(--text-muted);
 }
 .note.warn {
   color: var(--accent-amber);
 }
-.lead :deep(li) {
+.note.full {
+  flex-basis: 100%;
+}
+.lead :deep(.claim) {
   font-weight: 600;
 }
 h5 {
-  margin: 8px 0 2px;
-  font-size: 12px;
-  color: var(--text-muted);
+  margin: var(--sp-3) 0 2px;
+  font-size: var(--fs-aux);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 .basis {
   list-style: none;
   margin: 0 0 2px;
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-aux);
   line-height: 1.6;
   color: var(--text-muted);
 }
@@ -178,13 +236,13 @@ h5 {
 }
 .followups {
   display: flex;
-  gap: 6px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
-  margin-top: 8px;
+  margin-top: var(--sp-3);
 }
 .source {
-  margin: 8px 0 0;
-  font-size: 11px;
+  margin: var(--sp-3) 0 0;
+  font-size: 12px;
   color: var(--text-muted);
 }
 </style>

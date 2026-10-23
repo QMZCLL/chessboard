@@ -25,7 +25,7 @@ use crate::uci::Bound;
 use crate::uci::Score;
 
 /// 模板版本，随讲解一起保存，便于判断缓存是否过期。
-pub const GENERATOR_VERSION: u32 = 3;
+pub const GENERATOR_VERSION: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -71,6 +71,22 @@ pub struct Evidence {
     pub arrows: Vec<Move>,
     pub line: Option<LineRef>,
     pub certainty: Certainty,
+    /// `squares` 与 `arrows` 所在的局面：讲解某一着时，落子前（如当前需求、应将、首选候选）
+    /// 或落子后（如吃子、攻击、保护、对方应对）；说明某个局面时总是该局面。
+    /// 界面据此决定能否直接画在当前棋盘上，避免把落子前的箭头叠在落子后的局面上。
+    #[serde(default = "on_node")]
+    pub on: LineBase,
+}
+
+fn on_node() -> LineBase { LineBase::Node }
+
+/// 讲解某一着时，各类证据的格子与箭头所在的局面。
+fn board_of(topic: &str) -> LineBase {
+    match topic {
+        "in_check" | "threat" | "quiet" | "development_need" | "escape" | "defend" | "unprotect" | "best" | "second"
+        | "unsettled" | "contrast" | "candidate" => LineBase::Parent,
+        _ => LineBase::Node,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,10 +217,14 @@ pub struct ExplainContext {
 struct EvidenceSet {
     items: Vec<Evidence>,
     counters: [u32; 3],
+    /// 讲解某一着（证据可能在落子前或落子后），还是说明一个局面（证据都在该局面上）。
+    for_move: bool,
 }
 
 impl EvidenceSet {
-    fn new() -> Self { Self { items: Vec::new(), counters: [0; 3] } }
+    fn for_move() -> Self { Self { items: Vec::new(), counters: [0; 3], for_move: true } }
+
+    fn for_position() -> Self { Self { items: Vec::new(), counters: [0; 3], for_move: false } }
 
     #[allow(clippy::too_many_arguments)]
     fn add(
@@ -218,7 +238,8 @@ impl EvidenceSet {
         };
         self.counters[slot] += 1;
         let id = format!("{prefix}{}", self.counters[slot]);
-        self.items.push(Evidence { id: id.clone(), kind, topic: topic.to_string(), text, squares, arrows, line, certainty });
+        let on = if self.for_move { board_of(topic) } else { LineBase::Node };
+        self.items.push(Evidence { id: id.clone(), kind, topic: topic.to_string(), text, squares, arrows, line, certainty, on });
         id
     }
 }
@@ -921,7 +942,7 @@ pub fn explain_move(
     }
     let f = facts::move_facts(before, mv)?;
     let pts = points(&f);
-    let mut ev = EvidenceSet::new();
+    let mut ev = EvidenceSet::for_move();
     let mut warnings = Vec::new();
     if !ctx.history_complete {
         warnings.push("此前的着法历史不完整，长将、长捉等依赖历史的判定可能不准确".to_string());
@@ -1301,7 +1322,7 @@ fn drop_unknown_refs(claims: &mut [Claim], evidence: &[Evidence]) {
 /// 说明一个局面：用于根节点、导入的残局，以及任意节点的“当前局面”。
 pub fn explain_position(pos: &Position, ctx: &ExplainContext, engine: Option<&EngineEvidence>) -> PositionExplanation {
     let pf = facts::position_facts(pos);
-    let mut ev = EvidenceSet::new();
+    let mut ev = EvidenceSet::for_position();
     let mut claims = Vec::new();
     let mut warnings = Vec::new();
     if !ctx.history_complete {
@@ -1522,6 +1543,28 @@ mod tests {
             assert!(!c.evidence.is_empty());
             assert!(c.evidence.iter().all(|id| ids.contains(&id)));
         }
+    }
+
+    #[test]
+    fn evidence_records_which_board_it_belongs_to() {
+        // 炮五进四打中卒，对方马7进5吃炮：首选候选在落子前局面上，吃子与对方应对在落子后局面上
+        let pos = parse_position("rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w").unwrap();
+        let engine = EngineEvidence {
+            candidates: vec![line("h0g2", Score::Cp(60), &["h0g2", "i9h9"]), line("b0c2", Score::Cp(50), &["b0c2"])],
+            actual: Some(line("e2e6", Score::Cp(-320), &["e2e6", "g7e6", "h0g2"])),
+            conditions: "测试".into(),
+            complete: true,
+            notes: vec![],
+        };
+        let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
+        let on = |topic: &str| e.evidence.iter().find(|x| x.topic == topic).map(|x| x.on);
+        assert_eq!(on("best"), Some(LineBase::Parent));
+        assert_eq!(on("quiet").or(on("threat")), Some(LineBase::Parent));
+        assert_eq!(on("capture"), Some(LineBase::Node));
+        assert_eq!(on("reply"), Some(LineBase::Node));
+        // 说明一个局面时，证据都在这个局面上
+        let p = explain_position(&pos, &CTX, Some(&engine));
+        assert!(p.evidence.iter().all(|x| x.on == LineBase::Node), "{:?}", p.evidence);
     }
 
     #[test]

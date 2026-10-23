@@ -104,6 +104,8 @@ export interface Evidence {
   arrows: Move[];
   line: LineRef | null;
   certainty: Certainty;
+  /** squares 与 arrows 所在的局面：parent 为落子前，node 为当前节点的局面。 */
+  on: "parent" | "node";
 }
 
 export interface Claim {

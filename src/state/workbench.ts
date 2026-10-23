@@ -3,7 +3,7 @@
 import { computed, reactive } from "vue";
 import { api, errorMessage, isTauri, newRequestId, on, pickOpenPath, pickSavePath, ready } from "../api/backend";
 import type * as T from "../api/types";
-import { applyLine, placementOf } from "../utils/board";
+import { applyLine, moveNumber, placementOf, sideLabel } from "../utils/board";
 import { newerCoach } from "./coachMerge";
 
 export interface Preview {
@@ -13,6 +13,14 @@ export interface Preview {
   notation: string[];
   /** 已经走到第几步（0 表示起点） */
   index: number;
+  /** 依据在起点局面上的标记，只在起点（第 0 步）显示 */
+  marks: { squares: T.Square[]; arrows: T.Move[] } | null;
+}
+
+/** 讲解中被选中的一段及其当前查看的依据。 */
+export interface ClaimFocus {
+  key: string;
+  evidenceId: string | null;
 }
 
 export interface Highlight {
@@ -51,11 +59,16 @@ export const wb = reactive({
   analysis: null as AnalysisState | null,
   preview: null as Preview | null,
   highlight: null as Highlight | null,
+  focus: null as ClaimFocus | null,
+  /** 试走：从棋谱中某个局面开始走出自己的着法，走法保存在分支中 */
+  trial: null as { origin: number } | null,
   illegal: null as T.IllegalMove | null,
   mode: "auto" as "auto" | "think",
   revealed: {} as Record<number, boolean>,
   /** 先想后讲：节点 → 用户试走建立的分支节点 */
   attempts: {} as Record<number, number>,
+  /** 棋谱中折叠起来的分支（按分支第一着的节点） */
+  collapsed: {} as Record<number, boolean>,
   /** 事件推送来的最新讲解记录（按节点），用于避免较早发出的查询结果覆盖较新的讲解 */
   records: {} as Record<number, T.ExplanationRecord>,
   /** 已收到的最大讲解序号 */
@@ -65,7 +78,16 @@ export const wb = reactive({
   capture: { state: "idle" } as T.CaptureState,
   followLive: true,
   dialogs: { newStudy: false, capture: false, settings: false, studies: false },
+  /** 下次打开设置时显示的分组（从其他位置跳转到某项设置时使用） */
+  settingsTab: null as SettingsTab | null,
 });
+
+export type SettingsTab = "learn" | "coach" | "engine" | "capture" | "diag";
+
+export function openSettings(tab: SettingsTab | null = null) {
+  wb.settingsTab = tab;
+  wb.dialogs.settings = true;
+}
 
 export function setNotifier(fn: Notify) {
   notify = fn;
@@ -119,6 +141,42 @@ export const displaySide = computed<T.Color | null>(() => {
   const fen = displayFen.value;
   if (!fen) return null;
   return fen.split(" ")[1] === "b" ? "black" : "red";
+});
+
+/** 某个节点之后下一着的回合数。 */
+function roundAfter(node: T.StudyNode): number {
+  const rootSide = nodeOf(0)?.side_to_move ?? "red";
+  return parseInt(moveNumber(node.ply + 1, rootSide, node.side_to_move), 10);
+}
+
+export type BoardContextKind = "record" | "start" | "think" | "trial" | "preview" | "before";
+
+/** 选中的局面已经结束（将死或困毙），不能再走子。 */
+export const selectedEnded = computed(() => {
+  const d = wb.detail;
+  return !!d && d.node.id === wb.selected && (d.status === "checkmate" || d.status === "stalemate");
+});
+
+/** 棋盘上方的状态说明：现在看的是哪一个局面，可以做什么。 */
+export const boardContext = computed<{ kind: BoardContextKind; text: string; hint: string | null } | null>(() => {
+  const node = selectedNode.value;
+  const side = displaySide.value;
+  if (!node || !side) return null;
+  const p = wb.preview;
+  if (p && p.moves.length === 0) return { kind: "before", text: `落子前局面 · ${p.label}`, hint: null };
+  if (p) return { kind: "preview", text: `变化演示 · ${p.label} · 第 ${p.index} / ${p.moves.length} 着`, hint: null };
+  if (thinking.value) return { kind: "think", text: `先想后讲 · 请为${sideLabel(side)}选择下一步`, hint: null };
+  if (wb.trial) {
+    const origin = nodeOf(wb.trial.origin);
+    const round = origin ? roundAfter(origin) : 1;
+    return { kind: "trial", text: `试走分支 · 从第 ${round} 回合开始`, hint: "走法会保存在棋谱的分支中" };
+  }
+  // 只有还能继续走子时才提示走子
+  const end = node.children.length === 0 && !selectedEnded.value;
+  if (node.id === 0) {
+    return { kind: "start", text: "起始局面", hint: end ? "在棋盘上走子，开始记录" : null };
+  }
+  return { kind: "record", text: `棋谱局面 · 第 ${roundAfter(node)} 回合`, hint: end ? "在棋盘上走子，继续记录" : null };
 });
 
 // ---------- 启动与事件 ----------
@@ -396,14 +454,20 @@ export async function flipBoard() {
 
 // ---------- 节点与讲解 ----------
 
-export async function selectNode(id: number) {
+export async function selectNode(id: number, opts: { keepTrial?: boolean } = {}) {
   const s = study.value;
   if (!s || !nodeOf(id)) return;
   const changed = wb.selected !== id;
   wb.selected = id;
   wb.preview = null;
   wb.highlight = null;
+  wb.focus = null;
   wb.illegal = null;
+  if (!opts.keepTrial) wb.trial = null;
+  // 选中的着法在折叠的分支里时展开它
+  for (let cur = nodeOf(id); cur && cur.parent !== null; cur = nodeOf(cur.parent)) {
+    if (wb.collapsed[cur.id]) wb.collapsed[cur.id] = false;
+  }
   if (changed && wb.analysis && wb.analysis.nodeId !== id) wb.analysis = null;
   void api.focusNode(s.id, id).catch(() => undefined);
   await loadDetail();
@@ -503,6 +567,8 @@ export async function playMove(mv: T.Move) {
   const parent = thinkingNow ? node.parent! : node.id;
   const parentNode = nodeOf(parent);
   const variation = thinkingNow || (parentNode?.children.length ?? 0) > 0;
+  // 在已有后续着法的局面上走子即为试走：记住起点，便于返回
+  const trialOrigin = !thinkingNow && variation && !wb.trial ? parent : null;
   try {
     const resp = await api.applyMove(s.id, parent, mv, variation);
     if (resp.illegal) {
@@ -520,10 +586,24 @@ export async function playMove(mv: T.Move) {
       await loadDetail();
       return;
     }
-    await selectNode(target);
+    if (trialOrigin !== null) wb.trial = { origin: trialOrigin };
+    await selectNode(target, { keepTrial: true });
   } catch (e) {
     notify("error", errorMessage(e));
   }
+}
+
+/** 从当前局面开始试走：之后的走法保存在分支中，可以随时返回。 */
+export function startTrial() {
+  wb.preview = null;
+  wb.trial = { origin: wb.selected };
+}
+
+/** 结束试走，回到开始试走的局面；已经建立的分支保留在棋谱中。 */
+export async function endTrial() {
+  const origin = wb.trial?.origin;
+  wb.trial = null;
+  if (origin !== undefined) await selectNode(origin);
 }
 
 export async function analyze(budget: T.Budget) {
@@ -568,25 +648,83 @@ export async function cloudLookup() {
   }
 }
 
-// ---------- 演示与高亮 ----------
+// ---------- 依据、演示与高亮 ----------
 
-export function showEvidence(ev: T.Evidence) {
-  wb.highlight = { squares: ev.squares, arrows: ev.arrows, evidenceId: ev.id };
-  if (ev.line && ev.line.moves.length) {
-    showLine(ev.text.slice(0, 24), ev.line);
-  }
+/** 棋盘当前显示的是不是节点本身的局面（而不是落子前的思考局面或演示中的局面）。 */
+const boardShowsNode = computed(() => !wb.preview && !thinking.value);
+
+/** 依据能否直接画在当前棋盘上。 */
+function evidenceOnBoard(ev: T.Evidence): boolean {
+  return boardShowsNode.value && ev.on === "node";
 }
 
-export function showLine(label: string, line: T.LineRef) {
+function shortLabel(text: string) {
+  return text.length > 18 ? `${text.slice(0, 18)}…` : text;
+}
+
+/**
+ * 选中讲解中的一段：只突出显示依据，不进入演示。依据在当前局面上时高亮棋子与关系；
+ * 在落子前局面上时不画在落子后的棋盘上，由界面提示从起点查看。
+ */
+export function focusEvidence(key: string, ev: T.Evidence | null) {
+  wb.preview = null;
+  wb.focus = { key, evidenceId: ev?.id ?? null };
+  wb.highlight = ev && evidenceOnBoard(ev) && (ev.squares.length || ev.arrows.length)
+    ? { squares: ev.squares, arrows: ev.arrows, evidenceId: ev.id }
+    : null;
+}
+
+function startPreview(label: string, base: "parent" | "node", moves: T.Move[], notation: string[], marks: Preview["marks"]) {
   const node = selectedNode.value;
   if (!node) return;
-  const baseNode = line.base === "parent" ? node.parent : node.id;
+  const baseNode = base === "parent" ? node.parent : node.id;
   if (baseNode === null) return;
-  wb.preview = { label, baseNode, moves: line.moves, notation: line.notation, index: 1 };
+  wb.highlight = null;
+  // 从起点开始：先看清起始局面与依据标记，再逐着前进
+  wb.preview = { label, baseNode, moves, notation, index: 0, marks };
+}
+
+/**
+ * 演示依据中的变化：从依据指定的起始局面开始。变化以本步着法开头、依据又标在本步之后的局面上时
+ * （如对方的应对），直接从当前局面开始，不先重放刚走的这一着。
+ */
+function demoLine(ev: T.Evidence): T.LineRef | null {
+  if (!ev.line) return null;
+  const { base, moves, notation } = ev.line;
+  const line = base === "parent" && ev.on === "node" && moves[0] === selectedNode.value?.mv
+    ? { base: "node" as const, moves: moves.slice(1), notation: notation.slice(1) }
+    : ev.line;
+  return line.moves.length ? line : null;
+}
+
+/** 依据是否有可以演示的变化。 */
+export function canDemo(ev: T.Evidence | null | undefined): boolean {
+  return !!ev && !!demoLine(ev);
+}
+
+export function demoEvidence(ev: T.Evidence) {
+  const line = demoLine(ev);
+  if (!line) return;
+  const marks = ev.on === line.base ? { squares: ev.squares, arrows: ev.arrows } : null;
+  startPreview(shortLabel(ev.text), line.base, line.moves, line.notation, marks);
+}
+
+/** 在依据所在的局面（落子前）上查看它标出的棋子与关系。 */
+export function viewEvidenceBoard(ev: T.Evidence) {
+  startPreview(shortLabel(ev.text), ev.on, [], [], { squares: ev.squares, arrows: ev.arrows });
 }
 
 export function showCandidate(c: T.CandidateView, base: "parent" | "node") {
-  showLine(`${c.notation} 的变化`, { base, moves: c.pv, notation: c.pv_notation });
+  if (!c.pv.length) return;
+  startPreview(`${c.notation} 的变化`, base, c.pv, c.pv_notation, null);
+}
+
+/** 选中候选：在它的起始局面上标出首着；起始局面不是当前棋盘时只显示说明。 */
+export function focusCandidate(key: string, c: T.CandidateView, base: "parent" | "node") {
+  wb.preview = null;
+  wb.focus = { key, evidenceId: null };
+  const onBoard = boardShowsNode.value && base === "node";
+  wb.highlight = onBoard ? { squares: [c.mv.slice(0, 2), c.mv.slice(2, 4)], arrows: [c.mv], evidenceId: null } : null;
 }
 
 export function stepPreview(delta: number) {
@@ -599,11 +737,12 @@ export function exitPreview() {
   wb.preview = null;
 }
 
-export async function addPreviewAsBranch() {
+/** 把演示的变化保存为分支：`all` 为整条变化，否则为已经演示到的着法（至少一着）。 */
+export async function addPreviewAsBranch(all = false) {
   const s = study.value;
   const p = wb.preview;
-  if (!s || !p) return;
-  const moves = p.moves.slice(0, Math.max(1, p.index));
+  if (!s || !p || !p.moves.length) return;
+  const moves = all ? p.moves : p.moves.slice(0, Math.max(1, p.index));
   try {
     const resp = await api.addLine(s.id, p.baseNode, moves);
     if (resp.study) setView(resp.study);
@@ -630,11 +769,40 @@ export async function promote(id: number) {
   setView(await api.promoteNode(s.id, id));
 }
 
-export async function saveNote(note: string, starred: boolean) {
+/** 保存笔记。节点由调用方给出：保存的始终是编辑时对应的那一着。 */
+export async function saveNote(nodeId: number, note: string, starred: boolean) {
   const s = study.value;
   if (!s) return;
-  setView(await api.setNote(s.id, wb.selected, note, starred));
+  setView(await api.setNote(s.id, nodeId, note, starred));
 }
+
+/** 主线（从起始局面沿第一个子节点）上的节点。 */
+export const mainline = computed(() => {
+  const ids = new Set<number>();
+  for (let cur = nodeOf(0); cur; cur = nodeOf(cur.children[0])) ids.add(cur.id);
+  return ids;
+});
+
+/** 某着及其之后（含分支）的着法数。 */
+export function subtreeSize(id: number): number {
+  const node = nodeOf(id);
+  if (!node) return 0;
+  return 1 + node.children.reduce((n, c) => n + subtreeSize(c), 0);
+}
+
+/** 返回主线：回到当前分支从主线分出的那一着。 */
+export function backToMainline() {
+  let cur = selectedNode.value;
+  while (cur && !mainline.value.has(cur.id)) cur = nodeOf(cur.parent);
+  if (cur) void selectNode(cur.id);
+}
+
+/** 最新局面：屏幕连接时为实际对局的最新着，否则为主线最后一着。 */
+export const latestNode = computed(() => {
+  const view = wb.view;
+  if (!view) return null;
+  return view.study.live_node ?? lastMainline(view);
+});
 
 export function goRelative(delta: number) {
   const node = selectedNode.value;

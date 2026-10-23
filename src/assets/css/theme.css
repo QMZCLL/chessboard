@@ -1,60 +1,143 @@
+/*
+ * 主题与设计规范。整体取“文房”质感：宣纸底色、墨色文字、木质棋盘，层次靠柔和的阴影而不是粗边框。
+ * 颜色职责：
+ * - 深青绿（--accent-primary）：主要操作；
+ * - 蓝（--accent-blue）：选中、证据关联、变化演示；
+ * - 琥珀（--accent-amber）：分析不完整、需要注意；
+ * - 红（--accent-red）：错误提示与红方棋子，配合文字或形状区分；
+ * - 朱砂（--seal）：只用于品牌印章等装饰；
+ * - 中性色：边框、次级文字、普通状态。
+ * 深色主题由 html[data-theme="dark"] 切换（index.html 与 state/theme.ts 负责设置）。
+ */
 :root {
-  --bg: #f4f1ea;
-  --panel: #fbfaf7;
-  --panel-raised: #f1ede4;
-  --border: #e3ddd0;
-  --border-strong: #cfc6b4;
-  --text-primary: #1f1d1a;
-  --text-secondary: #4a463f;
-  --text-muted: #857e72;
-  --hover-bg: rgba(120, 100, 60, 0.08);
-  --selected-bg: rgba(37, 99, 235, 0.12);
+  /* 尺寸 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --fs-aux: 13px;
+  --fs-group: 14px;
+  --fs-body: 15px;
+  --fs-key: 19px;
+  --lh-body: 1.7;
+  --control-h: 34px;
+  --gutter: 10px;
+
+  /* 字体：正文用无衬线，标题与要点用宋体，着法与棋子用楷体 */
+  --font-sans: -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans SC", "Noto Sans CJK SC", sans-serif;
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", serif;
+  --piece-font: "KaiTi", "STKaiti", "Kaiti SC", "楷体", "AR PL UKai CN", "Noto Serif CJK SC", serif;
+
+  /* 颜色 */
+  --bg: #ece6da;
+  --bg-deep: #e3dccd;
+  --panel: #fbf9f4;
+  --panel-raised: #f4efe5;
+  --panel-sunken: #efe9dd;
+  --border: rgba(84, 62, 28, 0.13);
+  --border-strong: rgba(84, 62, 28, 0.24);
+  --text-primary: #231f19;
+  --text-secondary: #4b4439;
+  --text-muted: #7a7163;
+  --hover-bg: rgba(110, 84, 40, 0.07);
+  --selected-bg: rgba(37, 99, 235, 0.1);
   --highlight-bg: rgba(217, 119, 6, 0.1);
+  --accent-primary: #0f766e;
   --accent-red: #b3261e;
   --accent-blue: #2563eb;
   --accent-green: #2f7d4f;
-  --accent-amber: #d97706;
-  --tag-red-bg: rgba(179, 38, 30, 0.1);
-  --tag-blue-bg: rgba(37, 99, 235, 0.1);
-  --tag-green-bg: rgba(47, 125, 79, 0.1);
-  --tag-gray-bg: rgba(0, 0, 0, 0.06);
-  --board-frame: #c99a5b;
-  --board-field: #ecc98f;
-  --board-line: #5b3a17;
-  --board-coord: #5b3a17;
-  --board-last: rgba(37, 99, 235, 0.18);
-  --piece-font: "KaiTi", "STKaiti", "Kaiti SC", "楷体", "AR PL UKai CN", "Noto Serif CJK SC", serif;
+  --accent-amber: #b45309;
+  --seal: #b8322a;
+  --tag-red-bg: rgba(179, 38, 30, 0.09);
+  --tag-blue-bg: rgba(37, 99, 235, 0.09);
+  --tag-green-bg: rgba(47, 125, 79, 0.09);
+  --tag-teal-bg: rgba(15, 118, 110, 0.09);
+  --tag-amber-bg: rgba(217, 119, 6, 0.11);
+  --tag-gray-bg: rgba(60, 44, 20, 0.06);
+
+  /* 阴影：从贴近表面到悬浮 */
+  --shadow-1: 0 1px 2px rgba(60, 40, 10, 0.06), 0 0 0 1px rgba(84, 62, 28, 0.06);
+  --shadow-2: 0 1px 2px rgba(60, 40, 10, 0.05), 0 6px 20px -6px rgba(60, 40, 10, 0.14), 0 0 0 1px rgba(84, 62, 28, 0.06);
+  --shadow-3: 0 2px 6px rgba(60, 40, 10, 0.08), 0 18px 40px -12px rgba(60, 40, 10, 0.28);
+
+  /* 棋盘 */
+  --board-frame-1: #b98447;
+  --board-frame-2: #8f5d2b;
+  --board-field-1: #f1d39e;
+  --board-field-2: #e5bd7c;
+  --board-grain: 0.18;
+  --board-line: #5a3713;
+  --board-coord: rgba(90, 55, 19, 0.78);
+  --board-last: #1d4ed8;
+  --board-mark: #d97706;
+  --board-shadow: 0 1px 2px rgba(60, 35, 5, 0.3), 0 4px 10px rgba(60, 35, 5, 0.16), 0 26px 48px -14px rgba(60, 35, 5, 0.45);
+  --piece-face-1: #fffaf0;
+  --piece-face-2: #f0dcb4;
+  --piece-rim-1: #e4c58f;
+  --piece-rim-2: #a87a42;
+  --piece-edge: #6e4c22;
+  --piece-black: #1d1b18;
+  --piece-red: #b0241c;
+  --piece-shadow: rgba(40, 22, 2, 0.45);
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #17161a;
-    --panel: #1e1d22;
-    --panel-raised: #26252b;
-    --border: #302e35;
-    --border-strong: #45424c;
-    --text-primary: #ecebee;
-    --text-secondary: #c6c3cc;
-    --text-muted: #8c8894;
-    --hover-bg: rgba(255, 255, 255, 0.06);
-    --selected-bg: rgba(96, 140, 255, 0.2);
-    --highlight-bg: rgba(245, 158, 11, 0.14);
-    --accent-red: #f2726a;
-    --accent-blue: #7aa2ff;
-    --accent-green: #5cc98a;
-    --accent-amber: #f5a524;
-    --tag-red-bg: rgba(242, 114, 106, 0.16);
-    --tag-blue-bg: rgba(122, 162, 255, 0.16);
-    --tag-green-bg: rgba(92, 201, 138, 0.14);
-    --tag-gray-bg: rgba(255, 255, 255, 0.08);
-    --board-frame: #7a5a33;
-    --board-field: #c9a46a;
-    --board-line: #3b250e;
-    --board-coord: #d9c09a;
-    --board-last: rgba(96, 140, 255, 0.28);
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --bg: #141518;
+  --bg-deep: #0f1012;
+  --panel: #1c1d21;
+  --panel-raised: #23252a;
+  --panel-sunken: #18191c;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-primary: #ecebee;
+  --text-secondary: #c8c4cc;
+  --text-muted: #9a95a2;
+  --hover-bg: rgba(255, 255, 255, 0.05);
+  --selected-bg: rgba(96, 140, 255, 0.16);
+  --highlight-bg: rgba(245, 158, 11, 0.14);
+  --accent-primary: #2bb3a6;
+  --accent-red: #f2726a;
+  --accent-blue: #7aa2ff;
+  --accent-green: #5cc98a;
+  --accent-amber: #f5a524;
+  --seal: #c8463c;
+  --tag-red-bg: rgba(242, 114, 106, 0.14);
+  --tag-blue-bg: rgba(122, 162, 255, 0.14);
+  --tag-green-bg: rgba(92, 201, 138, 0.12);
+  --tag-teal-bg: rgba(43, 179, 166, 0.14);
+  --tag-amber-bg: rgba(245, 165, 36, 0.14);
+  --tag-gray-bg: rgba(255, 255, 255, 0.07);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -8px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-3: 0 2px 6px rgba(0, 0, 0, 0.4), 0 20px 44px -12px rgba(0, 0, 0, 0.7);
+
+  /* 深色下棋盘与棋子同时压低亮度，避免在暗色面板中过于刺眼 */
+  --board-frame-1: #6e4c28;
+  --board-frame-2: #4a3118;
+  --board-field-1: #b89660;
+  --board-field-2: #9c7846;
+  --board-grain: 0.24;
+  --board-line: #3a240c;
+  --board-coord: rgba(50, 30, 8, 0.85);
+  --board-last: #8fb0ff;
+  --board-mark: #f5a524;
+  --board-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.3), 0 26px 48px -14px rgba(0, 0, 0, 0.7);
+  --piece-face-1: #ece0c4;
+  --piece-face-2: #d0b585;
+  --piece-rim-1: #c7a46c;
+  --piece-rim-2: #84592b;
+  --piece-edge: #4f3517;
+  --piece-black: #1a1815;
+  --piece-red: #a4221a;
+  --piece-shadow: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
 }
 
 html,
@@ -62,11 +145,79 @@ body,
 #app {
   margin: 0;
   height: 100%;
-  background: var(--bg);
   color: var(--text-primary);
-  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 宣纸底：极淡的纤维噪点叠在底色上，只在背景层绘制一次 */
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.35), transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.27 0 0 0 0 0.15 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"] body {
+  background-image: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.03), transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.025 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+#app {
+  background: transparent;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* 面板：浮在纸面上的卡片 */
+.surface {
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+/* 分组标题：小字号、字距略宽，后接一条细线 */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.section-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* 自定义的可点击元素（讲解段落、棋谱着法、候选行）在键盘操作时显示焦点 */
+.focusable:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

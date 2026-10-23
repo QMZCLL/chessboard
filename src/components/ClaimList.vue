@@ -1,24 +1,41 @@
 <script setup lang="ts">
-// 讲解要点列表：每条结论都关联证据，点击可在棋盘上高亮并回放相关变化。
+// 讲解要点列表。点击一段只选中它并突出显示依据；演示变化使用独立的按钮。
+// 依据在落子前的局面上时，不把标记画在落子后的棋盘上，而是提示起点并提供查看入口。
+import { computed } from "vue";
+import { NButton } from "naive-ui";
+import Icon from "./Icon.vue";
 import type { Claim, Evidence } from "../api/types";
-import { showEvidence, wb } from "../state/workbench";
+import { canDemo, demoEvidence, focusEvidence, viewEvidenceBoard, wb } from "../state/workbench";
 
-const props = defineProps<{ claims: Claim[]; evidence: Evidence[] }>();
+const props = defineProps<{ claims: Claim[]; evidence: Evidence[]; scope: string }>();
 
 function evidenceOf(claim: Claim): Evidence[] {
   return claim.evidence.map((id) => props.evidence.find((e) => e.id === id)).filter((e): e is Evidence => !!e);
 }
 
-function primary(claim: Claim): Evidence | undefined {
-  return evidenceOf(claim)[0];
+function keyOf(i: number) {
+  return `${props.scope}:${i}`;
 }
 
-function active(claim: Claim) {
-  return evidenceOf(claim).some((e) => e.id === wb.highlight?.evidenceId);
+/** 选中时默认查看的依据：优先选能在棋盘上标出的。 */
+function primary(claim: Claim): Evidence | null {
+  const list = evidenceOf(claim);
+  return list.find((e) => e.squares.length || e.arrows.length) ?? list[0] ?? null;
 }
 
-function hasLine(claim: Claim) {
-  return evidenceOf(claim).some((e) => e.line && e.line.moves.length);
+function lineEvidence(claim: Claim): Evidence | null {
+  return evidenceOf(claim).find(canDemo) ?? null;
+}
+
+const focusedIndex = computed(() => {
+  const f = wb.focus;
+  if (!f || !f.key.startsWith(`${props.scope}:`)) return -1;
+  return Number(f.key.slice(props.scope.length + 1));
+});
+
+function focusedEvidence(claim: Claim): Evidence | null {
+  const id = wb.focus?.evidenceId;
+  return evidenceOf(claim).find((e) => e.id === id) ?? null;
 }
 
 function badge(claim: Claim): { text: string; cls: string } | null {
@@ -28,18 +45,66 @@ function badge(claim: Claim): { text: string; cls: string } | null {
   return null;
 }
 
-function open(claim: Claim) {
-  const ev = evidenceOf(claim).find((e) => e.line) ?? primary(claim);
-  if (ev) showEvidence(ev);
+function select(claim: Claim, i: number) {
+  focusEvidence(keyOf(i), primary(claim));
+}
+
+function demo(claim: Claim, i: number) {
+  const ev = lineEvidence(claim);
+  if (!ev) return;
+  focusEvidence(keyOf(i), ev);
+  demoEvidence(ev);
+}
+
+/** 依据标出的棋子在落子前的局面上（与棋盘此刻是否在演示无关）。 */
+function onParent(ev: Evidence | null): boolean {
+  return !!ev && ev.on === "parent" && (ev.squares.length > 0 || ev.arrows.length > 0);
+}
+
+function short(text: string) {
+  return text.length > 16 ? `${text.slice(0, 16)}…` : text;
 }
 </script>
 
 <template>
   <ul class="claims">
-    <li v-for="(c, i) in claims" :key="i" :class="{ active: active(c), clickable: !!primary(c) }" @click="open(c)">
+    <li
+      v-for="(c, i) in claims"
+      :key="i"
+      class="claim focusable"
+      :class="{ active: focusedIndex === i }"
+      tabindex="0"
+      role="button"
+      :aria-pressed="focusedIndex === i"
+      @click="select(c, i)"
+      @keydown.enter.prevent="select(c, i)"
+      @keydown.space.prevent="select(c, i)"
+    >
       <span class="text">{{ c.text }}</span>
       <span v-if="badge(c)" class="badge" :class="badge(c)!.cls">{{ badge(c)!.text }}</span>
-      <span v-if="hasLine(c)" class="replay">▶ 演示</span>
+      <n-button v-if="lineEvidence(c)" text size="tiny" class="demo" type="info" @click.stop="demo(c, i)">
+        <template #icon><Icon name="play" :size="11" /></template>演示变化
+      </n-button>
+
+      <div v-if="focusedIndex === i" class="detail" @click.stop>
+        <div v-if="evidenceOf(c).length > 1" class="chips" role="group" aria-label="这段讲解的依据">
+          <button
+            v-for="e in evidenceOf(c)"
+            :key="e.id"
+            type="button"
+            class="chip"
+            :class="{ on: wb.focus?.evidenceId === e.id }"
+            :title="e.text"
+            @click="focusEvidence(keyOf(i), e)"
+          >
+            {{ short(e.text) }}
+          </button>
+        </div>
+        <p v-if="onParent(focusedEvidence(c))" class="before">
+          这条依据在落子前的局面上。
+          <n-button v-if="!wb.preview" text size="tiny" type="info" @click="viewEvidenceBoard(focusedEvidence(c)!)">在落子前局面查看</n-button>
+        </p>
+      </div>
     </li>
   </ul>
 </template>
@@ -51,24 +116,40 @@ function open(claim: Claim) {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
 }
-li {
-  padding: 6px 8px;
-  border-radius: 6px;
-  line-height: 1.6;
-  font-size: 14px;
-  border: 1px solid transparent;
-}
-li.clickable {
+/* 每一段前有一个墨点；选中的一段成为带蓝色描边的卡片 */
+.claim {
+  position: relative;
+  padding: 6px var(--sp-3) 6px 26px;
+  border-radius: var(--radius);
+  line-height: var(--lh-body);
+  font-size: var(--fs-body);
   cursor: pointer;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
-li.clickable:hover {
+.claim::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: calc(6px + 0.85em - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.55;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+.claim:hover {
   background: var(--hover-bg);
 }
-li.active {
-  border-color: var(--accent-amber);
-  background: var(--highlight-bg);
+.claim.active {
+  background: var(--selected-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-blue) 55%, transparent);
+}
+.claim.active::before {
+  background: var(--accent-blue);
+  opacity: 1;
 }
 .badge {
   margin-left: 6px;
@@ -85,10 +166,40 @@ li.active {
   background: var(--tag-gray-bg);
   color: var(--text-muted);
 }
-.replay {
+.demo {
   margin-left: 6px;
   font-size: 12px;
+}
+.detail {
+  cursor: default;
+  margin-top: var(--sp-1);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 1px var(--sp-2);
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.chip.on {
+  border-color: var(--accent-blue);
   color: var(--accent-blue);
-  white-space: nowrap;
+  background: var(--tag-blue-bg);
+}
+.chip:focus-visible {
+  outline: 2px solid var(--accent-blue);
+}
+.before {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-aux);
+  color: var(--text-muted);
 }
 </style>

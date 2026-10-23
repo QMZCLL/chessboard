@@ -99,11 +99,10 @@ async function stopCapture() {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 4px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
+  padding: 0 var(--sp-4) 6px;
   font-size: 12px;
-  min-height: 32px;
+  min-height: 30px;
+  color: var(--text-muted);
 }
 .item {
   display: inline-flex;

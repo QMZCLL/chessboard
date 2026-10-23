@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>象棋学习助手</title>
+    <script>
+      // 在页面渲染前确定主题，避免深色系统上先闪一下浅色
+      (function () {
+        var pref = "system";
+        try {
+          pref = localStorage.getItem("xq-theme") || "system";
+        } catch (e) {}
+        var dark = pref === "dark" || (pref !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
 
   <body>
