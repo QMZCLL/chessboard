@@ -4,6 +4,7 @@ import { computed, reactive } from "vue";
 import { api, errorMessage, isTauri, newRequestId, on, pickOpenPath, pickSavePath, ready } from "../api/backend";
 import type * as T from "../api/types";
 import { applyLine, placementOf } from "../utils/board";
+import { newerCoach } from "./coachMerge";
 
 export interface Preview {
   label: string;
@@ -218,15 +219,6 @@ function onExplanation(p: T.ExplanationEvent) {
   if (wb.detail && wb.detail.study_id === p.study_id && wb.detail.node.id === p.node_id) {
     wb.detail.explanation = newestRecord(wb.detail.explanation, p.record);
   }
-}
-
-/**
- * 两份 AI 讲解状态中较新的一份：先比较记录的更新时间；相同时以后到达的为准
- * （证据更新、设置改变时状态会变而记录不变）。
- */
-function newerCoach(a: T.CoachView | undefined, b: T.CoachView): T.CoachView {
-  if (!a) return b;
-  return (a.record?.updated_at ?? 0) > (b.record?.updated_at ?? 0) ? a : b;
 }
 
 function onCoach(p: T.CoachView) {

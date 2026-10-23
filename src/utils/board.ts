@@ -1,6 +1,6 @@
 // 棋盘显示用的工具函数。规则判断都在后台完成，这里只做显示所需的换算。
 
-import type { Color, Move, Score, Square } from "../api/types";
+import type { Bound, Color, Move, Score, Square } from "../api/types";
 
 export const START_BOARD = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR";
 export const EMPTY_KINGS_BOARD = "4k4/9/9/9/9/9/9/9/9/4K4";
@@ -122,13 +122,21 @@ export function moveNumber(ply: number, rootSide: Color, mover: Color): string {
   return mover === "red" ? `${n}.` : `${n}…`;
 }
 
-export function scoreText(score: Score): string {
+/**
+ * 候选评分的显示。边界值只是搜索给出的界限：普通分注明“≥/≤”，将杀分的边界值不能说明存在杀棋，
+ * 与后台讲解文字的说法一致。
+ */
+export function scoreText(score: Score, bound: Bound = "exact"): string {
   if (score.kind === "mate") {
+    if (bound !== "exact") return "将杀边界，待确认";
     if (score.value > 0) return `${score.value} 步杀`;
     if (score.value < 0) return `${-score.value} 步被杀`;
     return "无着可走";
   }
-  return score.value > 0 ? `+${score.value}` : String(score.value);
+  const value = score.value > 0 ? `+${score.value}` : String(score.value);
+  if (bound === "lower") return `≥ ${value}`;
+  if (bound === "upper") return `≤ ${value}`;
+  return value;
 }
 
 const CN = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];

@@ -43,6 +43,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vue-tsc --noEmit
+      - run: pnpm test:unit
       - run: pnpm exec vite build
 
   desktop-windows:

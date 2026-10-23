@@ -1,7 +1,7 @@
 //! AI 讲解流程：模拟引擎 + 模拟语言模型服务（本机 HTTP）。
 //!
 //! 覆盖：密钥不外露、缓存复用、失败回退、等待引擎分析、证据更新后旧结果不写入、取消、
-//! 关闭功能或更换设置后不再发送排队中的请求、重启后清理中断的状态。
+//! 关闭功能或更换设置后不再发送排队中的请求、重启后清理中断的状态、状态版本。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -288,6 +288,14 @@ fn coach_explains_from_evidence_reuses_cache_and_keeps_key_private() {
     rec.coach("重新生成完成", node, "ready");
     assert_eq!(service.status().coach.used_today, 2);
 
+    // 状态版本：证据更新后推送的“已过期”版本更大，较早读到的“已生成”不会被界面当作更新的状态
+    let earlier = service.coach_view(NodeRef { study_id: sid.clone(), node_id: node }).unwrap();
+    assert_eq!(earlier.status, CoachStatus::Ready);
+    rec.clear();
+    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Deep, retry: false }).unwrap();
+    let stale = rec.coach("证据更新后过期", node, "stale");
+    assert!(stale["seq"].as_u64().unwrap() > earlier.seq, "{} <= {}", stale["seq"], earlier.seq);
+    assert!(stale["reason"].as_str().unwrap().contains("依据已更新"));
     service.shutdown();
 }
 

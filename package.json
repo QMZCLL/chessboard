@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test:unit": "node --experimental-strip-types --test tests/frontend/*.test.ts",
     "tauri": "tauri",
     "build:cpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.cpu.conf.json",
     "build:gpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.gpu.conf.json --features gpu",

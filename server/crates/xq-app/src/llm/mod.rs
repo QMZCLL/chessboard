@@ -162,6 +162,8 @@ pub enum CoachStatus {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CoachView {
+    /// 状态版本：记录、证据或设置每次变化都会递增，界面按它判断新旧，不依赖响应到达的先后。
+    pub seq: u64,
     pub study_id: String,
     pub node_id: NodeId,
     pub status: CoachStatus,

@@ -22,8 +22,8 @@ function previewing(c: CandidateView) {
     >
       <span class="rank">{{ c.rank ?? "—" }}</span>
       <span class="notation">{{ c.notation }}</span>
-      <span class="score" :class="{ bound: c.bound !== 'exact' }">
-        {{ scoreText(c.score) }}<template v-if="c.bound === 'lower'">↑</template><template v-else-if="c.bound === 'upper'">↓</template>
+      <span class="score" :class="{ bound: c.bound !== 'exact' }" :title="c.bound === 'exact' ? '' : '搜索边界值，不是精确评分'" data-testid="candidate-score">
+        {{ scoreText(c.score, c.bound) }}
       </span>
       <span class="summary">{{ c.summary }}</span>
       <span v-if="showActual && c.is_actual" class="tag">实际着法</span>

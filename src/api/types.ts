@@ -437,6 +437,8 @@ export interface CoachRecord {
 export type CoachStatus = "disabled" | "none" | "queued" | "running" | "ready" | "failed" | "stale";
 
 export interface CoachView {
+  /** 状态版本：记录、证据或设置变化时递增，按它判断新旧，不依赖响应到达的先后。 */
+  seq: number;
   study_id: string;
   node_id: number;
   status: CoachStatus;

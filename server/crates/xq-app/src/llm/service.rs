@@ -96,6 +96,8 @@ pub(crate) struct CoachRuntime {
     generation: AtomicU64,
     /// 模型服务设置（启用、接口、模型、凭据）的版本。
     config_rev: AtomicU64,
+    /// 界面状态版本，见 `CoachView::seq`。
+    seq: AtomicU64,
     active: Mutex<usize>,
     slot_free: Condvar,
 }
@@ -108,6 +110,7 @@ impl CoachRuntime {
             waiting: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
             config_rev: AtomicU64::new(0),
+            seq: AtomicU64::new(0),
             active: Mutex::new(0),
             slot_free: Condvar::new(),
         }
@@ -227,6 +230,8 @@ impl Inner {
 
     /// 界面看到的状态：结果是否对应当前的证据、模型与讲解设置。
     pub(crate) fn coach_view(&self, study_id: &str, node_id: NodeId) -> CoachView {
+        // 先取版本再读取状态：读取期间若有变化，随后推送的事件版本更大，界面会采用它
+        let seq = self.coach.seq.load(Ordering::SeqCst);
         let record = self.store.load_coach(study_id, node_id).ok().flatten();
         let settings = self.coach_settings();
         let cfg = self.config_snapshot().coach;
@@ -266,10 +271,11 @@ impl Inner {
                 Ok(_) => (CoachStatus::None, record.as_ref().and_then(|r| r.error.clone())),
             },
         };
-        CoachView { study_id: study_id.to_string(), node_id, status, reason, record }
+        CoachView { seq, study_id: study_id.to_string(), node_id, status, reason, record }
     }
 
     fn emit_coach(&self, study_id: &str, node_id: NodeId) {
+        self.coach.seq.fetch_add(1, Ordering::SeqCst);
         events::emit(self.events.as_ref(), events::COACH_UPDATED, &self.coach_view(study_id, node_id));
     }
 
@@ -298,6 +304,7 @@ impl Inner {
     /// 模型服务设置或密钥改变：使尚未发出的请求失效，并在讲解线程上按新设置重新安排。
     pub(crate) fn coach_config_changed(&self) {
         self.coach.config_rev.fetch_add(1, Ordering::SeqCst);
+        self.coach.seq.fetch_add(1, Ordering::SeqCst);
         self.on_explain_thread(|inner| inner.coach_settings_changed());
     }
 
