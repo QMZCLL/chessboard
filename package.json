@@ -1,7 +1,7 @@
 {
   "name": "xqlink",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,12 +11,14 @@
     "build:cpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.cpu.conf.json",
     "build:gpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.gpu.conf.json --features gpu",
     "build:cpu:rotate": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.cpu.conf.json --features rotate",
-    "build:gpu:rotate": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.gpu.conf.json --features gpu,rotate"
+    "build:gpu:rotate": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.gpu.conf.json --features gpu,rotate",
+    "bridge": "cargo run --manifest-path server/Cargo.toml -p xq-devserver -- --port 1422"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "@tauri-apps/plugin-dialog": "^2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

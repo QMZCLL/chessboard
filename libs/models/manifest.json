@@ -1,0 +1,12 @@
+{
+  "file": "large.onnx",
+  "version": "0.1.2",
+  "input_width": 640,
+  "input_height": 640,
+  "input_name": "images",
+  "output_name": "output",
+  "labels": "nbakrcpRNAKBCP0",
+  "confidence": 0.7,
+  "iou": 0.5,
+  "sha256": null
+}

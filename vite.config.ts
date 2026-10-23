@@ -28,5 +28,13 @@ export default defineConfig(async () => ({
       // 3. tell vite to ignore watching `src-tauri`
       ignored: ["**/server/**"],
     },
+    // 4. 在浏览器中调试界面时，把调用转发给开发桥（pnpm bridge）
+    proxy: {
+      "/__bridge": {
+        target: "http://127.0.0.1:1422",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/__bridge/, ""),
+      },
+    },
   },
 }));

@@ -1,0 +1,1438 @@
+//! 把事实与引擎证据组织成讲解：一句话结论、当前需求、具体依据、候选比较、主要应对、学习点。
+
+use serde::Deserialize;
+use serde::Serialize;
+
+use super::describe::join_labels;
+use super::describe::label_at;
+use super::describe::material_phrase;
+use super::describe::piece_label;
+use super::facts;
+use super::facts::CheckResolution;
+use super::facts::Development;
+use super::facts::LineVia;
+use super::facts::MoveFacts;
+use crate::board::Position;
+use crate::notation;
+use crate::rules;
+use crate::rules::GameStatus;
+use crate::types::Color;
+use crate::types::Move;
+use crate::types::Piece;
+use crate::types::PieceKind;
+use crate::types::Square;
+use crate::uci::Bound;
+use crate::uci::Score;
+
+/// 模板版本，随讲解一起保存，便于判断缓存是否过期。
+pub const GENERATOR_VERSION: u32 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceKind {
+    Fact,
+    Variation,
+    Positional,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Certainty {
+    /// 由规则直接计算。
+    Certain,
+    /// 由引擎变化支持，受分析预算限制。
+    Supported,
+    /// 位置性判断，只作参考。
+    Tentative,
+}
+
+/// 变化的起点：讲解某一着时为落子前局面，说明某个局面时为该局面本身。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineBase {
+    Parent,
+    Node,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineRef {
+    pub base: LineBase,
+    pub moves: Vec<Move>,
+    pub notation: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Evidence {
+    pub id: String,
+    pub kind: EvidenceKind,
+    pub topic: String,
+    pub text: String,
+    pub squares: Vec<Square>,
+    pub arrows: Vec<Move>,
+    pub line: Option<LineRef>,
+    pub certainty: Certainty,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Claim {
+    pub text: String,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateSource {
+    MultiPv,
+    SearchMoves,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateView {
+    pub mv: Move,
+    pub notation: String,
+    pub score: Score,
+    pub bound: Bound,
+    pub depth: u32,
+    pub pv: Vec<Move>,
+    pub pv_notation: Vec<String>,
+    pub rank: Option<u32>,
+    pub is_actual: bool,
+    pub source: CandidateSource,
+    /// 首着的直接作用（规则事实）。
+    pub summary: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerdictTone {
+    Best,
+    Close,
+    Inaccuracy,
+    Mistake,
+    Blunder,
+    Unclear,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Verdict {
+    pub tone: VerdictTone,
+    pub label: String,
+    /// 与首选的普通分差；涉及将杀分或边界分时为空。
+    pub delta: Option<i32>,
+    pub note: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExplainLevel {
+    Basic,
+    Detailed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveExplanation {
+    pub generator_version: u32,
+    pub level: ExplainLevel,
+    pub mover: Color,
+    pub mv: Move,
+    pub notation: String,
+    pub summary: String,
+    pub need: Vec<Claim>,
+    pub basis: Vec<Claim>,
+    pub comparison: Vec<Claim>,
+    pub replies: Vec<Claim>,
+    pub lesson: String,
+    pub verdict: Option<Verdict>,
+    pub candidates: Vec<CandidateView>,
+    pub evidence: Vec<Evidence>,
+    pub warnings: Vec<String>,
+    pub conditions: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PositionExplanation {
+    pub generator_version: u32,
+    pub side: Color,
+    pub status: GameStatus,
+    pub summary: String,
+    pub claims: Vec<Claim>,
+    pub evidence: Vec<Evidence>,
+    pub candidates: Vec<CandidateView>,
+    pub warnings: Vec<String>,
+    pub conditions: Option<String>,
+}
+
+/// 一条引擎变化（评分为根局面行棋方视角）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineLine {
+    pub mv: Move,
+    pub score: Score,
+    pub bound: Bound,
+    pub depth: u32,
+    pub pv: Vec<Move>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineEvidence {
+    /// 多候选搜索结果，按名次排列。
+    pub candidates: Vec<EngineLine>,
+    /// 实际走法未进入候选时，用 searchmoves 单独搜索的结果。
+    pub actual: Option<EngineLine>,
+    /// 分析条件的文字说明（引擎、深度、时间、候选数等）。
+    pub conditions: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExplainContext {
+    pub history_complete: bool,
+    pub repetition_count: usize,
+}
+
+struct EvidenceSet {
+    items: Vec<Evidence>,
+    counters: [u32; 3],
+}
+
+impl EvidenceSet {
+    fn new() -> Self { Self { items: Vec::new(), counters: [0; 3] } }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add(
+        &mut self, kind: EvidenceKind, topic: &str, text: String, squares: Vec<Square>, arrows: Vec<Move>,
+        line: Option<LineRef>, certainty: Certainty,
+    ) -> String {
+        let (prefix, slot) = match kind {
+            EvidenceKind::Fact => ("f", 0),
+            EvidenceKind::Variation => ("v", 1),
+            EvidenceKind::Positional => ("p", 2),
+        };
+        self.counters[slot] += 1;
+        let id = format!("{prefix}{}", self.counters[slot]);
+        self.items.push(Evidence { id: id.clone(), kind, topic: topic.to_string(), text, squares, arrows, line, certainty });
+        id
+    }
+}
+
+fn claim(text: impl Into<String>, ids: &[&String]) -> Claim {
+    Claim { text: text.into(), evidence: ids.iter().map(|s| s.to_string()).collect() }
+}
+
+/// 从事实中提炼出的一条讲解要点。
+struct Point {
+    priority: u8,
+    topic: &'static str,
+    /// 用于一句话结论的短语。
+    short: String,
+    text: String,
+    squares: Vec<Square>,
+    arrows: Vec<Move>,
+    kind: EvidenceKind,
+    certainty: Certainty,
+    /// 对走棋方有利（false 表示风险或代价）。
+    positive: bool,
+}
+
+fn labels(board: &crate::board::Board, squares: &[Square]) -> String {
+    join_labels(&squares.iter().map(|sq| label_at(board, *sq)).collect::<Vec<_>>())
+}
+
+fn leg_detail(piece: Piece, from: Square, target: Square) -> String {
+    let df = target.file() as i8 - from.file() as i8;
+    let dr = target.rank() as i8 - from.rank() as i8;
+    match piece.kind {
+        PieceKind::Horse => {
+            let leg = if dr.abs() == 2 { from.offset(0, dr.signum()) } else { from.offset(df.signum(), 0) };
+            leg.map(|l| format!("（马腿 {l} 无子）")).unwrap_or_default()
+        }
+        PieceKind::Elephant => from.offset(df / 2, dr / 2).map(|e| format!("（象眼 {e} 无子）")).unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+fn points(f: &MoveFacts) -> Vec<Point> {
+    let before = &f.before.board;
+    let after = &f.after.board;
+    let mover = f.mover;
+    let enemy = mover.opposite();
+    let moved_before = piece_label(f.piece, f.mv.from);
+    let moved_after = piece_label(f.piece, f.mv.to);
+    let enemy_king = Piece::new(enemy, PieceKind::King).name();
+    let mut out = Vec::new();
+    let mut push = |priority, topic, short: String, text: String, squares, arrows, kind, certainty, positive| {
+        out.push(Point { priority, topic, short, text, squares, arrows, kind, certainty, positive })
+    };
+
+    match f.opponent_status {
+        GameStatus::Checkmate => {
+            let mut squares = f.checkers.clone();
+            squares.extend(after.find_king(enemy));
+            push(
+                100,
+                "mate",
+                "将死对方".into(),
+                format!("走后{}将军，{}没有任何合法应着，被将死", labels(after, &f.checkers), enemy.label()),
+                squares,
+                vec![],
+                EvidenceKind::Fact,
+                Certainty::Certain,
+                true,
+            );
+        }
+        GameStatus::Stalemate => push(
+            100,
+            "stalemate",
+            "使对方无子可走（困毙）".into(),
+            format!("走后{}没有被将军，但也没有任何合法着法，即困毙，按规则{}判负", enemy.label(), enemy.label()),
+            after.find_king(enemy).into_iter().collect(),
+            vec![],
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            true,
+        ),
+        GameStatus::Ongoing => {}
+    }
+
+    if !f.checkers.is_empty() && f.opponent_status != GameStatus::Checkmate {
+        let king_sq = after.find_king(enemy);
+        let discovered = !f.checkers.contains(&f.mv.to);
+        let text = if discovered {
+            format!("{}让开线路后，{}将军对方{}（闪将）", moved_after, labels(after, &f.checkers), enemy_king)
+        } else if f.checkers.len() > 1 {
+            format!("{}将军，同时{}也形成将军（双将）", moved_after, labels(after, &f.checkers))
+        } else {
+            format!("{}直接将军对方{}", moved_after, enemy_king)
+        };
+        let mut squares = f.checkers.clone();
+        squares.extend(king_sq);
+        let arrows = king_sq.map(|k| f.checkers.iter().map(|c| Move::new(*c, k)).collect()).unwrap_or_default();
+        push(90, "check", "将军".into(), text, squares, arrows, EvidenceKind::Fact, Certainty::Certain, true);
+    }
+
+    if let Some(resolution) = f.check_resolution {
+        let checkers = rules::checkers(before, mover);
+        let checker_text = labels(before, &checkers);
+        let (short, text) = match resolution {
+            CheckResolution::KingMove => {
+                ("躲开将军".to_string(), format!("{}移动位置，躲开了{}的将军", f.piece.name(), checker_text))
+            }
+            CheckResolution::Capture => {
+                ("吃掉将军的棋子".to_string(), format!("吃掉正在将军的{}，化解将军", checker_text))
+            }
+            CheckResolution::Block => {
+                ("垫子化解将军".to_string(), format!("{}挡在将军线路上，化解了{}的将军", moved_after, checker_text))
+            }
+        };
+        let mut squares = checkers;
+        squares.push(f.mv.to);
+        push(85, "escape", short, text, squares, vec![], EvidenceKind::Fact, Certainty::Certain, true);
+    }
+
+    if let Some(captured) = f.captured {
+        let label = piece_label(captured, f.mv.to);
+        push(
+            80,
+            "capture",
+            format!("吃掉对方{label}"),
+            format!("{}吃掉对方{}", moved_before, label),
+            vec![f.mv.to],
+            vec![f.mv],
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            true,
+        );
+    }
+
+    let still_threatened = |sq: Square| f.threats_after.iter().any(|t| t.square == sq);
+    let mut resolved_squares = Vec::new();
+    for threat in &f.threats_before {
+        let moved_away = threat.square == f.mv.from;
+        let resolved = if moved_away { !still_threatened(f.mv.to) } else { !still_threatened(threat.square) };
+        if !resolved {
+            continue;
+        }
+        resolved_squares.push(threat.square);
+        let label = piece_label(threat.piece, threat.square);
+        let attackers = labels(before, &threat.attackers);
+        let how = if moved_away {
+            format!("本步把{label}移开，新位置没有受到同样的攻击")
+        } else if threat.attackers.contains(&f.mv.to) {
+            format!("吃掉了攻击{label}的{attackers}")
+        } else if f.new_protects.iter().any(|r| r.target == threat.square) {
+            format!("{moved_after}在新位置保护了它{}", leg_detail(f.piece, f.mv.to, threat.square))
+        } else {
+            format!("挡住或消除了对{label}的攻击")
+        };
+        let mut squares = vec![threat.square];
+        squares.extend(threat.attackers.iter().copied());
+        push(
+            75,
+            "defend",
+            format!("化解{label}受攻击的问题"),
+            format!("{label}原本受到{attackers}攻击，{how}"),
+            squares,
+            vec![],
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            true,
+        );
+    }
+
+    let mover_value = f.piece.value_at(f.mv.to);
+    let mut weak_targets = 0;
+    for rel in &f.new_attacks {
+        let label = piece_label(rel.target_piece, rel.target);
+        let valuable = rel.target_piece.value_at(rel.target) > mover_value;
+        if !rel.defended || valuable {
+            let reason = if !rel.defended { "该子没有保护" } else { "该子价值高于攻击它的棋子" };
+            push(
+                70,
+                "attack",
+                format!("攻击对方{}{label}", if rel.defended { "" } else { "无保护的" }),
+                format!("{moved_after}在新位置攻击对方{label}，{reason}"),
+                vec![f.mv.to, rel.target],
+                vec![Move::new(f.mv.to, rel.target)],
+                EvidenceKind::Fact,
+                Certainty::Certain,
+                true,
+            );
+        } else if weak_targets == 0 {
+            weak_targets += 1;
+            push(
+                30,
+                "aim",
+                format!("瞄准对方{label}"),
+                format!("{moved_after}在新位置瞄准对方{label}（对方有保护）"),
+                vec![f.mv.to, rel.target],
+                vec![Move::new(f.mv.to, rel.target)],
+                EvidenceKind::Fact,
+                Certainty::Certain,
+                true,
+            );
+        }
+    }
+
+    // 已作为“化解威胁”说明过的保护不再重复
+    let mut protects: Vec<&facts::Relation> =
+        f.new_protects.iter().filter(|r| !resolved_squares.contains(&r.target)).collect();
+    protects.sort_by_key(|r| (!r.attacked, r.defended_before, -r.target_piece.value_at(r.target)));
+    let important: Vec<&&facts::Relation> = protects.iter().filter(|r| r.attacked || !r.defended_before).take(2).collect();
+    let chosen: Vec<&facts::Relation> =
+        if important.is_empty() { protects.iter().take(1).copied().collect() } else { important.into_iter().copied().collect() };
+    for rel in chosen {
+        let label = piece_label(rel.target_piece, rel.target);
+        let mut text = format!("{moved_after}在新位置保护{label}{}", leg_detail(f.piece, f.mv.to, rel.target));
+        if !rel.defended_before {
+            text.push_str("，该子此前没有保护");
+        }
+        if rel.attacked {
+            text.push_str("，它正受到对方攻击");
+        }
+        let priority = if rel.attacked {
+            72
+        } else if !rel.defended_before {
+            60
+        } else {
+            25
+        };
+        push(
+            priority,
+            "protect",
+            format!("增加对{label}的保护"),
+            text,
+            vec![f.mv.to, rel.target],
+            vec![Move::new(f.mv.to, rel.target)],
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            true,
+        );
+    }
+
+    for change in f.discovered.iter().take(2) {
+        let line_piece = piece_label(change.piece, change.piece_square);
+        let target = piece_label(change.target_piece, change.target);
+        let weak = if change.target_defended { "" } else { "（无保护）" };
+        let (short, text) = match change.via {
+            LineVia::Screen => (
+                format!("为{line_piece}架起炮架"),
+                format!("{moved_after}成为{line_piece}的炮架，{line_piece}可以攻击对方{target}{weak}"),
+            ),
+            LineVia::Opened => (
+                format!("打开{line_piece}的线路"),
+                format!("{moved_before}让开线路后，{line_piece}可以攻击对方{target}{weak}"),
+            ),
+        };
+        let priority = if change.target_defended { 35 } else { 65 };
+        push(
+            priority,
+            "line",
+            short,
+            text,
+            vec![change.piece_square, change.target, f.mv.to],
+            vec![Move::new(change.piece_square, change.target)],
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            true,
+        );
+    }
+
+    if let Some(dev) = f.development {
+        let (short, text, kind, certainty) = match dev {
+            Development::LeavesHome => (
+                format!("出动{moved_before}"),
+                format!("{moved_before}离开底线投入行动"),
+                EvidenceKind::Fact,
+                Certainty::Certain,
+            ),
+            Development::CrossesRiver => (
+                format!("{}过河", f.piece.name()),
+                format!("{}过河后可以横走，活动范围扩大", moved_before),
+                EvidenceKind::Fact,
+                Certainty::Certain,
+            ),
+            Development::CenterCannon => (
+                "架中炮".to_string(),
+                "炮移到中路，正对对方中路（通常配合车马进攻中路）".to_string(),
+                EvidenceKind::Positional,
+                Certainty::Tentative,
+            ),
+            Development::Defensive => (
+                format!("{}巩固九宫", if f.piece.kind == PieceKind::Advisor { "补士" } else { "飞相" }),
+                format!("{}离开底线，加强九宫附近的防守联系", f.piece.name()),
+                EvidenceKind::Positional,
+                Certainty::Tentative,
+            ),
+            Development::KingMove => (
+                format!("动{}", f.piece.name()),
+                format!("{}在九宫内移动", f.piece.name()),
+                EvidenceKind::Fact,
+                Certainty::Certain,
+            ),
+        };
+        push(50, "develop", short, text, vec![f.mv.from, f.mv.to], vec![f.mv], kind, certainty, true);
+    }
+
+    // 风险与代价
+    if let Some(threat) = f.threats_after.iter().find(|t| t.square == f.mv.to) {
+        let detail = if threat.defended { "，攻击者价值更低" } else { "，且没有保护" };
+        push(
+            78,
+            "risk",
+            format!("{moved_after}的落点受到攻击"),
+            format!("{moved_after}的落点受到对方{}攻击{detail}", labels(after, &threat.attackers)),
+            std::iter::once(f.mv.to).chain(threat.attackers.iter().copied()).collect(),
+            threat.attackers.iter().map(|a| Move::new(*a, f.mv.to)).collect(),
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            false,
+        );
+    }
+    for threat in &f.threats_after {
+        let existed = f.threats_before.iter().any(|t| t.square == threat.square);
+        if threat.square == f.mv.to || existed {
+            continue;
+        }
+        let label = piece_label(threat.piece, threat.square);
+        let detail = if threat.defended { "（攻击者价值更低）" } else { "且没有保护" };
+        push(
+            70,
+            "exposed",
+            format!("{label}因此受到攻击"),
+            format!("走后{label}受到对方{}攻击{detail}", labels(after, &threat.attackers)),
+            std::iter::once(threat.square).chain(threat.attackers.iter().copied()).collect(),
+            threat.attackers.iter().map(|a| Move::new(*a, threat.square)).collect(),
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            false,
+        );
+    }
+    for rel in &f.lost_protects {
+        if rel.attacked {
+            continue; // 已在上面作为新受攻击的棋子说明
+        }
+        let label = piece_label(rel.target_piece, rel.target);
+        push(
+            40,
+            "unprotect",
+            format!("{label}失去保护"),
+            format!("{moved_before}离开后，{label}失去了保护"),
+            vec![f.mv.from, rel.target],
+            vec![],
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            false,
+        );
+    }
+    for change in f.enemy_gains.iter().take(2) {
+        let enemy_piece = piece_label(change.piece, change.piece_square);
+        let target = piece_label(change.target_piece, change.target);
+        let text = match change.via {
+            LineVia::Screen => format!("{moved_after}给对方{enemy_piece}做了炮架，对方{enemy_piece}可以攻击{target}"),
+            LineVia::Opened => format!("{moved_before}让开线路后，对方{enemy_piece}可以攻击{target}"),
+        };
+        push(
+            55,
+            "enemy_line",
+            format!("让对方{enemy_piece}获得攻击线路"),
+            text,
+            vec![change.piece_square, change.target],
+            vec![Move::new(change.piece_square, change.target)],
+            EvidenceKind::Fact,
+            Certainty::Certain,
+            false,
+        );
+    }
+
+    if !out.iter().any(|p| p.positive && p.priority >= 40) {
+        let (short, text) = match f.piece.kind {
+            PieceKind::Pawn if f.mv.from.file() == f.mv.to.file() => (
+                format!("挺{moved_before}"),
+                format!("{moved_before}向前挺进一步；本步没有吃子或将军"),
+            ),
+            PieceKind::Pawn => {
+                (format!("{moved_before}横移"), format!("{moved_before}横移一步；本步没有吃子或将军"))
+            }
+            _ => (
+                format!("调整{moved_before}的位置"),
+                format!(
+                    "本步没有吃子或将军；{}的可走点由 {} 个变为 {} 个",
+                    moved_before, f.mobility_before, f.mobility_after
+                ),
+            ),
+        };
+        out.push(Point {
+            priority: 20,
+            topic: "reposition",
+            short,
+            text,
+            squares: vec![f.mv.from, f.mv.to],
+            arrows: vec![f.mv],
+            kind: EvidenceKind::Positional,
+            certainty: Certainty::Tentative,
+            positive: true,
+        });
+    }
+
+    out.sort_by_key(|p| std::cmp::Reverse(p.priority));
+    out
+}
+
+/// 主要作用的短语，供候选列表与一句话结论使用。
+fn headline(points: &[Point]) -> String {
+    let positives: Vec<&Point> = points.iter().filter(|p| p.positive).collect();
+    let Some(first) = positives.first() else { return String::new() };
+    let develop = positives.iter().find(|p| p.topic == "develop");
+    // 非强制性的作用（保护、线路、攻击）时，以出子开头更自然
+    let (lead, follow) = match develop {
+        Some(dev) if first.priority < 75 && first.topic != "develop" => (*dev, Some(*first)),
+        _ => (*first, positives.iter().find(|p| p.topic != first.topic).copied()),
+    };
+    match follow {
+        Some(next) if next.topic != lead.topic && next.priority >= 40 => format!("{}，并{}", lead.short, next.short),
+        _ => lead.short.clone(),
+    }
+}
+
+fn first_move_summary(pos: &Position, mv: Move) -> String {
+    facts::move_facts(pos, mv).map(|f| headline(&points(&f))).unwrap_or_default()
+}
+
+fn candidate_views(pos: &Position, engine: &EngineEvidence, actual: Option<Move>) -> Vec<CandidateView> {
+    let mut out: Vec<CandidateView> = engine
+        .candidates
+        .iter()
+        .enumerate()
+        .map(|(i, line)| view_of(pos, line, Some(i as u32 + 1), actual == Some(line.mv), CandidateSource::MultiPv))
+        .collect();
+    if let Some(line) = &engine.actual
+        && !out.iter().any(|c| c.mv == line.mv)
+    {
+        out.push(view_of(pos, line, None, true, CandidateSource::SearchMoves));
+    }
+    out
+}
+
+/// 把引擎候选整理成界面展示用的列表（含中文记谱与首着的直接作用）。
+pub fn candidate_list(pos: &Position, lines: &[EngineLine]) -> Vec<CandidateView> {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| view_of(pos, line, Some(i as u32 + 1), false, CandidateSource::MultiPv))
+        .collect()
+}
+
+fn view_of(pos: &Position, line: &EngineLine, rank: Option<u32>, is_actual: bool, source: CandidateSource) -> CandidateView {
+    CandidateView {
+        mv: line.mv,
+        notation: notation::move_to_chinese(pos, line.mv).unwrap_or_else(|_| line.mv.iccs()),
+        score: line.score,
+        bound: line.bound,
+        depth: line.depth,
+        pv: line.pv.clone(),
+        pv_notation: notation::line_to_chinese(pos, &line.pv),
+        rank,
+        is_actual,
+        source,
+        summary: first_move_summary(pos, line.mv),
+    }
+}
+
+fn exact_cp(line: &EngineLine) -> Option<i32> { if line.bound == Bound::Exact { line.score.cp() } else { None } }
+
+/// 比较实际走法与首选。将杀分与普通分不相减；边界分只给方向不给分差。
+pub fn judge(best: &EngineLine, actual: &EngineLine, actual_rank: Option<u32>) -> Verdict {
+    if actual_rank == Some(1) || best.mv == actual.mv {
+        return Verdict { tone: VerdictTone::Best, label: "当前分析的首选".into(), delta: None, note: String::new() };
+    }
+    let bounded = best.bound != Bound::Exact || actual.bound != Bound::Exact;
+    let note = if bounded { "其中有分数是搜索边界值，差距只表示方向".to_string() } else { String::new() };
+    let verdict = |tone, label: &str, delta| Verdict { tone, label: label.to_string(), delta, note: note.clone() };
+    match (best.score, actual.score) {
+        (Score::Mate(b), Score::Mate(a)) if b > 0 && a > 0 => {
+            if a <= b + 1 {
+                verdict(VerdictTone::Close, "同样可以形成杀棋", None)
+            } else {
+                verdict(VerdictTone::Inaccuracy, "也能杀棋，但比首选更慢", None)
+            }
+        }
+        (Score::Mate(b), _) if b > 0 => verdict(VerdictTone::Blunder, "错过了杀棋", None),
+        (_, Score::Mate(a)) if a <= 0 => match best.score {
+            Score::Mate(b) if b <= 0 => verdict(VerdictTone::Close, "两者都难以避免被杀", None),
+            _ => verdict(VerdictTone::Blunder, "会导致被对方杀棋", None),
+        },
+        (Score::Mate(_), Score::Cp(_)) => verdict(VerdictTone::Close, "首选同样处于被杀局面，本步至少拖延", None),
+        (Score::Cp(_), Score::Mate(_)) | (Score::Mate(_), Score::Mate(_)) => {
+            verdict(VerdictTone::Unclear, "两次搜索结论不一致", None)
+        }
+        (Score::Cp(b), Score::Cp(a)) => {
+            let d = b - a;
+            if d < -20 {
+                return Verdict {
+                    tone: VerdictTone::Unclear,
+                    label: "两次搜索结论不一致".into(),
+                    delta: None,
+                    note: "单独分析该着法的得分高于首选，可能因搜索预算不同，结论尚不稳定".into(),
+                };
+            }
+            let d = d.max(0);
+            let (tone, label) = match d {
+                0..=30 => (VerdictTone::Close, "与首选接近"),
+                31..=80 => (VerdictTone::Inaccuracy, "略逊于首选"),
+                81..=200 => (VerdictTone::Mistake, "明显不如首选"),
+                _ => (VerdictTone::Blunder, "严重失误"),
+            };
+            verdict(tone, label, (!bounded).then_some(d))
+        }
+    }
+}
+
+fn score_text(score: Score, side: Color) -> String {
+    match score {
+        Score::Cp(cp) => format!("{}视角评分 {:+}", side.label(), cp),
+        Score::Mate(n) if n > 0 => format!("{}可在 {} 步内杀棋", side.label(), n),
+        Score::Mate(0) => format!("{}已无着可走", side.label()),
+        Score::Mate(n) => format!("{} {} 步后会被杀", side.label(), -n),
+    }
+}
+
+fn lesson_for(points: &[Point], verdict: Option<&Verdict>, reply_captures: bool, f: &MoveFacts) -> String {
+    let has = |topic: &str| points.iter().any(|p| p.topic == topic);
+    if let Some(v) = verdict {
+        match v.tone {
+            VerdictTone::Blunder if v.label.contains("错过了杀棋") => {
+                return "有将军机会时，先计算强制性的将军变化，再考虑其他着法。".into();
+            }
+            VerdictTone::Blunder | VerdictTone::Mistake if reply_captures || has("risk") || has("exposed") => {
+                return "走子前先检查：落点和失去保护的棋子会不会被对方吃掉，对方吃完后自己能否吃回。".into();
+            }
+            VerdictTone::Blunder | VerdictTone::Mistake => {
+                return "在多个候选之间比较时，先看对方最有力的回应，而不只看自己这一步的直接作用。".into();
+            }
+            _ => {}
+        }
+    }
+    if f.was_in_check {
+        "被将军时比较三种应将方式：动将、垫子、吃掉将军的棋子，并看应将后哪些棋子更安全。".into()
+    } else if has("mate") || has("stalemate") {
+        "收官时注意对方将帅的出路：控制它的每一个可走点，就能形成杀棋或困毙。".into()
+    } else if has("capture") {
+        "吃子前检查对方能否反吃或借机反击，再决定是否值得。".into()
+    } else if has("check") {
+        "将军前先想好后续手段；没有后续的将军可能只是浪费步数。".into()
+    } else if has("protect") || has("develop") {
+        "选择出子位置时，同时检查新增了哪些攻击和保护关系。".into()
+    } else if has("risk") || has("exposed") || has("unprotect") {
+        "每走一步后都检查：自己哪些棋子受到攻击、哪些失去了保护。".into()
+    } else {
+        "没有直接战术时，优先让活动范围小的棋子参与配合。".into()
+    }
+}
+
+/// 讲解某一着。`engine` 为空时只生成基于规则事实的基本讲解。
+pub fn explain_move(
+    before: &Position, mv: Move, ctx: &ExplainContext, engine: Option<&EngineEvidence>,
+) -> Option<MoveExplanation> {
+    if !rules::is_legal(before, mv) {
+        return None;
+    }
+    let f = facts::move_facts(before, mv)?;
+    let pts = points(&f);
+    let mut ev = EvidenceSet::new();
+    let mut warnings = Vec::new();
+    if !ctx.history_complete {
+        warnings.push("此前的着法历史不完整，长将、长捉等依赖历史的判定可能不准确".to_string());
+    }
+
+    // 当前需求
+    let mut need = Vec::new();
+    if f.was_in_check {
+        let checkers = rules::checkers(&before.board, f.mover);
+        let id = ev.add(
+            EvidenceKind::Fact,
+            "in_check",
+            format!("{}正被{}将军", f.mover.label(), labels(&before.board, &checkers)),
+            checkers.clone(),
+            vec![],
+            None,
+            Certainty::Certain,
+        );
+        need.push(claim(format!("{}正被将军，必须先应将", f.mover.label()), &[&id]));
+    }
+    for threat in f.threats_before.iter().take(2) {
+        let label = piece_label(threat.piece, threat.square);
+        let detail = if threat.defended { "，攻击者价值更低" } else { "，且没有保护" };
+        let text = format!("{label}受到对方{}攻击{detail}", labels(&before.board, &threat.attackers));
+        let id = ev.add(
+            EvidenceKind::Fact,
+            "threat",
+            text.clone(),
+            std::iter::once(threat.square).chain(threat.attackers.iter().copied()).collect(),
+            threat.attackers.iter().map(|a| Move::new(*a, threat.square)).collect(),
+            None,
+            Certainty::Certain,
+        );
+        need.push(claim(text, &[&id]));
+    }
+    if need.is_empty() {
+        let id = ev.add(
+            EvidenceKind::Fact,
+            "quiet",
+            "当前没有被将军，也没有受攻击而缺少保护的棋子".into(),
+            vec![],
+            vec![],
+            None,
+            Certainty::Certain,
+        );
+        let home: Vec<String> = before
+            .board
+            .pieces()
+            .filter(|(sq, p)| {
+                p.color == f.mover
+                    && matches!(p.kind, PieceKind::Rook | PieceKind::Horse)
+                    && sq.rank() == f.mover.home_rank()
+            })
+            .map(|(sq, p)| piece_label(p, sq))
+            .collect();
+        if home.len() >= 2 {
+            let pid = ev.add(
+                EvidenceKind::Positional,
+                "development_need",
+                format!("{}仍在底线，尚未出动", join_labels(&home)),
+                vec![],
+                vec![],
+                None,
+                Certainty::Tentative,
+            );
+            need.push(claim("当前没有直接威胁，主要任务是尽快出动尚在底线的车马", &[&id, &pid]));
+        } else {
+            need.push(claim("当前没有直接威胁，可以着手改善子力位置或寻找攻击目标", &[&id]));
+        }
+    }
+
+    // 具体依据：重要的要点全部列出，次要要点只在内容不足时补充
+    let mut basis = Vec::new();
+    let important = pts.iter().filter(|p| p.priority >= 40).count();
+    for p in pts.iter().filter(|p| p.priority >= 40 || important < 2).take(6) {
+        let id = ev.add(p.kind, p.topic, p.text.clone(), p.squares.clone(), p.arrows.clone(), None, p.certainty);
+        let text = if p.positive { p.text.clone() } else { format!("需要注意：{}", p.text) };
+        basis.push(claim(text, &[&id]));
+    }
+
+    // 候选比较、主要应对与评价
+    let mut comparison = Vec::new();
+    let mut replies = Vec::new();
+    let mut verdict = None;
+    let mut candidates = Vec::new();
+    let mut reply_captures = false;
+    let mut swing_loss: Option<String> = None;
+    let mut conditions = None;
+    let level = if engine.is_some() { ExplainLevel::Detailed } else { ExplainLevel::Basic };
+
+    if let Some(engine) = engine.filter(|e| !e.candidates.is_empty()) {
+        conditions = Some(engine.conditions.clone());
+        candidates = candidate_views(before, engine, Some(mv));
+        let best = &engine.candidates[0];
+        let rank = engine.candidates.iter().position(|c| c.mv == mv).map(|i| i as u32 + 1);
+        let actual_line = rank.map(|r| &engine.candidates[r as usize - 1]).or(engine.actual.as_ref());
+        let best_cn = notation::move_to_chinese(before, best.mv).unwrap_or_default();
+
+        if let Some(actual) = actual_line {
+            let v = judge(best, actual, rank);
+            let best_id = ev.add(
+                EvidenceKind::Variation,
+                "best",
+                format!("引擎首选{}（{}，深度 {}）", best_cn, score_text(best.score, f.mover), best.depth),
+                vec![best.mv.from, best.mv.to],
+                vec![best.mv],
+                Some(LineRef {
+                    base: LineBase::Parent,
+                    moves: best.pv.clone(),
+                    notation: notation::line_to_chinese(before, &best.pv),
+                }),
+                Certainty::Supported,
+            );
+            if rank.is_none() {
+                comparison.push(claim(
+                    format!("{}没有进入前 {} 个候选，已在相同条件下单独分析", f.notation, engine.candidates.len()),
+                    &[&best_id],
+                ));
+            }
+            if v.tone == VerdictTone::Best {
+                let mut text = format!("在当前分析中，{}是首选", f.notation);
+                let mut ids = vec![best_id.clone()];
+                if let Some(second) = engine.candidates.get(1) {
+                    let second_cn = notation::move_to_chinese(before, second.mv).unwrap_or_default();
+                    let second_id = ev.add(
+                        EvidenceKind::Variation,
+                        "second",
+                        format!("第二候选{}（{}）", second_cn, score_text(second.score, f.mover)),
+                        vec![second.mv.from, second.mv.to],
+                        vec![second.mv],
+                        Some(LineRef {
+                            base: LineBase::Parent,
+                            moves: second.pv.clone(),
+                            notation: notation::line_to_chinese(before, &second.pv),
+                        }),
+                        Certainty::Supported,
+                    );
+                    ids.push(second_id);
+                    match (exact_cp(best), exact_cp(second)) {
+                        (Some(b), Some(s)) if b - s <= 30 => text.push_str(&format!(
+                            "；与第二候选{second_cn}相差约 {} 分，在当前分析预算下两者接近",
+                            b - s
+                        )),
+                        (Some(b), Some(s)) => text.push_str(&format!("；比第二候选{second_cn}高约 {} 分", b - s)),
+                        _ => text.push_str(&format!("；第二候选是{second_cn}")),
+                    }
+                    let second_summary = first_move_summary(before, second.mv);
+                    if !second_summary.is_empty() {
+                        text.push_str(&format!("（{second_cn}的直接作用：{second_summary}）"));
+                    }
+                }
+                let refs: Vec<&String> = ids.iter().collect();
+                comparison.push(claim(text, &refs));
+            } else {
+                let best_summary = first_move_summary(before, best.mv);
+                let mut text = format!("引擎首选{best_cn}");
+                if !best_summary.is_empty() {
+                    text.push_str(&format!("（{best_summary}）"));
+                }
+                match v.delta {
+                    Some(d) => text.push_str(&format!("；{}比它低约 {d} 分，{}", f.notation, v.label)),
+                    None => text.push_str(&format!("；相比之下{}{}", f.notation, v.label)),
+                }
+                if !v.note.is_empty() {
+                    text.push_str(&format!("（{}）", v.note));
+                }
+                comparison.push(claim(text, &[&best_id]));
+            }
+
+            // 主要应对：实际走法主变化中的对方回应
+            if actual.pv.len() >= 2 && actual.pv[0] == mv {
+                let reply = actual.pv[1];
+                let reply_cn = notation::move_to_chinese(&f.after, reply).unwrap_or_else(|_| reply.iccs());
+                reply_captures = f.after.board.get(reply.to).is_some();
+                let reply_effect = first_move_summary(&f.after, reply);
+                let line = LineRef {
+                    base: LineBase::Parent,
+                    moves: actual.pv.clone(),
+                    notation: notation::line_to_chinese(before, &actual.pv),
+                };
+                let text = if reply_effect.is_empty() {
+                    format!("对方主要应对{reply_cn}")
+                } else {
+                    format!("对方主要应对{reply_cn}：{reply_effect}")
+                };
+                let id = ev.add(
+                    EvidenceKind::Variation,
+                    "reply",
+                    format!("{text}（主变化：{}）", line.notation.join(" ")),
+                    vec![reply.from, reply.to],
+                    vec![reply],
+                    Some(line),
+                    Certainty::Supported,
+                );
+                replies.push(claim(text, &[&id]));
+
+                let (swing, played) = facts::material_swing(before, &actual.pv, 6);
+                if played >= 2 && swing.abs() >= 100 {
+                    let phrase = material_phrase(swing);
+                    let text = if swing < 0 {
+                        format!("按这条变化走 {played} 步后，{}净损失子力{phrase}", f.mover.label())
+                    } else {
+                        format!("按这条变化走 {played} 步后，{}净得子力{phrase}", f.mover.label())
+                    };
+                    if swing < 0 {
+                        swing_loss = Some(format!("按主要变化会净损失子力{phrase}"));
+                    }
+                    let sid = ev.add(
+                        EvidenceKind::Variation,
+                        "material",
+                        text.clone(),
+                        vec![],
+                        vec![],
+                        Some(LineRef {
+                            base: LineBase::Parent,
+                            moves: actual.pv.iter().take(played).copied().collect(),
+                            notation: notation::line_to_chinese(before, &actual.pv[..played]),
+                        }),
+                        Certainty::Supported,
+                    );
+                    replies.push(claim(text, &[&sid]));
+                }
+            }
+            match actual.score {
+                Score::Mate(n) if n > 0 => {
+                    let id = ev.add(
+                        EvidenceKind::Variation,
+                        "mate_line",
+                        format!("按主变化，{}可在 {n} 步内杀棋", f.mover.label()),
+                        vec![],
+                        vec![],
+                        None,
+                        Certainty::Supported,
+                    );
+                    replies.push(claim(format!("按主变化，{}可在 {n} 步内杀棋", f.mover.label()), &[&id]));
+                }
+                Score::Mate(n) if n < 0 => {
+                    let id = ev.add(
+                        EvidenceKind::Variation,
+                        "mated_line",
+                        format!("按主变化，{} {} 步后会被杀", f.mover.label(), -n),
+                        vec![],
+                        vec![],
+                        None,
+                        Certainty::Supported,
+                    );
+                    replies.push(claim(format!("按主变化，{} {} 步后会被杀", f.mover.label(), -n), &[&id]));
+                    swing_loss.get_or_insert_with(|| "会被对方杀棋".to_string());
+                }
+                _ => {}
+            }
+            if v.tone == VerdictTone::Unclear {
+                warnings.push("不同搜索得出的结论不一致，建议用“深入分析”增加搜索预算".to_string());
+            }
+            verdict = Some(v);
+        } else {
+            warnings.push(format!("{}没有进入候选，单独分析未完成，暂时无法比较优劣", f.notation));
+        }
+    } else if engine.is_none() {
+        // 无引擎时，用同一棋子的其他走法做事实层面的对照
+        if let Some(text) = fact_contrast(before, &f, &pts) {
+            let id = ev.add(EvidenceKind::Fact, "contrast", text.clone(), vec![], vec![], None, Certainty::Certain);
+            comparison.push(claim(text, &[&id]));
+        }
+    }
+
+    // 一句话结论
+    let head = headline(&pts);
+    let summary = match verdict.as_ref().map(|v| v.tone) {
+        Some(VerdictTone::Mistake | VerdictTone::Blunder) => {
+            let cost = swing_loss
+                .clone()
+                .or_else(|| pts.iter().find(|p| !p.positive && p.priority >= 55).map(|p| p.short.clone()))
+                .unwrap_or_else(|| verdict.as_ref().map(|v| v.label.clone()).unwrap_or_default());
+            format!("{}：{}，但{}。", f.notation, head, cost)
+        }
+        _ => {
+            let risk = pts.iter().find(|p| !p.positive && p.priority >= 70);
+            match risk {
+                Some(r) => format!("{}：{}，但{}。", f.notation, head, r.short),
+                None => format!("{}：{}。", f.notation, head),
+            }
+        }
+    };
+
+    let lesson = lesson_for(&pts, verdict.as_ref(), reply_captures, &f);
+    let mut explanation = MoveExplanation {
+        generator_version: GENERATOR_VERSION,
+        level,
+        mover: f.mover,
+        mv,
+        notation: f.notation.clone(),
+        summary,
+        need,
+        basis,
+        comparison,
+        replies,
+        lesson,
+        verdict,
+        candidates,
+        evidence: ev.items,
+        warnings,
+        conditions,
+    };
+    audit(&mut explanation.evidence, &mut explanation.warnings, before, &f.after);
+    for claims in [&mut explanation.need, &mut explanation.basis, &mut explanation.comparison, &mut explanation.replies] {
+        drop_unknown_refs(claims, &explanation.evidence);
+    }
+    Some(explanation)
+}
+
+/// 与同一棋子另一种走法对照，说明本步在事实层面多做了什么。
+fn fact_contrast(before: &Position, f: &MoveFacts, pts: &[Point]) -> Option<String> {
+    let mine: Vec<&Point> = pts.iter().filter(|p| p.positive && p.priority >= 40).collect();
+    if mine.is_empty() {
+        return None;
+    }
+    for alt in rules::legal_moves_from(before, f.mv.from) {
+        if alt == f.mv {
+            continue;
+        }
+        let Some(af) = facts::move_facts(before, alt) else { continue };
+        let alt_pts = points(&af);
+        let missing: Vec<&&Point> =
+            mine.iter().filter(|p| !alt_pts.iter().any(|a| a.topic == p.topic && a.short == p.short)).collect();
+        if let Some(diff) = missing.first() {
+            let alt_cn = notation::move_to_chinese(before, alt).ok()?;
+            return Some(format!(
+                "与{alt_cn}相比，{}能{}，{alt_cn}没有这一作用；两者的后续差别可以查看候选变化",
+                f.notation, diff.short
+            ));
+        }
+    }
+    None
+}
+
+/// 检查证据中的变化能否合法回放、坐标是否有效；不通过的变化会被移除并记录警告。
+fn audit(evidence: &mut [Evidence], warnings: &mut Vec<String>, parent: &Position, node: &Position) {
+    const OVERCLAIM: [&str; 5] = ["唯一", "必胜", "必然", "无论怎么走", "一定能"];
+    for e in evidence.iter_mut() {
+        if let Some(line) = &e.line {
+            let mut cur = match line.base {
+                LineBase::Parent => parent.clone(),
+                LineBase::Node => node.clone(),
+            };
+            let mut ok = true;
+            for mv in &line.moves {
+                if !rules::is_legal(&cur, *mv) {
+                    ok = false;
+                    break;
+                }
+                cur = cur.after(*mv);
+            }
+            if !ok {
+                warnings.push(format!("证据 {} 的变化无法在当前局面合法回放，已移除", e.id));
+                e.line = None;
+            }
+        }
+        if OVERCLAIM.iter().any(|w| e.text.contains(w)) && e.kind != EvidenceKind::Fact {
+            warnings.push(format!("证据 {} 的措辞超出了证据强度", e.id));
+        }
+    }
+}
+
+fn drop_unknown_refs(claims: &mut [Claim], evidence: &[Evidence]) {
+    for c in claims.iter_mut() {
+        c.evidence.retain(|id| evidence.iter().any(|e| &e.id == id));
+    }
+}
+
+/// 说明一个局面：用于根节点、导入的残局，以及任意节点的“当前局面”。
+pub fn explain_position(pos: &Position, ctx: &ExplainContext, engine: Option<&EngineEvidence>) -> PositionExplanation {
+    let pf = facts::position_facts(pos);
+    let mut ev = EvidenceSet::new();
+    let mut claims = Vec::new();
+    let mut warnings = Vec::new();
+    if !ctx.history_complete {
+        warnings.push("此局面之前的着法未知，长将、长捉等依赖历史的判定可能不完整".to_string());
+    }
+    let side = pos.side;
+    let king = pos.board.find_king(side);
+
+    let summary = match pf.status {
+        GameStatus::Checkmate => {
+            let id = ev.add(
+                EvidenceKind::Fact,
+                "mated",
+                format!("{}将军，{}没有任何合法应着", labels(&pos.board, &pf.checkers), side.label()),
+                pf.checkers.iter().copied().chain(king).collect(),
+                vec![],
+                None,
+                Certainty::Certain,
+            );
+            claims.push(claim(format!("{}已被将死", side.label()), &[&id]));
+            format!("{}已被将死，对局结束。", side.label())
+        }
+        GameStatus::Stalemate => {
+            let reasons = king
+                .map(|k| {
+                    rules::pseudo_targets(&pos.board, k)
+                        .into_iter()
+                        .filter_map(|t| rules::illegal_reason(pos, Move::new(k, t)).map(|r| format!("去 {t}：{}", r.message)))
+                        .take(4)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let mut text = format!("{}没有被将军，但所有棋子都没有合法着法", side.label());
+            if !reasons.is_empty() {
+                text.push_str(&format!("；{}的可走点都不安全：{}", Piece::new(side, PieceKind::King).name(), reasons.join("；")));
+            }
+            let id = ev.add(
+                EvidenceKind::Fact,
+                "stalemated",
+                text.clone(),
+                king.into_iter().collect(),
+                vec![],
+                None,
+                Certainty::Certain,
+            );
+            claims.push(claim(text, &[&id]));
+            format!("{}无子可走（困毙），按规则判负，对局结束。", side.label())
+        }
+        GameStatus::Ongoing => {
+            let check = if pf.in_check { "，正被将军" } else { "" };
+            format!(
+                "轮到{}走{}。子力：红方{}；黑方{}。",
+                side.label(),
+                check,
+                facts::material_inventory(&pos.board, Color::Red),
+                facts::material_inventory(&pos.board, Color::Black)
+            )
+        }
+    };
+
+    if pf.status == GameStatus::Ongoing {
+        if pf.in_check {
+            let id = ev.add(
+                EvidenceKind::Fact,
+                "in_check",
+                format!("{}正在将军{}", labels(&pos.board, &pf.checkers), side.label()),
+                pf.checkers.iter().copied().chain(king).collect(),
+                king.map(|k| pf.checkers.iter().map(|c| Move::new(*c, k)).collect()).unwrap_or_default(),
+                None,
+                Certainty::Certain,
+            );
+            claims.push(claim(format!("{}正被将军，必须先应将（共有 {} 种应将着法）", side.label(), pf.legal_moves), &[&id]));
+        } else {
+            let id = ev.add(
+                EvidenceKind::Fact,
+                "mobility",
+                format!("{}共有 {} 种合法着法", side.label(), pf.legal_moves),
+                vec![],
+                vec![],
+                None,
+                Certainty::Certain,
+            );
+            claims.push(claim(format!("{}共有 {} 种合法着法", side.label(), pf.legal_moves), &[&id]));
+        }
+        for (threats, own) in [(&pf.own_threats, true), (&pf.opponent_threats, false)] {
+            for t in threats.iter().take(3) {
+                let label = piece_label(t.piece, t.square);
+                let detail = if t.defended { "，攻击者价值更低" } else { "，且没有保护" };
+                let owner = if own { side.label() } else { side.opposite().label() };
+                let text = format!("{owner}的{label}受到{}攻击{detail}", labels(&pos.board, &t.attackers));
+                let id = ev.add(
+                    EvidenceKind::Fact,
+                    if own { "own_threat" } else { "target" },
+                    text.clone(),
+                    std::iter::once(t.square).chain(t.attackers.iter().copied()).collect(),
+                    t.attackers.iter().map(|a| Move::new(*a, t.square)).collect(),
+                    None,
+                    Certainty::Certain,
+                );
+                let lead = if own { "需要处理：" } else { "可以利用：" };
+                claims.push(claim(format!("{lead}{text}"), &[&id]));
+            }
+        }
+        let diff = pf.material_red - pf.material_black;
+        if diff.abs() >= 100 {
+            let leader = if diff > 0 { Color::Red } else { Color::Black };
+            let id = ev.add(
+                EvidenceKind::Fact,
+                "material",
+                format!("按粗略子力价值，{}多出{}", leader.label(), material_phrase(diff)),
+                vec![],
+                vec![],
+                None,
+                Certainty::Certain,
+            );
+            claims.push(claim(format!("按粗略子力价值，{}多出{}", leader.label(), material_phrase(diff)), &[&id]));
+        }
+        if ctx.repetition_count > 1 {
+            let id = ev.add(
+                EvidenceKind::Fact,
+                "repetition",
+                format!("当前局面在本段棋谱中已出现 {} 次", ctx.repetition_count),
+                vec![],
+                vec![],
+                None,
+                Certainty::Certain,
+            );
+            claims.push(claim(format!("当前局面在本段棋谱中已出现 {} 次，注意重复局面规则", ctx.repetition_count), &[&id]));
+        }
+    }
+
+    let mut candidates = Vec::new();
+    let mut conditions = None;
+    if let Some(engine) = engine.filter(|e| !e.candidates.is_empty()) {
+        conditions = Some(engine.conditions.clone());
+        candidates = candidate_views(pos, engine, None);
+        let best = &engine.candidates[0];
+        let best_cn = notation::move_to_chinese(pos, best.mv).unwrap_or_default();
+        let effect = first_move_summary(pos, best.mv);
+        let line = LineRef {
+            base: LineBase::Node,
+            moves: best.pv.clone(),
+            notation: notation::line_to_chinese(pos, &best.pv),
+        };
+        let mut text = format!("引擎首选{best_cn}（{}）", score_text(best.score, side));
+        if !effect.is_empty() {
+            text.push_str(&format!("：{effect}"));
+        }
+        let id = ev.add(
+            EvidenceKind::Variation,
+            "best",
+            format!("{text}；主变化 {}", line.notation.join(" ")),
+            vec![best.mv.from, best.mv.to],
+            vec![best.mv],
+            Some(line),
+            Certainty::Supported,
+        );
+        claims.push(claim(text, &[&id]));
+    }
+
+    let mut evidence = ev.items;
+    audit(&mut evidence, &mut warnings, pos, pos);
+    drop_unknown_refs(&mut claims, &evidence);
+    PositionExplanation {
+        generator_version: GENERATOR_VERSION,
+        side,
+        status: pf.status,
+        summary,
+        claims,
+        evidence,
+        candidates,
+        warnings,
+        conditions,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fen::parse_position;
+
+    fn mv(s: &str) -> Move { Move::parse_iccs(s).unwrap() }
+
+    const CTX: ExplainContext = ExplainContext { history_complete: true, repetition_count: 1 };
+
+    fn line(m: &str, score: Score, pv: &[&str]) -> EngineLine {
+        EngineLine { mv: mv(m), score, bound: Bound::Exact, depth: 12, pv: pv.iter().map(|s| mv(s)).collect() }
+    }
+
+    #[test]
+    fn horse_development_example() {
+        let e = explain_move(&Position::startpos(), mv("h0g2"), &CTX, None).unwrap();
+        assert_eq!(e.summary, "马二进三：出动右马，并增加对中兵的保护。");
+        assert_eq!(e.level, ExplainLevel::Basic);
+        assert!(e.basis.iter().any(|c| c.text.contains("保护中兵") && c.text.contains("马腿 f2 无子")), "{:?}", e.basis);
+        assert!(e.comparison.iter().any(|c| c.text.contains("马二进一")), "{:?}", e.comparison);
+        assert!(e.lesson.contains("保护关系"));
+        assert!(e.need.iter().any(|c| c.text.contains("尚在底线")), "{:?}", e.need);
+        // 每条结论引用的证据都存在
+        let ids: Vec<&String> = e.evidence.iter().map(|x| &x.id).collect();
+        for c in e.need.iter().chain(&e.basis).chain(&e.comparison) {
+            assert!(!c.evidence.is_empty());
+            assert!(c.evidence.iter().all(|id| ids.contains(&id)));
+        }
+    }
+
+    #[test]
+    fn mistake_follows_gain_cost_structure() {
+        // 炮五进四打中卒，对方马7进5吃炮
+        let pos = parse_position("rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w").unwrap();
+        let engine = EngineEvidence {
+            candidates: vec![
+                line("h0g2", Score::Cp(60), &["h0g2", "i9h9"]),
+                line("b0c2", Score::Cp(50), &["b0c2", "i9h9"]),
+            ],
+            actual: Some(line("e2e6", Score::Cp(-320), &["e2e6", "g7e6", "h0g2"])),
+            conditions: "测试".into(),
+        };
+        let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
+        let v = e.verdict.clone().unwrap();
+        assert_eq!(v.tone, VerdictTone::Blunder);
+        assert_eq!(v.delta, Some(380));
+        assert!(e.summary.starts_with("炮五进四：吃掉对方中卒，但"), "{}", e.summary);
+        assert!(e.replies.iter().any(|c| c.text.contains("马7进5")), "{:?}", e.replies);
+        assert!(e.replies.iter().any(|c| c.text.contains("净损失")), "{:?}", e.replies);
+        assert!(e.comparison.iter().any(|c| c.text.contains("没有进入前 2 个候选")));
+        assert!(e.lesson.contains("会不会被对方吃掉"));
+        assert!(e.candidates.iter().any(|c| c.is_actual && c.source == CandidateSource::SearchMoves));
+        assert!(e.warnings.is_empty(), "{:?}", e.warnings);
+    }
+
+    #[test]
+    fn mate_and_bound_scores_are_not_subtracted() {
+        let best = line("h0g2", Score::Mate(3), &["h0g2"]);
+        let actual = line("b0c2", Score::Cp(500), &["b0c2"]);
+        let v = judge(&best, &actual, Some(2));
+        assert_eq!((v.tone, v.delta), (VerdictTone::Blunder, None));
+        let mut bounded = line("b0c2", Score::Cp(10), &["b0c2"]);
+        bounded.bound = Bound::Upper;
+        let v = judge(&line("h0g2", Score::Cp(100), &["h0g2"]), &bounded, Some(2));
+        assert_eq!(v.delta, None);
+        assert!(!v.note.is_empty());
+        let v = judge(&line("h0g2", Score::Cp(10), &["h0g2"]), &line("b0c2", Score::Cp(90), &["b0c2"]), None);
+        assert_eq!(v.tone, VerdictTone::Unclear);
+    }
+
+    #[test]
+    fn invalid_engine_lines_are_dropped() {
+        let engine = EngineEvidence {
+            candidates: vec![line("h0g2", Score::Cp(20), &["h0g2", "h0g2"])],
+            actual: None,
+            conditions: "测试".into(),
+        };
+        let e = explain_move(&Position::startpos(), mv("h0g2"), &CTX, Some(&engine)).unwrap();
+        assert!(e.warnings.iter().any(|w| w.contains("无法在当前局面合法回放")), "{:?}", e.warnings);
+        assert!(e.evidence.iter().all(|x| x.line.as_ref().is_none_or(|l| l.moves.len() < 2 || l.moves[1] != mv("h0g2"))));
+    }
+
+    #[test]
+    fn endgame_position_and_terminal_explanations() {
+        let ctx = ExplainContext { history_complete: false, repetition_count: 1 };
+        let pos = parse_position("3k5/9/9/9/9/9/9/9/4R4/4K4 b").unwrap();
+        let p = explain_position(&pos, &ctx, None);
+        assert!(p.summary.starts_with("轮到黑方走"), "{}", p.summary);
+        assert!(p.warnings.iter().any(|w| w.contains("着法未知")));
+        let stale = explain_position(&parse_position("3k5/4R4/4R4/9/9/9/9/9/9/4K4 b").unwrap(), &ctx, None);
+        assert_eq!(stale.status, GameStatus::Stalemate);
+        assert!(stale.claims[0].text.contains("可走点都不安全"), "{:?}", stale.claims);
+        let mated = explain_position(&parse_position("3k5/3R5/3R5/9/9/9/9/9/9/4K4 b").unwrap(), &ctx, None);
+        assert_eq!(mated.status, GameStatus::Checkmate);
+        // 走出将死的一着
+        let pos = parse_position("3k5/9/9/9/9/9/9/9/4R4/4K4 w").unwrap();
+        let e = explain_move(&pos, mv("e1d1"), &ctx, None).unwrap();
+        assert!(e.summary.contains("将死对方"), "{}", e.summary);
+    }
+
+    #[test]
+    fn check_escape_need_and_lesson() {
+        let pos = parse_position("3k5/9/9/9/9/9/9/9/3R5/5K3 b").unwrap();
+        let e = explain_move(&pos, mv("d9e9"), &CTX, None).unwrap();
+        assert!(e.need[0].text.contains("正被将军"));
+        assert!(e.basis.iter().any(|c| c.text.contains("躲开")), "{:?}", e.basis);
+        assert!(e.lesson.contains("应将"));
+    }
+}

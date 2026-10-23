@@ -1,0 +1,15 @@
+[package]
+name = "xq-devserver"
+version = "0.2.0"
+edition = "2024"
+publish = false
+description = "开发桥：在浏览器中调试界面时，用 HTTP 与服务器推送事件代替 Tauri IPC（不随应用发布）"
+
+[dependencies]
+xq-app = { path = "../xq-app" }
+xq-core = { path = "../xq-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny_http = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

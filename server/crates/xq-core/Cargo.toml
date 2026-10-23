@@ -1,0 +1,11 @@
+[package]
+name = "xq-core"
+version = "0.2.0"
+edition = "2024"
+description = "中国象棋领域核心：规则、记谱、棋谱树、引擎协议解析与讲解证据"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
