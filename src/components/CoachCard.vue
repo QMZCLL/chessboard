@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // AI 讲解：由语言模型根据规则事实与引擎证据组织文字。每段都引用程序给出的结论，
-// 点击可在棋盘上高亮或回放；评分、分差、深度与将杀步数不由模型书写，只出现在每段下方由程序给出的依据中。
+// 点击可在棋盘上高亮或回放；评分等数字、排名、评价等级、优劣与杀棋结论不由模型书写，只出现在每段下方由程序给出的依据中。
 import { computed } from "vue";
 import { NButton, NSpin, NTag } from "naive-ui";
 import type { Claim, CoachResult, CoachText, ExplainLevel } from "../api/types";
@@ -90,6 +90,9 @@ function follow(id: string | null) {
     <template v-if="result">
       <div :class="{ faded: view.status === 'stale' }">
         <ClaimList :claims="[asClaim(result.output.summary)]" :evidence="result.evidence" class="lead" />
+        <ul v-if="basisOf(result.output.summary).length" class="basis" data-testid="coach-basis">
+          <li v-for="(b, j) in basisOf(result.output.summary)" :key="j">依据：{{ b }}</li>
+        </ul>
         <template v-for="(s, i) in sections" :key="i">
           <h5 v-if="s.title">{{ s.title }}</h5>
           <ClaimList :claims="[s.claim]" :evidence="result.evidence" />
@@ -100,6 +103,9 @@ function follow(id: string | null) {
         <template v-if="result.output.lesson.text">
           <h5>学习要点</h5>
           <ClaimList :claims="[asClaim(result.output.lesson)]" :evidence="result.evidence" />
+          <ul v-if="basisOf(result.output.lesson).length" class="basis" data-testid="coach-basis">
+            <li v-for="(b, j) in basisOf(result.output.lesson)" :key="j">依据：{{ b }}</li>
+          </ul>
         </template>
         <div v-if="result.output.followups.length" class="followups">
           <n-button v-for="f in result.output.followups" :key="f.action" size="tiny" secondary @click="follow(f.evidence_id)">
@@ -108,7 +114,7 @@ function follow(id: string | null) {
         </div>
       </div>
       <p class="source">
-        由 {{ result.model_label }} 根据程序给出的事实与引擎证据组织文字，点击段落查看依据；评分、分差等数字只出现在程序给出的“依据”中，等级以上方程序评价为准。
+        由 {{ result.model_label }} 根据程序给出的事实与引擎证据组织文字，点击段落查看依据；评分、排名、评价与杀棋结论只出现在程序给出的“依据”中。
       </p>
     </template>
   </section>

@@ -2,18 +2,16 @@
 //!
 //! - 结构：字段、段落数量、篇幅；
 //! - 引用：编号必须来自本次证据包，每段都要引用与段落类型相符的结论；
-//! - 硬结论：新增的着法、胜率、未经确认的杀棋、分析不完整时的优劣评价、
-//!   与评价等级不符的失误说法、绝对化措辞，以及把讲解写成棋手真实想法。
+//! - 硬结论：数字、排名、评价等级、优劣方向、杀棋与胜负一律不写在模型文字中；
+//!   另外拦截新增的着法、胜率与绝对化措辞，以及把讲解写成棋手真实想法。
 //!
-//! 能力边界：自由文字的语义正确性无法由程序完全保证。“数字在输入里出现过”不能说明它在句子里用对了
-//! （正负号、属于哪个候选、是深度还是分差），因此文字中不允许出现数字：评分、分差、深度、将杀步数
-//! 都由程序在每段所引用的依据中显示。将杀与优劣评价的说法必须在同一段引用支持它的结论，
-//! 并检查该结论的可信程度；其余措辞只能做到不与程序给出的结论明显冲突。
+//! 能力边界：自由文字的语义无法由程序完全验证。引用了“正确类别”的结论，并不能说明句子里
+//! “谁是首选”“谁更好”“哪一方会被杀”与程序结论一致；“数字在输入里出现过”也不能说明正负号与归属。
+//! 因此这些硬结论只由程序给出：模型通过 `claim_ids` 选择要讲的结论，程序在每段下方显示结论原文
+//! （排名、评分、评价等级、杀棋方向都在其中），模型文字只解释作用、理由与需要注意的地方。
 
 use std::collections::HashSet;
 
-use xq_core::explain::Certainty;
-use xq_core::explain::VerdictTone;
 
 use super::CoachExplanation;
 use super::FollowupAction;
@@ -29,13 +27,23 @@ const DIGITS: &str = "一二三四五六七八九123456789１２３４５６７�
 /// 除非程序给出的结论里本来就有，否则不能出现的说法。
 const ABSOLUTE: [&str; 15] =
     ["胜率", "%", "％", "百分之", "必胜", "必败", "必然", "无论怎么走", "一定能", "最佳", "最优", "最强", "唯一", "稳赢", "必杀"];
-/// 确定的杀棋说法：同一段必须引用已经确认的将杀结论。
-const MATE_WORDS: [&str; 7] = ["将死", "绝杀", "杀棋", "步杀", "被杀", "杀局", "成杀"];
-/// 能支持杀棋说法的结论类别。
-const MATE_KINDS: [&str; 3] = ["mate", "mate_line", "mated_line"];
-const CN_NUMERALS: &str = "零一二三四五六七八九十百千两";
-const BAD_WORDS: [&str; 8] = ["失误", "败着", "劣着", "错着", "漏着", "恶手", "缓着", "疑问手"];
-const COMPARE_WORDS: [&str; 5] = ["首选", "更好", "更差", "不如", "略逊"];
+/// 硬结论的说法：排名、评价等级、优劣方向、杀棋（任何带“杀”字的说法）与胜负。由程序在依据中给出，模型文字不写。
+const HARD_WORDS: [&str; 46] = [
+    // 排名
+    "首选", "次选", "第一候选", "第二候选", "第三候选", "排在", "排名",
+    // 评价等级
+    "失误", "败着", "劣着", "错着", "漏着", "恶手", "缓着", "疑问手", "好棋", "妙手", "佳着",
+    // 优劣方向
+    "更好", "更差", "更强", "更弱", "更高", "更低", "不如", "略逊", "优于", "劣于", "强于", "弱于", "胜过", "好于", "差于",
+    "领先", "落后", "占优", "上风", "下风",
+    // 杀棋与胜负
+    "杀", "将死", "困毙", "胜势", "败势", "获胜", "取胜", "输棋",
+];
+const CN_NUMERALS: &str = "零一二三四五六七八九十百千万两";
+/// 这些语境中的汉字数字是评分、深度等数值。
+const NUMBER_CONTEXT: [&str; 4] = ["评分", "深度", "分差", "分数"];
+/// 紧接在这些字后面的“十分”表示数量（如“领先十分”“差了十分”），而不是“很”。
+const AMOUNT_BEFORE: &str = "先后差低高了约为是到达";
 const INTENT_WORDS: [&str; 5] = ["本意", "意图是", "心里想", "他想", "她想"];
 
 const SUMMARY_MAX: usize = 80;
@@ -60,9 +68,22 @@ fn notations(text: &str) -> Vec<(usize, String)> {
     out
 }
 
-/// 用汉字写出的分数与将杀步数，如“三十分”“三步杀”。“十分”（很）不算。
+/// 去掉记谱后的文字：记谱中的数字（如“马二进三”的“二”“三”）不参与数字检查。
+fn without_notations(text: &str) -> Vec<char> {
+    let mut chars: Vec<char> = text.chars().collect();
+    for (i, _) in notations(text) {
+        for c in chars.iter_mut().skip(i).take(4) {
+            *c = ' ';
+        }
+    }
+    chars
+}
+
+fn is_cjk(c: char) -> bool { ('\u{4e00}'..='\u{9fff}').contains(&c) }
+
+/// 用汉字写出的数值，如“负三十”“深度为二十”“领先十分”“三步杀”。记谱中的数字与“十分重要”中的“十分”不算。
 fn spelled_numbers(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
+    let chars = without_notations(text);
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
@@ -75,12 +96,23 @@ fn spelled_numbers(text: &str) -> Vec<String> {
             i += 1;
         }
         let run: String = chars[start..i].iter().collect();
+        let prev = start.checked_sub(1).map(|p| chars[p]);
         let next = chars.get(i).copied();
-        let score = next == Some('分') && run != "十";
-        // “三步杀”“三步之内就会杀棋”：步字后不远处出现“杀”
+        let before: String = chars[start.saturating_sub(4)..start].iter().collect();
+        // 带正负号，或“三十”“一百”这样的多位数
+        let signed = matches!(prev, Some('正' | '负'));
+        let compound = run.chars().count() >= 2 && run.chars().any(|c| "十百千万".contains(c));
+        // “评分为三”“深度二十”
+        let in_context = NUMBER_CONTEXT.iter().any(|w| before.contains(w));
+        // “三十分”“领先十分”是分数；“十分重要”的“十分”是“很”
+        let adverb = run == "十" && chars.get(i + 1).is_some_and(|c| is_cjk(*c)) && !prev.is_some_and(|p| AMOUNT_BEFORE.contains(p));
+        let points = next == Some('分') && !adverb;
+        // “三步杀”“三步之内就会杀棋”
         let mate = next == Some('步') && chars.iter().skip(i + 1).take(6).any(|c| *c == '杀');
-        if score || mate {
-            out.push(chars[start..(i + 1).min(chars.len())].iter().collect());
+        if signed || compound || in_context || points || mate {
+            let from = if signed { start - 1 } else { start };
+            let to = if points || mate { i + 1 } else { i };
+            out.push(chars[from..to.min(chars.len())].iter().collect());
         }
     }
     out
@@ -88,12 +120,7 @@ fn spelled_numbers(text: &str) -> Vec<String> {
 
 /// 文字中的阿拉伯数字（记谱中的数字除外）。
 fn numbers(text: &str) -> Vec<String> {
-    let mut chars: Vec<char> = text.chars().collect();
-    for (i, _) in notations(text) {
-        for c in chars.iter_mut().skip(i).take(4) {
-            *c = ' ';
-        }
-    }
+    let chars = without_notations(text);
     let mut out = Vec::new();
     let mut cur = String::new();
     for c in chars {
@@ -219,21 +246,16 @@ pub fn validate(raw: &str, bundle: &EvidenceBundle, detail: Detail) -> Result<Co
     // 硬结论
     let source = source_text(bundle);
     let known_moves: HashSet<String> = notations(&source).into_iter().map(|(_, m)| m).collect();
-    let tone = pack.verdict.as_ref().map(|v| v.tone);
-    let complete = pack.analysis.complete;
     let claimed = |w: &str| pack.claims.iter().any(|c| c.statement.contains(w));
-    // 每段文字及其引用的结论：将杀与优劣评价必须由同一段的引用支持
-    let mut texts: Vec<(&str, &[String])> = vec![(&out.summary.text, &out.summary.claim_ids), (&out.lesson.text, &out.lesson.claim_ids)];
-    texts.extend(out.sections.iter().map(|s| (s.text.as_str(), s.claim_ids.as_slice())));
+    let mut texts: Vec<&str> = vec![&out.summary.text, &out.lesson.text];
+    texts.extend(out.sections.iter().map(|s| s.text.as_str()));
     let mut seen = HashSet::new();
     let mut flag = |msg: String| {
         if seen.insert(msg.clone()) {
             errors.push(msg);
         }
     };
-    for (text, ids) in texts {
-        let cited: Vec<_> = ids.iter().filter_map(|id| bundle.claim(id)).collect();
-        let cites = |groups: &[&str]| cited.iter().any(|c| groups.contains(&c.group.as_str()) || groups.contains(&c.kind.as_str()));
+    for text in texts {
         for (_, m) in notations(text) {
             if !known_moves.contains(&m) {
                 flag(format!("出现了证据中没有的着法“{m}”"));
@@ -243,40 +265,16 @@ pub fn validate(raw: &str, bundle: &EvidenceBundle, detail: Detail) -> Result<Co
             flag(format!("文字中不要写数字（出现“{num}”）：评分、分差、深度、将杀步数由程序在依据中显示"));
         }
         if let Some(num) = spelled_numbers(text).into_iter().next() {
-            flag(format!("文字中不要写分数或将杀步数（出现“{num}”），这些由程序在依据中显示"));
+            flag(format!("文字中不要写数值（出现“{num}”）：评分、分差、深度、将杀步数由程序在依据中显示"));
+        }
+        // 去掉记谱再查，避免“将五平四”之类的记谱触发
+        let plain: String = without_notations(text).into_iter().collect();
+        if let Some(w) = HARD_WORDS.iter().find(|w| plain.contains(**w)) {
+            flag(format!("“{w}”属于排名、评价、优劣或杀棋结论，由程序在依据中显示，文字中不要写"));
         }
         for w in ABSOLUTE {
             if text.contains(w) && !claimed(w) {
                 flag(format!("使用了证据不支持的说法“{w}”"));
-            }
-        }
-        if let Some(w) = MATE_WORDS.iter().find(|w| text.contains(**w)) {
-            // 规则确认的将死，或完整分析中的精确将杀分；“尚未完成的搜索”里的将杀不能写成确定结论
-            let confirmed = cited.iter().any(|c| MATE_KINDS.contains(&c.kind.as_str()) && c.certainty != Certainty::Tentative);
-            if !confirmed {
-                flag(format!("说“{w}”时，同一段必须引用已经确认的将杀结论"));
-            }
-        }
-        if !complete {
-            if let Some(w) = BAD_WORDS.iter().chain(COMPARE_WORDS.iter()).find(|w| text.contains(**w)) {
-                flag(format!("分析尚未完成，不能评价优劣（出现“{w}”）"));
-            }
-        } else {
-            let bad_ok = matches!(tone, Some(VerdictTone::Inaccuracy | VerdictTone::Mistake | VerdictTone::Blunder));
-            if let Some(w) = BAD_WORDS.iter().find(|w| text.contains(**w)) {
-                if !bad_ok {
-                    flag(format!("程序的评价不是失误，不能说“{w}”"));
-                } else if !cites(&["verdict", "comparison"]) {
-                    flag(format!("说“{w}”时，同一段必须引用程序的评价或候选比较"));
-                }
-            }
-            if text.contains("严重") && tone != Some(VerdictTone::Blunder) && !claimed("严重") {
-                flag("程序的评价不是严重失误，不能说“严重”".to_string());
-            }
-            if let Some(w) = COMPARE_WORDS.iter().find(|w| text.contains(**w))
-                && !cites(&["verdict", "comparison", "candidate"])
-            {
-                flag(format!("说“{w}”时，同一段必须引用程序的评价、候选比较或候选"));
             }
         }
         if let Some(w) = INTENT_WORDS.iter().find(|w| text.contains(**w)) {
@@ -342,8 +340,9 @@ mod tests {
             output(
                 "马二进三出动右马，并保护中兵。",
                 json!([
-                    { "kind": "purpose", "text": "当前没有直接威胁，出动车马十分重要。", "claim_ids": [basis] },
-                    { "kind": "comparison", "text": "马二进三在本次搜索中是首选。", "claim_ids": [cand] },
+                    // 记谱里的数字（“马二进三”的“三”）不能和后面的字拼成数值；“十分重要”的“十分”是“很”
+                    { "kind": "purpose", "text": "马二进三分担中路防守，尽快出动车马十分重要。", "claim_ids": [basis] },
+                    { "kind": "comparison", "text": "马八进七同样出动马，但没有保护中兵，两者的比较见依据。", "claim_ids": [cand] },
                 ]),
             )
         );
@@ -355,33 +354,29 @@ mod tests {
         assert_eq!(best.label, "演示首选的变化");
     }
 
+    fn rejects(b: &EvidenceBundle, kind: &str, text: &str, claim: &str, expect: &str) {
+        let sections = json!([{ "kind": kind, "text": text, "claim_ids": [claim] }]);
+        let errors = validate(&output("出动右马。", sections), b, Detail::Normal).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains(expect)), "{text} → 期望“{expect}”：{errors:?}");
+    }
+
     #[test]
     fn invented_content_is_rejected() {
         let b = detailed_bundle(&[("h0g2", 30, &["h0g2", "h9g7"]), ("b0c2", 20, &["b0c2"])], true);
         let basis = claim_of(&b, "basis");
-        let cand = claim_of(&b, "candidate");
         let reply = claim_of(&b, "reply");
         let cases = [
-            ("引用了不存在", json!([{ "kind": "purpose", "text": "出动右马。", "claim_ids": ["c99"] }])),
-            ("没有引用任何结论", json!([{ "kind": "purpose", "text": "出动右马。", "claim_ids": [] }])),
-            ("没有引用与之相符", json!([{ "kind": "comparison", "text": "出动右马。", "claim_ids": [basis] }])),
-            ("没有的着法“车一进一”", json!([{ "kind": "reply", "text": "对方可以车一进一。", "claim_ids": [reply] }])),
-            // 评审中的反例：评分正负号反转、把一个候选的评分写给另一个、把深度写成分差
-            ("不要写数字（出现“30”）", json!([{ "kind": "comparison", "text": "马二进三的评分为 -30。", "claim_ids": [cand] }])),
-            ("不要写数字（出现“30”）", json!([{ "kind": "comparison", "text": "马八进七的评分是 +30。", "claim_ids": [cand] }])),
-            ("不要写数字（出现“10”）", json!([{ "kind": "comparison", "text": "比第二候选高约 10 分。", "claim_ids": [cand] }])),
-            ("不要写分数或将杀步数（出现“三十分”）", json!([{ "kind": "comparison", "text": "大约领先三十分。", "claim_ids": [cand] }])),
-            ("不要写分数或将杀步数（出现“三步”）", json!([{ "kind": "reply", "text": "对方三步之内就会杀棋。", "claim_ids": [reply] }])),
-            ("“胜率”", json!([{ "kind": "comparison", "text": "红方胜率很高。", "claim_ids": [cand] }])),
-            ("已经确认的将杀结论", json!([{ "kind": "reply", "text": "对方很快会被杀。", "claim_ids": [reply] }])),
-            ("不是失误", json!([{ "kind": "comparison", "text": "这步是失误。", "claim_ids": [cand] }])),
-            ("“最佳”", json!([{ "kind": "comparison", "text": "这是最佳选择。", "claim_ids": [cand] }])),
-            ("真实想法", json!([{ "kind": "purpose", "text": "他想出动右马。", "claim_ids": [basis] }])),
+            ("purpose", "出动右马。", "c99", "引用了不存在"),
+            ("comparison", "出动右马。", basis.as_str(), "没有引用与之相符"),
+            ("reply", "对方可以车一进一。", reply.as_str(), "没有的着法“车一进一”"),
+            ("purpose", "他想出动右马。", basis.as_str(), "真实想法"),
         ];
-        for (expect, sections) in cases {
-            let errors = validate(&output("出动右马。", sections), &b, Detail::Normal).unwrap_err();
-            assert!(errors.iter().any(|e| e.contains(expect)), "{expect}: {errors:?}");
+        for (kind, text, claim, expect) in cases {
+            rejects(&b, kind, text, claim, expect);
         }
+        let errors = validate(&output("出动右马。", json!([{ "kind": "purpose", "text": "出动右马。", "claim_ids": [] }])), &b, Detail::Normal)
+            .unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("没有引用任何结论")), "{errors:?}");
         assert!(validate("{\"summary\":", &b, Detail::Normal).unwrap_err()[0].contains("JSON"));
         let long = "很长".repeat(200);
         let errors =
@@ -391,15 +386,57 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_analysis_forbids_verdict_words() {
+    fn numbers_are_left_to_the_program() {
+        let b = detailed_bundle(&[("h0g2", 30, &["h0g2", "h9g7"]), ("b0c2", 20, &["b0c2"])], true);
+        let cand = claim_of(&b, "candidate");
+        let reply = claim_of(&b, "reply");
+        let cases = [
+            // 评审中的反例：评分正负号反转、候选评分错配、深度写成分差
+            ("马二进三的评分为 -30。", cand.as_str(), "出现“30”"),
+            ("马八进七的评分是 +30。", cand.as_str(), "出现“30”"),
+            ("比第二个候选高约 10 分。", cand.as_str(), "出现“10”"),
+            // 用汉字写出的数值
+            ("马二进三的评分为负三十。", cand.as_str(), "出现“负三十”"),
+            ("当前搜索深度为二十。", cand.as_str(), "出现“二十”"),
+            ("评分为三。", cand.as_str(), "出现“三”"),
+            ("大约差了十分。", cand.as_str(), "出现“十分”"),
+        ];
+        for (text, claim, expect) in cases {
+            rejects(&b, "comparison", text, claim, expect);
+        }
+        // 普通的步数说法不是数值结论
+        let sections = json!([{ "kind": "reply", "text": "对方下一步可能出车，第一步先补士更稳。", "claim_ids": [reply] }]);
+        validate(&output("出动右马。", sections), &b, Detail::Normal).unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    #[test]
+    fn rank_verdict_and_mate_conclusions_are_left_to_the_program() {
+        let b = detailed_bundle(&[("h0g2", 30, &["h0g2", "h9g7"]), ("b0c2", 20, &["b0c2"])], true);
+        // 评审中的反例：第二候选引用自己的编号，却被称为首选
+        let second = b.pack.candidates[1].claim_id.clone();
+        rejects(&b, "comparison", "马八进七是本次搜索的首选。", &second, "“首选”属于");
+        let cand = claim_of(&b, "candidate");
+        for (text, word) in [("马二进三比马八进七更好。", "更好"), ("这步是一步好棋。", "好棋"), ("红方因此领先。", "领先")] {
+            rejects(&b, "comparison", text, &cand, &format!("“{word}”属于"));
+        }
+        // 评审中的反例：引用“本方可以杀棋”的结论，却说本方会被杀；没有将杀结论时说“已经形成将杀”
+        let mate = mate_bundle(true);
+        let mate_line = mate.pack.claims.iter().find(|c| c.kind == "mate_line").unwrap().id.clone();
+        rejects(&mate, "reply", "红方会被杀。", &mate_line, "“杀”属于");
+        rejects(&mate, "reply", "这步之后可以形成杀棋。", &mate_line, "“杀”属于");
+        let basis = claim_of(&b, "basis");
+        rejects(&b, "purpose", "这步已经形成将杀，黑方无法防住。", &basis, "“杀”属于");
+        // 程序评价为严重失误时，模型同样不写评价，由程序在依据中显示
+        let blunder = blunder_bundle();
+        assert_eq!(blunder.pack.verdict.as_ref().unwrap().tone, xq_core::explain::VerdictTone::Blunder);
+        let cmp = claim_of(&blunder, "comparison");
+        rejects(&blunder, "comparison", "这步是严重失误。", &cmp, "“失误”属于");
+    }
+
+    #[test]
+    fn incomplete_analysis_offers_no_best_line() {
         let b = detailed_bundle(&[("h2e2", 400, &["h2e2"]), ("h0g2", -100, &["h0g2"])], false);
         let cand = claim_of(&b, "candidate");
-        for word in ["首选", "失误", "不如"] {
-            let sections = json!([{ "kind": "comparison", "text": format!("这步{word}炮二平五。"), "claim_ids": [cand] }]);
-            let errors = validate(&output("出动右马。", sections), &b, Detail::Normal).unwrap_err();
-            assert!(errors.iter().any(|e| e.contains("分析尚未完成")), "{word}: {errors:?}");
-        }
-        // 没有确定的首选可演示
         let ok = validate(
             &output("出动右马。", json!([{ "kind": "comparison", "text": "候选比较还没有完成。", "claim_ids": [cand] }])),
             &b,
@@ -407,43 +444,6 @@ mod tests {
         )
         .unwrap();
         assert!(ok.followups.iter().all(|f| f.action != FollowupAction::ShowBest));
-    }
-
-    #[test]
-    fn mate_wording_needs_a_confirmed_cited_mate_claim() {
-        let text = "这步之后可以形成杀棋。";
-        // 尚未完成的搜索中的将杀：可信程度为 tentative，不能写成确定的杀棋
-        let tentative = mate_bundle(false);
-        let mate = tentative.pack.claims.iter().find(|c| c.kind == "mate_line").unwrap();
-        assert_eq!(mate.certainty, Certainty::Tentative);
-        let sections = json!([{ "kind": "reply", "text": text, "claim_ids": [mate.id] }]);
-        let errors = validate(&output("出动右马。", sections), &tentative, Detail::Normal).unwrap_err();
-        assert!(errors.iter().any(|e| e.contains("已经确认的将杀结论")), "{errors:?}");
-        // 完整分析中的精确将杀分：引用它时可以说，不引用时不行
-        let confirmed = mate_bundle(true);
-        let mate = confirmed.pack.claims.iter().find(|c| c.kind == "mate_line").unwrap();
-        assert_eq!(mate.certainty, Certainty::Supported);
-        let sections = json!([{ "kind": "reply", "text": text, "claim_ids": [mate.id] }]);
-        validate(&output("出动右马。", sections), &confirmed, Detail::Normal).unwrap_or_else(|e| panic!("{e:?}"));
-        let basis = claim_of(&confirmed, "basis");
-        let sections = json!([{ "kind": "purpose", "text": text, "claim_ids": [basis] }]);
-        let errors = validate(&output("出动右马。", sections), &confirmed, Detail::Normal).unwrap_err();
-        assert!(errors.iter().any(|e| e.contains("已经确认的将杀结论")), "{errors:?}");
-    }
-
-    #[test]
-    fn mistake_words_follow_program_verdict() {
-        // 实际着法比首选低 380 分：程序评价为严重失误，引用评价或比较时可以这样说
-        let b = blunder_bundle();
-        assert_eq!(b.pack.verdict.as_ref().unwrap().tone, VerdictTone::Blunder);
-        let cmp = claim_of(&b, "comparison");
-        let text = "这步是严重失误，比首选差得多。";
-        let sections = json!([{ "kind": "comparison", "text": text, "claim_ids": [cmp] }]);
-        validate(&output("炮五进四吃卒，但会丢炮。", sections), &b, Detail::Normal).unwrap_or_else(|e| panic!("{e:?}"));
-        let basis = claim_of(&b, "basis");
-        let sections = json!([{ "kind": "caution", "text": text, "claim_ids": [basis] }]);
-        let errors = validate(&output("炮五进四吃卒，但会丢炮。", sections), &b, Detail::Normal).unwrap_err();
-        assert!(errors.iter().any(|e| e.contains("同一段必须引用程序的评价")), "{errors:?}");
     }
 
     #[test]
