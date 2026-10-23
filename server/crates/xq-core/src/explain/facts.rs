@@ -16,12 +16,15 @@ use crate::types::Piece;
 use crate::types::PieceKind;
 use crate::types::Square;
 
-/// 受到攻击且没有保护，或攻击者价值更低的棋子。
+/// 受到威胁的棋子：对方吃下后己方无法吃回，或攻击者价值更低。
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Threat {
     pub square: Square,
     pub piece: Piece,
     pub attackers: Vec<Square>,
+    /// 吃下该子后己方无法合法吃回的攻击者。
+    pub unanswered: Vec<Square>,
+    /// 对方每一种吃法之后己方都能吃回（威胁只来自攻击者价值更低）。
     pub defended: bool,
 }
 
@@ -33,18 +36,33 @@ pub fn legal_attackers(board: &Board, sq: Square, by: Color) -> Vec<Square> {
     rules::attackers(board, sq, by).into_iter().filter(|from| rules::is_legal(&pos, Move::new(*from, sq))).collect()
 }
 
-/// 假设对方棋子来到 `sq`，`owner` 能否合法吃回。
+/// 对方用 `attacker` 吃掉 `sq` 上的棋子后，原主能合法吃回的棋子。
 ///
-/// 只看几何控制会把被牵制的棋子也当作保护；这里用合法走法判断，保护才是真实可用的。
-pub fn can_recapture(board: &Board, sq: Square, owner: Color) -> bool {
+/// 在棋盘上真正执行这次吃子：攻击者离开原位可能拆掉炮架或打开线路，回吃必须按吃子后的棋盘判断。
+pub fn recapturers(board: &Board, attacker: Square, sq: Square) -> Vec<Square> {
+    let Some(owner) = board.get(sq).map(|p| p.color) else { return Vec::new() };
+    legal_attackers(&board.applied(Move::new(attacker, sq)), sq, owner)
+}
+
+/// 对方暂时吃不到 `sq` 时，假设对方棋子来到这里，`owner` 能否合法吃掉它。
+fn covers(board: &Board, sq: Square, owner: Color) -> bool {
     let mut hypothetical = board.clone();
     hypothetical.set(sq, Some(Piece::new(owner.opposite(), PieceKind::Pawn)));
     !legal_attackers(&hypothetical, sq, owner).is_empty()
 }
 
-/// 该点上的棋子是否有可以合法回吃的保护。
+/// 该点上的棋子是否有真实可用的保护。
+///
+/// 对方能合法吃它时，逐一执行每一种吃法，每一种之后己方都能合法吃回才算有保护；
+/// 对方暂时吃不到时，按假设对方棋子来到此处判断。
 pub fn is_defended(board: &Board, sq: Square) -> bool {
-    board.get(sq).is_some_and(|p| can_recapture(board, sq, p.color))
+    let Some(piece) = board.get(sq) else { return false };
+    let attackers = legal_attackers(board, sq, piece.color.opposite());
+    if attackers.is_empty() {
+        covers(board, sq, piece.color)
+    } else {
+        attackers.iter().all(|a| !recapturers(board, *a, sq).is_empty())
+    }
 }
 
 /// 对方能合法吃掉该点棋子。
@@ -52,9 +70,27 @@ pub fn is_attacked_legally(board: &Board, sq: Square) -> bool {
     board.get(sq).is_some_and(|p| !legal_attackers(board, sq, p.color.opposite()).is_empty())
 }
 
-/// 某方处于受攻击状态的棋子，按价值从高到低。
+/// `protector` 对 `target` 上己方棋子的保护：对方吃掉目标后，它能否合法吃回。
 ///
-/// 只计入对方能合法吃子的攻击；“有保护”指对方用最便宜的攻击者吃下后，己方能合法吃回。
+/// 目标受到攻击时逐一执行对方的吃法，返回它能应对的攻击者，一个都应对不了时为 `None`；
+/// 目标暂未受到攻击时按假设判断，能保护时返回空列表。
+fn protection(board: &Board, protector: Square, target: Square) -> Option<Vec<Square>> {
+    let owner = board.get(target)?.color;
+    let recaptures = |b: Board| rules::is_legal(&Position::new(b, owner), Move::new(protector, target));
+    let attackers = legal_attackers(board, target, owner.opposite());
+    if attackers.is_empty() {
+        let mut probe = board.clone();
+        probe.set(target, Some(Piece::new(owner.opposite(), PieceKind::Pawn)));
+        return recaptures(probe).then(Vec::new);
+    }
+    let against: Vec<Square> =
+        attackers.into_iter().filter(|a| recaptures(board.applied(Move::new(*a, target)))).collect();
+    (!against.is_empty()).then_some(against)
+}
+
+/// 某方受到威胁的棋子，按价值从高到低。
+///
+/// 逐一执行对方每一种合法吃法：吃下后己方无法合法吃回，或攻击者价值更低（吃回也亏），都构成威胁。
 pub fn en_prise(board: &Board, color: Color) -> Vec<Threat> {
     let mut out = Vec::new();
     for (sq, piece) in board.pieces() {
@@ -62,11 +98,11 @@ pub fn en_prise(board: &Board, color: Color) -> Vec<Threat> {
             continue;
         }
         let attackers = legal_attackers(board, sq, color.opposite());
-        let Some(&cheapest) = attackers.iter().min_by_key(|a| value(board, **a)) else { continue };
-        let after = Position::new(board.applied(Move::new(cheapest, sq)), color);
-        let defended = !legal_attackers(&after.board, sq, color).is_empty();
-        if !defended || value(board, cheapest) < piece.value_at(sq) {
-            out.push(Threat { square: sq, piece, attackers, defended });
+        let unanswered: Vec<Square> =
+            attackers.iter().copied().filter(|a| recapturers(board, *a, sq).is_empty()).collect();
+        let cheaper = attackers.iter().any(|a| value(board, *a) < piece.value_at(sq));
+        if !unanswered.is_empty() || cheaper {
+            out.push(Threat { square: sq, piece, defended: unanswered.is_empty(), unanswered, attackers });
         }
     }
     out.sort_by_key(|t| -t.piece.value_at(t.square));
@@ -126,6 +162,9 @@ pub struct Relation {
     pub attacked: bool,
     /// 走子前目标是否已有保护。
     pub defended_before: bool,
+    /// 保护关系对应的对方吃子棋子：它们吃掉目标后，走动的棋子可以合法吃回。
+    /// 目标暂未受到攻击（按假设判断的保护）以及攻击关系时为空。
+    pub against: Vec<Square>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -145,6 +184,7 @@ pub struct LineChange {
     pub target: Square,
     pub target_piece: Piece,
     pub via: LineVia,
+    /// 这枚棋子吃掉目标后，对方能否合法吃回。
     pub target_defended: bool,
 }
 
@@ -227,7 +267,7 @@ fn line_changes(before: &Board, after: &Board, owner: Color, mv: Move) -> Vec<Li
                 target,
                 target_piece,
                 via,
-                target_defended: is_defended(after, target),
+                target_defended: !recapturers(after, sq, target).is_empty(),
             });
         }
     }
@@ -258,25 +298,29 @@ pub fn move_facts(pos: &Position, mv: Move) -> Option<MoveFacts> {
         if target_piece.kind == PieceKind::King || ctrl_before.contains(target) {
             continue;
         }
-        // 走到新位置的棋子若被牵制，它的攻击或保护并不能实际兑现
-        let mut probe = after.clone();
-        if target_piece.color == mover {
-            probe.set(*target, Some(Piece::new(enemy, PieceKind::Pawn)));
-        }
-        if !rules::is_legal(&Position::new(probe, mover), Move::new(mv.to, *target)) {
-            continue;
-        }
-        let relation = Relation {
-            target: *target,
-            target_piece,
-            defended: is_defended(after, *target),
-            attacked: is_attacked_legally(after, *target),
-            defended_before: before.get(*target) == Some(target_piece) && is_defended(before, *target),
-        };
+        let defended_before = before.get(*target) == Some(target_piece) && is_defended(before, *target);
         if target_piece.color == enemy {
-            new_attacks.push(relation);
-        } else {
-            new_protects.push(relation);
+            // 走到新位置的棋子若被牵制，它的攻击并不能实际兑现
+            if !rules::is_legal(&Position::new(after.clone(), mover), Move::new(mv.to, *target)) {
+                continue;
+            }
+            new_attacks.push(Relation {
+                target: *target,
+                target_piece,
+                defended: !recapturers(after, mv.to, *target).is_empty(),
+                attacked: true,
+                defended_before,
+                against: Vec::new(),
+            });
+        } else if let Some(against) = protection(after, mv.to, *target) {
+            new_protects.push(Relation {
+                target: *target,
+                target_piece,
+                defended: is_defended(after, *target),
+                attacked: is_attacked_legally(after, *target),
+                defended_before,
+                against,
+            });
         }
     }
 
@@ -287,6 +331,7 @@ pub fn move_facts(pos: &Position, mv: Move) -> Option<MoveFacts> {
             || target_piece.kind == PieceKind::King
             || ctrl_after.contains(target)
             || after.get(*target) != Some(target_piece)
+            || protection(before, mv.from, *target).is_none()
         {
             continue;
         }
@@ -298,6 +343,7 @@ pub fn move_facts(pos: &Position, mv: Move) -> Option<MoveFacts> {
                 defended,
                 attacked: is_attacked_legally(after, *target),
                 defended_before: true,
+                against: Vec::new(),
             });
         }
     }
@@ -487,6 +533,29 @@ mod tests {
         let threats = en_prise(&pos.board, Color::Red);
         let pawn = threats.iter().find(|t| t.square == sq("g3")).expect("兵应被视为受攻击且无有效保护");
         assert!(!pawn.defended);
+    }
+
+    #[test]
+    fn capturing_screen_is_not_a_protection() {
+        // 评审中的用例：炮走到 a3 后，黑车 c3 看似成为炮架；但黑车吃马时离开 c3，炮无法吃回
+        let pos = parse_position("3k5/9/9/9/9/C8/2r1N4/9/9/4K4 w").unwrap();
+        let f = move_facts(&pos, mv("a4a3")).unwrap();
+        assert!(f.new_protects.iter().all(|r| r.target != sq("e3")), "{:?}", f.new_protects);
+        assert!(!is_defended(&f.after.board, sq("e3")));
+        let horse = f.threats_after.iter().find(|t| t.square == sq("e3")).expect("马仍受到攻击");
+        assert_eq!(horse.unanswered, vec![sq("c3")]);
+    }
+
+    #[test]
+    fn protection_is_bound_to_the_capture() {
+        // 车平到马所在横线：黑车吃马后，红车可以吃回
+        let pos = parse_position("4rk3/9/9/9/4N4/R8/9/9/9/3K5 w").unwrap();
+        let f = move_facts(&pos, mv("a4a5")).unwrap();
+        let rel = f.new_protects.iter().find(|r| r.target == sq("e5")).expect("新增对马的保护");
+        assert!(rel.attacked && rel.defended && !rel.defended_before);
+        assert_eq!(rel.against, vec![sq("e9")]);
+        assert!(f.threats_before.iter().any(|t| t.square == sq("e5")));
+        assert!(f.threats_after.iter().all(|t| t.square != sq("e5")), "{:?}", f.threats_after);
     }
 
     #[test]

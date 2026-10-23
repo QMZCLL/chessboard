@@ -78,12 +78,33 @@ pub enum AnalysisOutcome {
     Terminal { status: GameStatus },
 }
 
+/// 分析记录的格式版本。结果结构或完整性判断改变时递增：旧格式的记录既不复用也不展示，
+/// 下次搜索时被覆盖。版本 1 起结果带有完整性信息。
+pub const ANALYSIS_FORMAT: u32 = 1;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisRecord {
     pub key: String,
     pub conditions: AnalysisConditions,
     pub outcome: AnalysisOutcome,
+    /// 早期记录没有该字段，读作 0。
+    #[serde(default)]
+    pub format: u32,
     pub created_at: i64,
+}
+
+impl AnalysisRecord {
+    pub fn is_current_format(&self) -> bool { self.format == ANALYSIS_FORMAT }
+
+    /// 能否代替一次新的搜索：当前格式，且是终局或完整一致的结果。
+    /// 不完整的结果只用于展示，再次请求时总是重新搜索。
+    pub fn reusable(&self) -> bool {
+        self.is_current_format()
+            && match &self.outcome {
+                AnalysisOutcome::Completed { result } => result.complete,
+                AnalysisOutcome::Terminal { .. } => true,
+            }
+    }
 }
 
 /// 某个走子节点的讲解状态。排队中的任务不计为已讲解，缺少环节的讲解不计为完成。

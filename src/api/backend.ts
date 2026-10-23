@@ -116,8 +116,9 @@ export const api = {
   setNote: (study_id: string, node_id: number, note: string, starred: boolean) =>
     call<T.StudyView>("set_note", { req: { study_id, node_id, note, starred } }),
   focusNode: (study_id: string, node_id: number) => call<void>("focus_node", { req: { study_id, node_id } }),
-  explainMove: (study_id: string, node_id: number, budget: T.Budget) =>
-    call<T.ExplanationRecord | null>("explain_move", { req: { study_id, node_id, budget } }),
+  /** retry 为 true 时，部分完成的讲解重新分析，不复用不完整的结果。 */
+  explainMove: (study_id: string, node_id: number, budget: T.Budget, retry = false) =>
+    call<T.ExplanationRecord | null>("explain_move", { req: { study_id, node_id, budget, retry } }),
   analyzePosition: (study_id: string, node_id: number, budget: T.Budget, request_id: string) =>
     call<void>("analyze_position", { req: { study_id, node_id, budget, request_id } }),
   cancelAnalysis: (requestId: string) => call<void>("cancel_analysis", { requestId }),

@@ -417,6 +417,20 @@ export async function explainDeeper() {
   }
 }
 
+/** 重试部分完成的讲解：按原来的分析预算重新搜索。 */
+export async function retryExplanation() {
+  const s = study.value;
+  if (!s || !selectedNode.value?.mv) return;
+  const nodeId = wb.selected;
+  const budget = wb.detail?.explanation?.budget ?? "quick";
+  try {
+    // 后台开始重新分析时会推送“进行中”的讲解记录，完成后再推送结果
+    await api.explainMove(s.id, nodeId, budget, true);
+  } catch (e) {
+    notify("error", errorMessage(e));
+  }
+}
+
 /** 在棋盘上走子：记录走法或建立分支；先想后讲模式下作为用户的思考结果。 */
 export async function playMove(mv: T.Move) {
   const s = study.value;

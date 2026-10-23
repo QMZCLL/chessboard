@@ -131,7 +131,21 @@ pub(crate) struct ExplainTask {
     pub priority: Priority,
     /// false 时只生成基本讲解。
     pub detailed: bool,
+    /// 用户明确要求重试：部分完成的讲解重新分析。
+    pub retry: bool,
 }
+
+/// 讲解线程处理的消息。
+///
+/// 引擎任务结束后的处理也交回讲解线程执行：确认代次、写入讲解与登记新请求都在同一线程上依次进行，
+/// 已被取代的旧结果不会在新结果写入之后才落盘。
+pub(crate) enum ExplainMsg {
+    Task(ExplainTask),
+    Continue(Box<dyn FnOnce(&Inner) + Send>),
+}
+
+/// 测试用的钩子：讲解结果确认仍是最新请求、尚未写入时调用，参数为会话、节点与分析预算。
+pub type CommitHook = Arc<dyn Fn(&str, NodeId, Budget) + Send + Sync>;
 
 pub(crate) struct Inner {
     pub(crate) paths: AppPaths,
@@ -148,7 +162,8 @@ pub(crate) struct Inner {
     pub(crate) focus: Mutex<Option<(String, NodeId)>>,
     /// 每次讲解记录变化递增；视图与事件都带上它，界面据此识别过期的视图。
     pub(crate) explain_seq: AtomicU64,
-    pub(crate) explain_tx: Mutex<Sender<ExplainTask>>,
+    pub(crate) explain_tx: Mutex<Sender<ExplainMsg>>,
+    pub(crate) commit_hook: Mutex<Option<CommitHook>>,
     pub(crate) capture_backend: Arc<dyn CaptureBackend>,
     pub(crate) capture: Mutex<Option<CaptureSession>>,
     pub(crate) capture_state: Mutex<CaptureState>,
@@ -183,7 +198,7 @@ impl AppService {
             engine_spec(&paths, &loaded.config),
             Box::new(move |state: &EngineState| events::emit(engine_events.as_ref(), events::ENGINE_STATUS, state)),
         )?;
-        let (tx, rx) = mpsc::channel::<ExplainTask>();
+        let (tx, rx) = mpsc::channel::<ExplainMsg>();
         let inner = Arc::new_cyclic(|weak| Inner {
             paths,
             config: RwLock::new(loaded.config),
@@ -198,6 +213,7 @@ impl AppService {
             focus: Mutex::new(None),
             explain_seq: AtomicU64::new(0),
             explain_tx: Mutex::new(tx),
+            commit_hook: Mutex::new(None),
             capture_backend,
             capture: Mutex::new(None),
             capture_state: Mutex::new(CaptureState::Idle),
@@ -207,12 +223,19 @@ impl AppService {
         thread::Builder::new()
             .name("explain".into())
             .spawn(move || {
-                while let Ok(task) = rx.recv() {
+                while let Ok(msg) = rx.recv() {
                     let Some(inner) = weak.upgrade() else { break };
-                    let (study, node) = (task.study_id.clone(), task.node_id);
+                    let what = match &msg {
+                        ExplainMsg::Task(task) => format!("会话 {}，节点 {}", task.study_id, task.node_id),
+                        ExplainMsg::Continue(_) => "处理引擎结果".to_string(),
+                    };
+                    let run = std::panic::AssertUnwindSafe(|| match msg {
+                        ExplainMsg::Task(task) => inner.process_explain(task),
+                        ExplainMsg::Continue(step) => step(&inner),
+                    });
                     // 单个讲解任务出错时记录下来，讲解线程继续处理其他任务
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.process_explain(task))).is_err() {
-                        inner.notice(format!("生成讲解时出错（会话 {study}，节点 {node}），已跳过"));
+                    if std::panic::catch_unwind(run).is_err() {
+                        inner.notice(format!("生成讲解时出错（{what}），已跳过"));
                     }
                 }
             })
@@ -255,6 +278,10 @@ impl AppService {
     }
 
     pub fn restart_engine(&self) { self.inner.engine.restart(); }
+
+    /// 测试用：设置讲解写入前的钩子，用来构造并发交错。
+    #[doc(hidden)]
+    pub fn set_commit_hook(&self, hook: Option<CommitHook>) { *lock(&self.inner.commit_hook) = hook; }
 
     pub fn list_studies(&self) -> ApiResult<Vec<StudySummary>> {
         let mut list: Vec<StudySummary> = self
@@ -500,8 +527,15 @@ impl AppService {
     /// 返回已有讲解，并在需要时排队生成更详细的讲解。
     pub fn explain_move(&self, req: ExplainRequest) -> ApiResult<Option<ExplanationRecord>> {
         let record = self.inner.store.load_explanation(&req.study_id, req.node_id)?;
-        // 是否需要重新分析（设置是否改变、上次是否不完整）由讲解线程判断
-        self.inner.enqueue(&req.study_id, req.node_id, req.budget, Priority::Interactive, true);
+        // 是否需要重新分析（设置是否改变、是否要求重试）由讲解线程判断
+        self.inner.send_explain(ExplainMsg::Task(ExplainTask {
+            study_id: req.study_id,
+            node_id: req.node_id,
+            budget: req.budget,
+            priority: Priority::Interactive,
+            detailed: true,
+            retry: req.retry,
+        }));
         Ok(record)
     }
 
@@ -600,8 +634,17 @@ impl Inner {
     }
 
     pub(crate) fn enqueue(&self, study_id: &str, node_id: NodeId, budget: Budget, priority: Priority, detailed: bool) {
-        let task = ExplainTask { study_id: study_id.to_string(), node_id, budget, priority, detailed };
-        if lock(&self.explain_tx).send(task).is_err() {
+        let task = ExplainTask { study_id: study_id.to_string(), node_id, budget, priority, detailed, retry: false };
+        self.send_explain(ExplainMsg::Task(task));
+    }
+
+    /// 在讲解线程上继续处理（用于引擎任务的回调）。
+    pub(crate) fn on_explain_thread(&self, step: impl FnOnce(&Inner) + Send + 'static) {
+        self.send_explain(ExplainMsg::Continue(Box::new(step)));
+    }
+
+    fn send_explain(&self, msg: ExplainMsg) {
+        if lock(&self.explain_tx).send(msg).is_err() {
             error!("讲解线程已停止");
         }
     }

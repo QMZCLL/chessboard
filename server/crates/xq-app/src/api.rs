@@ -98,6 +98,9 @@ pub struct ExplainRequest {
     pub study_id: String,
     pub node_id: NodeId,
     pub budget: Budget,
+    /// 用户明确要求重试：部分完成的讲解重新分析，不复用不完整的结果。
+    #[serde(default)]
+    pub retry: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

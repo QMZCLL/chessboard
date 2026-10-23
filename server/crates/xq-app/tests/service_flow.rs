@@ -40,14 +40,21 @@ impl EventSink for Recorder {
 
 impl Recorder {
     fn wait(&self, what: &str, pred: impl Fn(&str, &Value) -> bool) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(60);
+        self.wait_for(Duration::from_secs(60), pred).unwrap_or_else(|| panic!("等待事件超时：{what}"))
+    }
+
+    /// 在限定时间内等待事件，超时返回 None。
+    fn wait_for(&self, timeout: Duration, pred: impl Fn(&str, &Value) -> bool) -> Option<Value> {
+        let deadline = Instant::now() + timeout;
         let mut events = self.events.lock().unwrap();
         loop {
             if let Some((_, v)) = events.iter().find(|(e, v)| pred(e, v)) {
-                return v.clone();
+                return Some(v.clone());
             }
             let left = deadline.saturating_duration_since(Instant::now());
-            assert!(!left.is_zero(), "等待事件超时：{what}");
+            if left.is_zero() {
+                return None;
+            }
             events = self.signal.wait_timeout(events, left).unwrap().0;
         }
     }
@@ -437,7 +444,7 @@ fn explanation_reruns_after_settings_change() {
     let mut cfg = service.status().config;
     cfg.analysis.quick_depth = 7;
     service.update_config(cfg).unwrap();
-    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Quick }).unwrap();
+    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Quick, retry: false }).unwrap();
     let ev = rec.wait("按新设置重新讲解", |e, v| {
         e == "explanation_updated"
             && v["node_id"] == node
@@ -521,7 +528,7 @@ fn late_quick_result_never_overwrites_deep() {
     let sid = created.study.study.id.clone();
     let node = 1;
     std::thread::sleep(Duration::from_millis(300));
-    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Deep }).unwrap();
+    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Deep, retry: false }).unwrap();
     rec.wait("深入分析完成", |e, v| {
         e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed" && v["record"]["budget"] == "deep"
     });
@@ -530,6 +537,101 @@ fn late_quick_result_never_overwrites_deep() {
     let detail = service.node_detail(NodeRef { study_id: sid.clone(), node_id: node }).unwrap();
     let record = detail.explanation.unwrap();
     assert_eq!(record.budget, Some(Budget::Deep), "较晚结束的快速分析不能覆盖深入分析");
+    assert!(!record.pending);
+    service.shutdown();
+}
+
+#[test]
+fn retry_searches_again_instead_of_reusing_incomplete_analysis() {
+    // 第一次搜索：深度 1 的完整一轮是 [炮二平五 +400, 马二进三 -100]，深度 2 只更新了第一名且最终着法变为马二进三，
+    // 结果不完整。第二次搜索给出完整一致的候选。
+    let script = "@go\n\
+        info depth 1 seldepth 1 multipv 1 score cp 400 nodes 10 time 1 pv h2e2\n\
+        info depth 1 seldepth 1 multipv 2 score cp -100 nodes 10 time 1 pv h0g2\n\
+        info depth 2 seldepth 2 multipv 1 score cp 500 nodes 20 time 2 pv h0g2\n\
+        bestmove h0g2\n\
+        @go\n\
+        info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2\n\
+        info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2\n\
+        bestmove h2e2\n";
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h0g2"), variation: false }).unwrap().node_id.unwrap();
+    let ev = rec.wait("部分讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "partial");
+    let expl = &ev["record"]["explanation"];
+    // 引擎最终选择的正是马二进三：不完整的候选不能把它判为失误
+    assert_eq!(expl["verdict"]["tone"], "unclear", "{expl}");
+    let comparison = expl["comparison"].to_string();
+    assert!(!comparison.contains("严重失误") && !comparison.contains("低约"), "{comparison}");
+
+    // 普通查看不重新分析部分完成的讲解
+    rec.clear();
+    let view = |retry| ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Quick, retry };
+    service.explain_move(view(false)).unwrap();
+    let rerun = rec.wait_for(Duration::from_millis(400), |e, v| e == "explanation_updated" && v["node_id"] == node);
+    assert!(rerun.is_none(), "{rerun:?}");
+    // 明确重试：不复用不完整的分析，引擎收到第二次搜索
+    service.explain_move(view(true)).unwrap();
+    let ev = rec.wait("重试后的详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+    let expl = &ev["record"]["explanation"];
+    assert_eq!(expl["level"], "detailed");
+    assert_eq!(expl["verdict"]["tone"], "close", "{expl}");
+    assert_eq!(expl["candidates"][0]["score"]["value"], 30, "使用第二次搜索的结果");
+    service.shutdown();
+}
+
+#[test]
+fn superseded_result_cannot_commit_after_newer_request() {
+    // 第一次搜索：起始局面的深入分析（进入缓存）；第二次：炮二平五的快速讲解
+    let script = "@go\n\
+        info depth 1 seldepth 1 multipv 1 score cp 35 nodes 10 time 1 pv h2e2\n\
+        info depth 1 seldepth 1 multipv 2 score cp 25 nodes 10 time 1 pv h0g2\n\
+        bestmove h2e2\n\
+        @go\n\
+        info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2\n\
+        info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2\n\
+        bestmove h2e2\n";
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    service
+        .analyze_position(AnalyzeRequest { study_id: sid.clone(), node_id: ROOT, budget: Budget::Deep, request_id: "deep".into() })
+        .unwrap();
+    rec.wait("深入分析进入缓存", |e, v| e == "analysis_done" && v["request_id"] == "deep");
+
+    // 快速讲解确认仍是最新请求后、写入前暂停
+    let (paused_tx, paused_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel::<()>();
+    let gate = Mutex::new(Some((paused_tx, resume_rx)));
+    service.set_commit_hook(Some(Arc::new(move |_: &str, _, budget| {
+        if budget == Budget::Quick
+            && let Some((paused, resume)) = gate.lock().unwrap().take()
+        {
+            paused.send(()).unwrap();
+            resume.recv().unwrap();
+        }
+    })));
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    paused_rx.recv_timeout(Duration::from_secs(30)).expect("快速讲解应进入提交");
+
+    // 暂停期间提交深入讲解：它命中缓存，但必须等旧任务提交完毕才能登记与写入
+    service.explain_move(ExplainRequest { study_id: sid.clone(), node_id: node, budget: Budget::Deep, retry: false }).unwrap();
+    let is_deep = |e: &str, v: &Value| e == "explanation_updated" && v["node_id"] == node && v["record"]["budget"] == "deep";
+    let early = rec.wait_for(Duration::from_millis(500), is_deep);
+    assert!(early.is_none(), "旧任务提交期间不能插入新的写入：{early:?}");
+    resume_tx.send(()).unwrap();
+    rec.wait("深入讲解", |e, v| is_deep(e, v) && v["status"] == "detailed");
+    let record = service.node_detail(NodeRef { study_id: sid.clone(), node_id: node }).unwrap().explanation.unwrap();
+    assert_eq!(record.budget, Some(Budget::Deep), "旧的快速讲解不能覆盖深入讲解");
     assert!(!record.pending);
     service.shutdown();
 }

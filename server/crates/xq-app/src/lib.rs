@@ -20,3 +20,4 @@ pub use service::ApiError;
 pub use service::ApiResult;
 pub use service::AppPaths;
 pub use service::AppService;
+pub use service::CommitHook;

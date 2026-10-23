@@ -11,9 +11,9 @@ import {
   cancelAnalysis,
   cloudLookup,
   explainDeeper,
-  loadDetail,
   newestRecord,
   nodeOf,
+  retryExplanation,
   reveal,
   saveNote,
   selectedNode,
@@ -94,7 +94,7 @@ const thinkSide = computed(() => {
                 <div v-if="record?.pending" class="pending"><n-spin size="small" /> 正在用引擎比较候选与主要应对，完成后自动补充…</div>
                 <n-alert v-if="!record?.pending && (record?.error || expl.level === 'partial')" type="warning" :show-icon="false" class="alert">
                   讲解尚不完整{{ record?.error ? `：${record.error}` : "，下面的提示说明了缺少的部分" }}
-                  <n-button size="tiny" quaternary @click="loadDetail">重试</n-button>
+                  <n-button size="tiny" quaternary @click="retryExplanation">重试</n-button>
                 </n-alert>
 
                 <h4>当前需求</h4>
