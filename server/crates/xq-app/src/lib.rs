@@ -9,6 +9,7 @@ mod capture_glue;
 pub mod config;
 pub mod engine;
 pub mod events;
+pub mod llm;
 mod pipeline;
 pub mod records;
 mod service;

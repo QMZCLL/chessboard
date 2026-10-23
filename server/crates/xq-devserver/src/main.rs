@@ -94,6 +94,10 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
             Ok(Value::Null)
         }
         "explain_move" => to_value(service.explain_move(arg(args, "req")?)?),
+        "coach_explain" => to_value(service.coach_explain(arg(args, "req")?)?),
+        "coach_cancel" => to_value(service.coach_cancel(arg(args, "req")?)?),
+        "coach_view" => to_value(service.coach_view(arg(args, "req")?)?),
+        "set_coach_credential" => to_value(service.set_coach_credential(arg(args, "req")?)?),
         "analyze_position" => to_value(service.analyze_position(arg(args, "req")?)?),
         "cancel_analysis" => {
             service.cancel_analysis(&arg::<String>(args, "requestId")?);

@@ -21,7 +21,10 @@ use xq_core::validate::ValidationReport;
 use crate::capture::CaptureState;
 use crate::capture::RecognitionStatus;
 use crate::config::AppConfig;
+use crate::config::Audience;
+use crate::config::Detail;
 use crate::engine::EngineState;
+use crate::llm::CoachView;
 use crate::records::Budget;
 use crate::records::CloudRecord;
 use crate::records::ExplainStatus;
@@ -103,6 +106,39 @@ pub struct ExplainRequest {
     pub retry: bool,
 }
 
+/// 生成某一着的 AI 讲解。证据、局面与搜索结果都由后台读取，不由界面传入。
+#[derive(Clone, Debug, Deserialize)]
+pub struct CoachExplainRequest {
+    pub study_id: String,
+    pub node_id: NodeId,
+    /// 为空时使用设置中的学习水平与详细程度。
+    #[serde(default)]
+    pub audience: Option<Audience>,
+    #[serde(default)]
+    pub detail: Option<Detail>,
+    /// 忽略已有结果与缓存，重新生成。
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CoachCredentialRequest {
+    /// 为空时清除已保存的密钥。
+    pub key: Option<String>,
+}
+
+/// AI 讲解是否可用。只说明密钥是否已配置，不返回密钥本身。
+#[derive(Clone, Debug, Serialize)]
+pub struct CoachAvailability {
+    pub enabled: bool,
+    pub ready: bool,
+    pub key_configured: bool,
+    pub reason: Option<String>,
+    pub model_label: String,
+    pub used_today: u32,
+    pub daily_budget: u32,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct NoteRequest {
     pub study_id: String,
@@ -168,6 +204,8 @@ pub struct NodeDetail {
     pub position: PositionExplanation,
     /// 走子节点的逐着讲解。
     pub explanation: Option<ExplanationRecord>,
+    /// 走子节点的 AI 讲解状态。
+    pub coach: Option<CoachView>,
     pub cloud: Option<CloudRecord>,
 }
 
@@ -193,6 +231,7 @@ pub struct AppStatus {
     pub recognition: RecognitionStatus,
     pub capture: CaptureState,
     pub config: AppConfig,
+    pub coach: CoachAvailability,
     pub notices: Vec<String>,
     pub log_dir: String,
     pub data_dir: String,

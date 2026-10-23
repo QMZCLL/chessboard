@@ -12,6 +12,7 @@ use xq_app::capture::CaptureState;
 use xq_app::capture::Snapshot;
 use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
+use xq_app::llm::CoachView;
 use xq_app::records::ExplanationRecord;
 
 use crate::StartupError;
@@ -124,6 +125,30 @@ pub async fn set_note(state: State<'_, AppService>, req: NoteRequest) -> ApiResu
 pub async fn focus_node(state: State<'_, AppService>, req: NodeRef) -> ApiResult<()> {
     service(&state).focus_node(req);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn coach_explain(state: State<'_, AppService>, req: CoachExplainRequest) -> ApiResult<CoachView> {
+    let s = service(&state);
+    blocking(move || s.coach_explain(req)).await
+}
+
+#[tauri::command]
+pub async fn coach_cancel(state: State<'_, AppService>, req: NodeRef) -> ApiResult<CoachView> {
+    let s = service(&state);
+    blocking(move || s.coach_cancel(req)).await
+}
+
+#[tauri::command]
+pub async fn coach_view(state: State<'_, AppService>, req: NodeRef) -> ApiResult<CoachView> {
+    let s = service(&state);
+    blocking(move || s.coach_view(req)).await
+}
+
+#[tauri::command]
+pub async fn set_coach_credential(state: State<'_, AppService>, req: CoachCredentialRequest) -> ApiResult<AppStatus> {
+    let s = service(&state);
+    blocking(move || s.set_coach_credential(req)).await
 }
 
 #[tauri::command]

@@ -59,6 +59,8 @@ export const wb = reactive({
   records: {} as Record<number, T.ExplanationRecord>,
   /** 已收到的最大讲解序号 */
   explainSeq: 0,
+  /** AI 讲解状态（按节点），来自节点详情与 coach_updated 事件 */
+  coach: {} as Record<number, T.CoachView>,
   capture: { state: "idle" } as T.CaptureState,
   followLive: true,
   dialogs: { newStudy: false, capture: false, settings: false, studies: false },
@@ -127,6 +129,7 @@ export async function boot() {
   });
   on<T.ExplanationEvent>("explanation_updated", onExplanation);
   on<T.StudyUpdatedEvent>("study_updated", onStudyUpdated);
+  on<T.CoachView>("coach_updated", onCoach);
   on<T.AnalysisProgressEvent>("analysis_progress", (p) => {
     const a = wb.analysis;
     if (!a || a.requestId !== p.request_id) return;
@@ -217,6 +220,68 @@ function onExplanation(p: T.ExplanationEvent) {
   }
 }
 
+/**
+ * 两份 AI 讲解状态中较新的一份：先比较记录的更新时间；相同时以后到达的为准
+ * （证据更新、设置改变时状态会变而记录不变）。
+ */
+function newerCoach(a: T.CoachView | undefined, b: T.CoachView): T.CoachView {
+  if (!a) return b;
+  return (a.record?.updated_at ?? 0) > (b.record?.updated_at ?? 0) ? a : b;
+}
+
+function onCoach(p: T.CoachView) {
+  if (!wb.view || wb.view.study.id !== p.study_id) return;
+  wb.coach[p.node_id] = newerCoach(wb.coach[p.node_id], p);
+}
+
+/** 当前节点的 AI 讲解状态。 */
+export const coachView = computed(() => (selectedNode.value?.mv ? (wb.coach[wb.selected] ?? null) : null));
+
+/** 生成（或重新生成）当前这一着的 AI 讲解。 */
+export async function requestCoach(refresh = false) {
+  const s = study.value;
+  if (!s || !selectedNode.value?.mv) return;
+  const nodeId = wb.selected;
+  try {
+    const view = await api.coachExplain(s.id, nodeId, refresh);
+    if (study.value?.id === s.id) wb.coach[nodeId] = newerCoach(wb.coach[nodeId], view);
+  } catch (e) {
+    notify("error", errorMessage(e));
+  }
+}
+
+export async function cancelCoach() {
+  const s = study.value;
+  if (!s) return;
+  try {
+    await api.coachCancel(s.id, wb.selected);
+  } catch (e) {
+    notify("error", errorMessage(e));
+  }
+}
+
+/** 设置或密钥改变后，重新获取当前这一着的 AI 讲解状态。 */
+export async function refreshCoach() {
+  const s = study.value;
+  if (!s || !selectedNode.value?.mv) return;
+  const nodeId = wb.selected;
+  try {
+    const view = await api.coachView(s.id, nodeId);
+    if (study.value?.id !== s.id) return;
+    wb.coach[nodeId] = newerCoach(wb.coach[nodeId], view);
+    if (!thinking.value) autoCoach(wb.coach[nodeId]);
+  } catch (e) {
+    notify("error", errorMessage(e));
+  }
+}
+
+/** 设置为“查看时自动生成”时，还没有结果或结果已过期就排队生成；已有有效结果直接使用。 */
+function autoCoach(view: T.CoachView | null) {
+  const status = wb.status;
+  if (!view || !status?.coach.ready || status.config.coach.auto_explain_scope !== "viewed") return;
+  if (view.status === "none" || view.status === "stale") void requestCoach(false);
+}
+
 async function onStudyUpdated(p: T.StudyUpdatedEvent) {
   if (!wb.view || wb.view.study.id !== p.study_id || p.revision <= wb.view.study.revision) return;
   const previousLive = wb.view.study.live_node;
@@ -262,6 +327,7 @@ function setView(view: T.StudyView) {
     wb.revealed = {};
     wb.attempts = {};
     wb.records = {};
+    wb.coach = {};
     wb.analysis = null;
   }
   wb.view = view;
@@ -363,6 +429,10 @@ export async function loadDetail() {
     detail.explanation = newestRecord(detail.explanation, wb.records[nodeId]);
     wb.detail = detail;
     wb.detailError = null;
+    if (detail.coach) {
+      wb.coach[nodeId] = newerCoach(wb.coach[nodeId], detail.coach);
+      if (!thinking.value) autoCoach(wb.coach[nodeId]);
+    }
     // 走子节点：由后台判断讲解是否缺失、不完整或因设置改变而过期，需要时重新排队
     if (detail.node.mv && !detail.explanation?.pending) {
       const record = await api.explainMove(s.id, nodeId, "quick");
@@ -393,6 +463,7 @@ async function loadThinkBase() {
 
 export function reveal(id = wb.selected) {
   wb.revealed[id] = true;
+  if (id === wb.selected) autoCoach(wb.coach[id] ?? null);
 }
 
 export async function setMode(mode: "auto" | "think") {

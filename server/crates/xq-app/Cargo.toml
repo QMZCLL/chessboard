@@ -22,3 +22,5 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 
 [dev-dependencies]
 tempfile = "3"
+# 测试中模拟语言模型服务
+tiny_http = "0.12"

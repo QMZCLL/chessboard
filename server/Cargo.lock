@@ -6480,6 +6480,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "tiny_http",
  "tracing",
  "uuid",
  "xq-core",

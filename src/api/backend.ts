@@ -45,6 +45,7 @@ const EVENTS = [
   "study_updated",
   "capture_state",
   "cloud_result",
+  "coach_updated",
 ] as const;
 export type EventName = (typeof EVENTS)[number];
 
@@ -119,6 +120,12 @@ export const api = {
   /** retry 为 true 时，部分完成的讲解重新分析，不复用不完整的结果。 */
   explainMove: (study_id: string, node_id: number, budget: T.Budget, retry = false) =>
     call<T.ExplanationRecord | null>("explain_move", { req: { study_id, node_id, budget, retry } }),
+  coachExplain: (study_id: string, node_id: number, refresh = false) =>
+    call<T.CoachView>("coach_explain", { req: { study_id, node_id, refresh } }),
+  coachCancel: (study_id: string, node_id: number) => call<T.CoachView>("coach_cancel", { req: { study_id, node_id } }),
+  coachView: (study_id: string, node_id: number) => call<T.CoachView>("coach_view", { req: { study_id, node_id } }),
+  /** 保存或清除模型服务的密钥（只写入后台凭据文件，不会再返回界面）。 */
+  setCoachCredential: (key: string | null) => call<T.AppStatus>("set_coach_credential", { req: { key } }),
   analyzePosition: (study_id: string, node_id: number, budget: T.Budget, request_id: string) =>
     call<void>("analyze_position", { req: { study_id, node_id, budget, request_id } }),
   cancelAnalysis: (requestId: string) => call<void>("cancel_analysis", { requestId }),

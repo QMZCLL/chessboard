@@ -125,6 +125,8 @@ export interface CandidateView {
   summary: string;
 }
 
+export type ExplainLevel = "basic" | "partial" | "detailed";
+
 export type VerdictTone = "best" | "close" | "inaccuracy" | "mistake" | "blunder" | "unclear";
 
 export interface Verdict {
@@ -136,7 +138,7 @@ export interface Verdict {
 
 export interface MoveExplanation {
   generator_version: number;
-  level: "basic" | "partial" | "detailed";
+  level: ExplainLevel;
   mover: Color;
   mv: Move;
   notation: string;
@@ -202,6 +204,8 @@ export interface NodeDetail {
   repetition: number;
   position: PositionExplanation;
   explanation: ExplanationRecord | null;
+  /** 走子节点的 AI 讲解状态。 */
+  coach: CoachView | null;
   cloud: CloudRecord | null;
 }
 
@@ -346,6 +350,98 @@ export interface AppConfig {
     model: string | null;
   };
   cloud: { enabled: boolean; timeout_ms: number };
+  coach: CoachConfig;
+}
+
+export type CoachProvider = "openai" | "deepseek" | "ollama";
+export type Audience = "beginner" | "intermediate" | "advanced";
+export type Detail = "brief" | "normal" | "deep";
+export type CoachScope = "off" | "viewed";
+
+/** AI 讲解设置。密钥不在配置中：credential_ref 只是引用（store:coach 或 env:变量名）。 */
+export interface CoachConfig {
+  enabled: boolean;
+  provider: CoachProvider;
+  base_url: string;
+  model: string;
+  credential_ref: string | null;
+  timeout_ms: number;
+  max_output_tokens: number;
+  max_parallel_requests: number;
+  daily_request_budget: number;
+  auto_explain_scope: CoachScope;
+  audience: Audience;
+  detail: Detail;
+}
+
+export interface CoachAvailability {
+  enabled: boolean;
+  ready: boolean;
+  key_configured: boolean;
+  reason: string | null;
+  model_label: string;
+  used_today: number;
+  daily_budget: number;
+}
+
+export interface AllowedClaim {
+  id: string;
+  kind: string;
+  group: string;
+  statement: string;
+  evidence_ids: string[];
+  certainty: Certainty;
+}
+
+export interface CoachText {
+  text: string;
+  claim_ids: string[];
+}
+
+export type SectionKind = "purpose" | "reason" | "comparison" | "reply" | "caution";
+
+export interface CoachSection extends CoachText {
+  kind: SectionKind;
+}
+
+export interface Followup {
+  action: "show_reply" | "show_best" | "compare_alternative";
+  label: string;
+  evidence_id: string | null;
+}
+
+export interface CoachResult {
+  output: { summary: CoachText; sections: CoachSection[]; lesson: CoachText; followups: Followup[] };
+  claims: AllowedClaim[];
+  evidence: Evidence[];
+  evidence_revision: string;
+  cache_key: string;
+  model_label: string;
+  audience: Audience;
+  detail: Detail;
+  created_at: number;
+}
+
+export interface CoachRecord {
+  study_id: string;
+  node_id: number;
+  state: "idle" | "queued" | "running" | "ready" | "failed";
+  waiting_evidence: boolean;
+  generation: number;
+  result: CoachResult | null;
+  error: string | null;
+  updated_at: number;
+}
+
+/** disabled 未启用或未配置；none 尚未生成；stale 已有结果但依据或设置已改变。 */
+export type CoachStatus = "disabled" | "none" | "queued" | "running" | "ready" | "failed" | "stale";
+
+export interface CoachView {
+  study_id: string;
+  node_id: number;
+  status: CoachStatus;
+  reason: string | null;
+  record: CoachRecord | null;
 }
 
 export interface AppStatus {
@@ -354,6 +450,7 @@ export interface AppStatus {
   recognition: RecognitionStatus;
   capture: CaptureState;
   config: AppConfig;
+  coach: CoachAvailability;
   notices: string[];
   log_dir: string;
   data_dir: string;

@@ -46,6 +46,7 @@ use crate::engine::EngineState;
 use crate::engine::Priority;
 use crate::events;
 use crate::events::EventSink;
+use crate::llm::service::CoachRuntime;
 use crate::records::Budget;
 use crate::records::ExplainStatus;
 use crate::records::ExplanationRecord;
@@ -164,6 +165,7 @@ pub(crate) struct Inner {
     pub(crate) explain_seq: AtomicU64,
     pub(crate) explain_tx: Mutex<Sender<ExplainMsg>>,
     pub(crate) commit_hook: Mutex<Option<CommitHook>>,
+    pub(crate) coach: CoachRuntime,
     pub(crate) capture_backend: Arc<dyn CaptureBackend>,
     pub(crate) capture: Mutex<Option<CaptureSession>>,
     pub(crate) capture_state: Mutex<CaptureState>,
@@ -199,6 +201,7 @@ impl AppService {
             Box::new(move |state: &EngineState| events::emit(engine_events.as_ref(), events::ENGINE_STATUS, state)),
         )?;
         let (tx, rx) = mpsc::channel::<ExplainMsg>();
+        let (coach_tx, coach_rx) = mpsc::channel();
         let inner = Arc::new_cyclic(|weak| Inner {
             paths,
             config: RwLock::new(loaded.config),
@@ -214,6 +217,7 @@ impl AppService {
             explain_seq: AtomicU64::new(0),
             explain_tx: Mutex::new(tx),
             commit_hook: Mutex::new(None),
+            coach: CoachRuntime::new(coach_tx),
             capture_backend,
             capture: Mutex::new(None),
             capture_state: Mutex::new(CaptureState::Idle),
@@ -240,6 +244,7 @@ impl AppService {
                 }
             })
             .map_err(|e| format!("无法启动讲解线程：{e}"))?;
+        crate::llm::service::spawn_workers(Arc::downgrade(&inner), coach_rx)?;
         Ok(Self { inner })
     }
 
@@ -258,6 +263,7 @@ impl AppService {
             recognition: inner.capture_backend.status(),
             capture: lock(&inner.capture_state).clone(),
             config: inner.config_snapshot(),
+            coach: inner.coach_availability(),
             notices: lock(&inner.notices).iter().cloned().collect(),
             log_dir: inner.paths.log_dir.display().to_string(),
             data_dir: inner.paths.data_dir.display().to_string(),
@@ -435,6 +441,7 @@ impl AppService {
             self.inner.engine.cancel_group(&explain_group(id, n));
         }
         lock(&self.inner.studies).remove(id);
+        self.inner.coach_forget(id, None);
         self.inner.store.delete_study(id)?;
         Ok(())
     }
@@ -491,6 +498,7 @@ impl AppService {
             self.inner.engine.cancel_group(&explain_group(&r.study_id, *n));
             lock(&self.inner.inflight).remove(&(r.study_id.clone(), *n));
         }
+        self.inner.coach_forget(&r.study_id, Some(&removed));
         self.inner.store.delete_explanations(&r.study_id, &removed)?;
         self.inner.emit_study_updated(&study, "delete", &[]);
         self.inner.study_view(&study)
@@ -638,7 +646,7 @@ impl Inner {
         self.send_explain(ExplainMsg::Task(task));
     }
 
-    /// 在讲解线程上继续处理（用于引擎任务的回调）。
+    /// 在讲解线程上继续处理：引擎任务与 AI 讲解请求的回调、AI 讲解请求的登记。
     pub(crate) fn on_explain_thread(&self, step: impl FnOnce(&Inner) + Send + 'static) {
         self.send_explain(ExplainMsg::Continue(Box::new(step)));
     }
@@ -718,6 +726,7 @@ impl Inner {
         let engine = self.cached_position_evidence(&study, node_id);
         let position = xq_core::explain::explain_position(&pos, &ctx, engine.as_ref());
         let explanation = if node.is_move() { self.store.load_explanation(study_id, node_id)? } else { None };
+        let coach = node.is_move().then(|| self.coach_view(study_id, node_id));
         Ok(NodeDetail {
             study_id: study_id.to_string(),
             revision: study.revision,
@@ -730,6 +739,7 @@ impl Inner {
             node,
             position,
             explanation,
+            coach,
         })
     }
 }

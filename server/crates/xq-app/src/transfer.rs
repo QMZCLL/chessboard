@@ -168,6 +168,16 @@ impl AppService {
                 cfg.analysis.sixty_move_rule
             ),
             format!("云库：{}", if cfg.cloud.enabled { "开启" } else { "关闭" }),
+            // 只说明密钥是否已配置，不输出密钥与服务地址
+            format!(
+                "AI 讲解：{} · {} · 密钥{} · 今日调用 {}/{}{}",
+                if status.coach.enabled { "开启" } else { "关闭" },
+                status.coach.model_label,
+                if status.coach.key_configured { "已配置" } else { "未配置" },
+                status.coach.used_today,
+                status.coach.daily_budget,
+                status.coach.reason.as_ref().map(|r| format!("（{r}）")).unwrap_or_default()
+            ),
             format!("数据目录：{}", status.data_dir),
             format!("日志目录：{}", status.log_dir),
         ];

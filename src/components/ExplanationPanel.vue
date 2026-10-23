@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 import { NAlert, NButton, NButtonGroup, NInput, NProgress, NScrollbar, NSpin, NSwitch, NTabPane, NTabs, NTag } from "naive-ui";
 import AttemptCard from "./AttemptCard.vue";
 import CandidateTable from "./CandidateTable.vue";
+import CoachCard from "./CoachCard.vue";
 import ClaimList from "./ClaimList.vue";
 import VerdictTag from "./VerdictTag.vue";
 import {
@@ -96,6 +97,7 @@ const thinkSide = computed(() => {
                   讲解尚不完整{{ record?.error ? `：${record.error}` : "，下面的提示说明了缺少的部分" }}
                   <n-button size="tiny" quaternary @click="retryExplanation">重试</n-button>
                 </n-alert>
+                <CoachCard :level="expl.level" :pending="!!record?.pending" />
 
                 <h4>当前需求</h4>
                 <ClaimList :claims="expl.need" :evidence="expl.evidence" />

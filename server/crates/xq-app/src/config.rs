@@ -22,6 +22,7 @@ pub struct AppConfig {
     pub analysis: AnalysisConfig,
     pub capture: CaptureConfig,
     pub cloud: CloudConfig,
+    pub coach: CoachConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +67,113 @@ pub struct CloudConfig {
     pub timeout_ms: u64,
 }
 
+/// 语言模型服务的接口类型。三者的结构化输出参数不同，分别适配。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoachProvider {
+    /// OpenAI Chat Completions，使用 JSON Schema 结构化输出。
+    Openai,
+    /// DeepSeek（OpenAI 兼容接口），使用 JSON 输出模式。
+    Deepseek,
+    /// 本机 Ollama `/api/chat`，在 `format` 中提供 JSON Schema。
+    Ollama,
+}
+
+impl CoachProvider {
+    pub fn default_base_url(self) -> &'static str {
+        match self {
+            CoachProvider::Openai => "https://api.openai.com/v1",
+            CoachProvider::Deepseek => "https://api.deepseek.com",
+            CoachProvider::Ollama => "http://127.0.0.1:11434",
+        }
+    }
+
+    pub fn needs_key(self) -> bool { self != CoachProvider::Ollama }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CoachProvider::Openai => "OpenAI",
+            CoachProvider::Deepseek => "DeepSeek",
+            CoachProvider::Ollama => "Ollama",
+        }
+    }
+}
+
+/// AI 讲解面向的学习者水平。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Audience {
+    Beginner,
+    Intermediate,
+    Advanced,
+}
+
+/// AI 讲解的详细程度。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Detail {
+    Brief,
+    Normal,
+    Deep,
+}
+
+/// 何时自动生成 AI 讲解。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoachScope {
+    /// 只在用户点击时生成。
+    Off,
+    /// 查看某一着时自动生成（已有有效缓存时直接使用）。
+    Viewed,
+}
+
+/// AI 讲解设置。密钥不在这里：`credential_ref` 只是引用（`store:coach` 表示保存在后台凭据文件，
+/// `env:变量名` 表示从环境变量读取），配置随状态返回界面时不会带出密钥。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CoachConfig {
+    pub enabled: bool,
+    pub provider: CoachProvider,
+    /// 为空时使用该接口的默认地址。
+    pub base_url: String,
+    pub model: String,
+    pub credential_ref: Option<String>,
+    pub timeout_ms: u64,
+    pub max_output_tokens: u32,
+    pub max_parallel_requests: u32,
+    /// 每天（UTC）最多调用次数，0 表示不限。
+    pub daily_request_budget: u32,
+    pub auto_explain_scope: CoachScope,
+    pub audience: Audience,
+    pub detail: Detail,
+}
+
+impl Default for CoachConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: CoachProvider::Deepseek,
+            base_url: String::new(),
+            model: String::new(),
+            credential_ref: None,
+            timeout_ms: 60_000,
+            max_output_tokens: 1500,
+            max_parallel_requests: 2,
+            daily_request_budget: 200,
+            auto_explain_scope: CoachScope::Off,
+            audience: Audience::Beginner,
+            detail: Detail::Normal,
+        }
+    }
+}
+
+impl CoachConfig {
+    pub fn base_url(&self) -> String {
+        let url = self.base_url.trim().trim_end_matches('/');
+        if url.is_empty() { self.provider.default_base_url().to_string() } else { url.to_string() }
+    }
+}
+
 fn default_threads() -> u32 {
     let cores = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(2);
     (cores / 2).clamp(1, 4)
@@ -80,6 +188,7 @@ impl Default for AppConfig {
             analysis: AnalysisConfig::default(),
             capture: CaptureConfig::default(),
             cloud: CloudConfig::default(),
+            coach: CoachConfig::default(),
         }
     }
 }
@@ -132,6 +241,7 @@ impl AppConfig {
         clamp_u64("深入分析时间(毫秒)", &mut self.analysis.deep_time_ms, 200, 600_000);
         clamp_u64("截图间隔(毫秒)", &mut self.capture.interval_ms, 50, 5_000);
         clamp_u64("云库超时(毫秒)", &mut self.cloud.timeout_ms, 500, 60_000);
+        clamp_u64("AI 讲解超时(毫秒)", &mut self.coach.timeout_ms, 2_000, 300_000);
         let mut clamp_u32 = |name: &str, v: &mut u32, lo: u32, hi: u32| {
             let c = (*v).clamp(lo, hi);
             if c != *v {
@@ -144,6 +254,8 @@ impl AppConfig {
         clamp_u32("快速分析深度", &mut self.analysis.quick_depth, 1, 100);
         clamp_u32("深入分析深度", &mut self.analysis.deep_depth, 1, 100);
         clamp_u32("候选数", &mut self.analysis.multipv, 1, 5);
+        clamp_u32("AI 讲解最大输出", &mut self.coach.max_output_tokens, 300, 8_000);
+        clamp_u32("AI 讲解并发数", &mut self.coach.max_parallel_requests, 1, 4);
         clamp_u32("稳定帧数", &mut self.capture.stable_frames, 1, 30);
         clamp_u32("无法解释时等待帧数", &mut self.capture.unexplained_frames, 0, 100);
         if !(0.3..=0.99).contains(&self.capture.confidence_threshold) {
@@ -153,6 +265,13 @@ impl AppConfig {
         if !REPETITION_RULES.contains(&self.analysis.repetition_rule.as_str()) {
             notes.push(format!("未知的重复局面规则 {}，已改为 ChineseRule", self.analysis.repetition_rule));
             self.analysis.repetition_rule = "ChineseRule".into();
+        }
+        self.coach.model = self.coach.model.trim().to_string();
+        if let Some(r) = &self.coach.credential_ref
+            && !(r == "store:coach" || r.strip_prefix("env:").is_some_and(|n| !n.is_empty()))
+        {
+            notes.push("AI 讲解的凭据引用无效，已清除；请重新填写密钥".into());
+            self.coach.credential_ref = None;
         }
         if !["error", "warn", "info", "debug", "trace"].contains(&self.log_level.as_str()) {
             self.log_level = "info".into();

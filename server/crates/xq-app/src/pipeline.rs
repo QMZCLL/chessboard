@@ -273,7 +273,7 @@ impl Inner {
         }
     }
 
-    fn node_exists(&self, study_id: &str, node_id: NodeId) -> bool {
+    pub(crate) fn node_exists(&self, study_id: &str, node_id: NodeId) -> bool {
         self.studies.lock().map(|s| s.get(study_id).is_some_and(|st| st.nodes.contains_key(&node_id))).unwrap_or(false)
     }
 
@@ -295,6 +295,7 @@ impl Inner {
             record,
             stats: self.explain_stats(&record.study_id),
         });
+        self.coach_on_explanation(record);
     }
 
     fn load_record(&self, study_id: &str, node_id: NodeId) -> ExplanationRecord {
