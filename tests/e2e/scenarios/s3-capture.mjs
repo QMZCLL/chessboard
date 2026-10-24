@@ -56,8 +56,10 @@ await waitText(page, "无法用一到两步合法走法解释", 15000);
 await page.locator(".n-modal .n-radio-button", { hasText: "黑走" }).first().click();
 await snap(page, "confirm-gap");
 await page.getByRole("button", { name: "按此局面继续" }).click();
-await page.locator(".gap").waitFor();
-check(await page.locator(".gap").count() === 1, "棋谱中出现带缺口标记的新起点");
+// 只在棋谱中查找：屏幕连接对话框淡出期间，其中的提示框也带有 gap 样式类
+const gap = page.locator(".tree .line .gap");
+await gap.first().waitFor();
+check((await gap.count()) === 1, "棋谱中出现带缺口标记的新起点");
 
 // 停止连接
 await page.getByRole("button", { name: "屏幕连接" }).click();

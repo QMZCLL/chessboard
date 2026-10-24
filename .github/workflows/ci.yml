@@ -76,6 +76,8 @@ jobs:
         with:
           name: e2e-output
           path: tests/e2e/.out
+          # .out 以点开头，默认会被当作隐藏目录跳过
+          include-hidden-files: true
           retention-days: 7
 
   desktop-windows:
