@@ -22,7 +22,7 @@ await page.waitForSelector(".xq-board");
 const ctx = page.getByTestId("board-context");
 const selectedId = () => page.evaluate(() => document.querySelector(".move.active")?.getAttribute("data-node"));
 
-// 1. 看谱学习：选择一着 → 要点 → 点击依据只高亮 → 演示变化 → 返回本步
+// 1. 看谱学习：选择一着 → 要点 → 点击依据只高亮 → 演示变化 → 返回这一着之后的局面
 await page.locator('[data-node="3"]').click();
 await page.getByTestId("key-point").waitFor();
 check((await page.getByTestId("move-name").innerText()).includes("马二进三"), "标题显示当前讲解的着法");
@@ -30,19 +30,19 @@ check((await ctx.innerText()).includes("棋谱局面 · 第 2 回合"), `棋盘�
 const basis = page.locator(".claims").first().locator(".claim").first();
 await basis.click();
 check(await basis.evaluate((el) => el.classList.contains("active")), "点击讲解段落后该段被选中");
-check(!(await ctx.innerText()).includes("变化演示"), "点击段落不进入演示");
+check(!(await ctx.innerText()).includes("正在演示"), "点击段落不进入演示");
 check((await page.locator(".xq-board circle.hl").count()) > 0, "依据在当前局面上时直接高亮棋子");
 await snap(page, "wf-focus");
 
 await page.getByRole("button", { name: "演示主要应对" }).click();
-await ctx.filter({ hasText: "变化演示" }).waitFor();
+await ctx.filter({ hasText: "正在演示" }).waitFor();
 check((await ctx.innerText()).includes("第 0 / "), `演示从起点开始：${await ctx.innerText()}`);
 await page.keyboard.press("ArrowRight");
 check((await ctx.innerText()).includes("第 1 / "), "方向键在演示中逐着前进");
 check(await page.getByRole("button", { name: /保存已演示的 1 着/ }).isVisible(), "保存按钮写明保存范围");
 await snap(page, "wf-demo");
-await page.getByRole("button", { name: "返回本步" }).click();
-check((await ctx.innerText()).includes("棋谱局面"), "返回本步后回到原来的局面");
+await page.getByTestId("preview-back").click();
+check((await ctx.innerText()).includes("棋谱局面"), "返回后回到原来的局面");
 check((await selectedId()) === "3", "返回后仍是原来的着法");
 
 // 2. 落子前局面的依据：不画在落子后的棋盘上，提示起点
@@ -53,7 +53,7 @@ const beforeNote = comparison.getByText("这条依据在落子前的局面上");
 check(await beforeNote.isVisible(), "落子前局面的依据显示起点提示");
 check((await page.locator(".xq-board line.arrow").count()) === 0, "不把落子前的箭头画在落子后的棋盘上");
 await comparison.getByRole("button", { name: "在落子前局面查看" }).click();
-await ctx.filter({ hasText: "落子前局面" }).waitFor();
+await ctx.filter({ hasText: "落子前的局面" }).waitFor();
 check((await page.locator(".xq-board circle.hl").count()) > 0, "在落子前局面上标出依据");
 await snap(page, "wf-before");
 await page.keyboard.press("Escape");
@@ -122,11 +122,11 @@ await page.getByRole("button", { name: "查看候选" }).click();
 const row = page.locator(".candidates .row").first();
 await row.click();
 check(await page.locator(".candidates .detail").first().isVisible(), "选中候选显示详情");
-check(!(await ctx.innerText()).includes("变化演示"), "选中候选不进入演示");
+check(!(await ctx.innerText()).includes("正在演示"), "选中候选不进入演示");
 await row.getByRole("button", { name: "演示", exact: true }).click();
-await ctx.filter({ hasText: "变化演示" }).waitFor();
+await ctx.filter({ hasText: "正在演示" }).waitFor();
 check(true, "候选的演示按钮进入演示");
-await page.getByRole("button", { name: "返回本步" }).click();
+await page.getByTestId("preview-back").click();
 
 // 8. 起始局面
 await page.locator('[data-node="0"]').click();

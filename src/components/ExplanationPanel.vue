@@ -3,8 +3,9 @@
 // （有 AI 讲解时用 AI 讲解，否则用规则讲解）→ 关键操作 → 详细分析（可折叠）→ 学习点与笔记。
 // 局面分析在起始局面上直接给出分析入口；笔记显示保存状态，并始终保存到编辑时对应的那一着。
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { NAlert, NButton, NCollapse, NCollapseItem, NInput, NScrollbar, NSpin, NSwitch, NTabPane, NTabs, NTag } from "naive-ui";
+import { NAlert, NButton, NCollapse, NCollapseItem, NInput, NScrollbar, NSpin, NSwitch, NTabPane, NTabs, NTag, NTooltip } from "naive-ui";
 import AttemptCard from "./AttemptCard.vue";
+import BasisList from "./BasisList.vue";
 import Icon from "./Icon.vue";
 import CandidateTable from "./CandidateTable.vue";
 import CoachCard from "./CoachCard.vue";
@@ -17,9 +18,11 @@ import {
   cloudLookup,
   coachView,
   demoEvidence,
+  exitPreview,
   explainDeeper,
   newestRecord,
   nodeOf,
+  previewBackLabel,
   retryExplanation,
   reveal,
   selectedNode,
@@ -27,6 +30,7 @@ import {
   thinking,
   wb,
 } from "../state/workbench";
+import { coachLesson } from "../state/coachContent";
 import { coachDisplay } from "../state/coachDisplay";
 import { editNote, noteView, persistNote } from "../state/notes";
 import { sideLabel } from "../utils/board";
@@ -52,6 +56,11 @@ const keyPoint = computed(() => {
 });
 /** AI 讲解的结果对应当前条件时才承担正文，规则讲解的依据移到详细分析中；上次的结果不作为正文。 */
 const coachBody = computed(() => coachDisplay(coachView.value).kind === "current");
+const coachResult = computed(() => (coachBody.value ? (coachView.value?.record?.result ?? null) : null));
+/** 当前有效的 AI 学习要点；没有时学习点使用规则讲解的内容 */
+const aiLesson = computed(() => coachLesson(coachResult.value));
+/** 讲解不完整（部分分析或出错）时，补充分析是主要操作 */
+const needsRetry = computed(() => !record.value?.pending && (!!record.value?.error || expl.value?.level === "partial"));
 const replyEvidence = computed(() => expl.value?.evidence.find((e) => e.topic === "reply" && canDemo(e)) ?? null);
 
 // 详细分析的展开状态在本机记住
@@ -145,6 +154,16 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
               <AttemptCard v-if="attempt !== undefined" :node-id="attempt" />
               <div v-if="wb.detailError" class="error">{{ wb.detailError }}</div>
               <template v-if="expl">
+                <!-- 棋盘正在演示其他局面时，说明右侧讲解的对象 -->
+                <div v-if="wb.preview" class="subject-bar" data-testid="explain-subject">
+                  <span>
+                    本页讲解：<strong class="subject-move">{{ expl.notation }}</strong>
+                    <span class="muted"> · 棋盘正在{{ wb.preview.moves.length ? "演示变化" : "显示其他局面" }}</span>
+                  </span>
+                  <n-button size="small" secondary @click="exitPreview">
+                    <template #icon><Icon name="back" /></template>{{ previewBackLabel }}
+                  </n-button>
+                </div>
                 <!-- 1. 当前着法与程序评价 -->
                 <header class="move-head">
                   <span class="mover" :class="expl.mover">{{ moverLabel }}</span>
@@ -159,9 +178,12 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
                 <!-- 2. 一句话要点 -->
                 <p class="key-point" data-testid="key-point">{{ keyPoint }}</p>
                 <div v-if="record?.pending" class="status-line"><n-spin :size="14" /> 引擎正在比较候选与主要应对，完成后自动补充</div>
-                <n-alert v-if="!record?.pending && (record?.error || expl.level === 'partial')" type="warning" :show-icon="false" class="alert">
-                  讲解尚不完整{{ record?.error ? `：${record.error}` : "，详细分析中的提示说明了缺少的部分" }}
-                  <n-button size="tiny" quaternary @click="retryExplanation">重试</n-button>
+                <!-- 分析不完整时，补充分析是这一区域的主要操作；已确认的事实照常显示 -->
+                <n-alert v-if="needsRetry" type="warning" :show-icon="false" class="alert" data-testid="partial-alert">
+                  <div class="alert-row">
+                    <span>{{ record?.error ? `讲解尚不完整：${record.error}` : "分析不完整：只显示已确认的事实，详细分析中说明了缺少的部分。" }}</span>
+                    <n-button size="small" type="warning" @click="retryExplanation">{{ record?.error ? "重试" : "补充分析" }}</n-button>
+                  </div>
                 </n-alert>
 
                 <!-- 3. 讲解正文 -->
@@ -174,15 +196,20 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
 
                 <!-- 4. 关键操作 -->
                 <div class="key-actions">
-                  <n-button v-if="replyEvidence" size="small" type="primary" secondary @click="demoEvidence(replyEvidence)">
+                  <n-button v-if="replyEvidence" size="medium" :type="needsRetry ? 'default' : 'primary'" secondary data-testid="demo-reply" @click="demoEvidence(replyEvidence)">
                     <template #icon><Icon name="play" :size="13" /></template>演示主要应对
                   </n-button>
-                  <n-button v-if="expl.candidates.length" size="small" secondary @click="showCandidates">
+                  <n-button v-if="expl.candidates.length" size="medium" secondary @click="showCandidates">
                     <template #icon><Icon name="list" /></template>查看候选
                   </n-button>
-                  <n-button size="small" quaternary :disabled="record?.pending" @click="explainDeeper">
-                    <template #icon><Icon name="search" /></template>深入分析这一着
-                  </n-button>
+                  <n-tooltip>
+                    <template #trigger>
+                      <n-button size="medium" quaternary :disabled="record?.pending" @click="explainDeeper">
+                        <template #icon><Icon name="search" /></template>深入分析
+                      </n-button>
+                    </template>
+                    用更长的时间重新分析这一着
+                  </n-tooltip>
                 </div>
 
                 <!-- 5. 详细分析 -->
@@ -190,10 +217,6 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
                   <n-collapse-item title="详细分析" name="detail">
                     <h4 class="section-title">当前需求</h4>
                     <ClaimList scope="need" :claims="expl.need" :evidence="expl.evidence" />
-                    <template v-if="coachBody">
-                      <h4 class="section-title">规则依据</h4>
-                      <ClaimList scope="basis" :claims="expl.basis" :evidence="expl.evidence" />
-                    </template>
                     <h4 ref="candidatesAnchor" class="section-title">候选比较</h4>
                     <ClaimList v-if="expl.comparison.length" scope="comparison" :claims="expl.comparison" :evidence="expl.evidence" />
                     <p v-else class="muted">等待引擎分析后补充候选比较。</p>
@@ -201,15 +224,29 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
                     <h4 class="section-title">主要应对</h4>
                     <ClaimList v-if="expl.replies.length" scope="replies" :claims="expl.replies" :evidence="expl.evidence" />
                     <p v-else class="muted">{{ expl.level === "detailed" ? "引擎没有给出后续变化。" : "等待引擎分析后补充对手的主要应对。" }}</p>
+                    <!-- 有效 AI 讲解出现后移到这里的规则讲解内容放在末尾：结果到达时不把正在阅读的段落往下推 -->
+                    <template v-if="coachBody">
+                      <h4 class="section-title">规则依据</h4>
+                      <ClaimList scope="basis" :claims="expl.basis" :evidence="expl.evidence" />
+                    </template>
+                    <template v-if="aiLesson">
+                      <h4 class="section-title">规则讲解的学习点</h4>
+                      <p class="rule-lesson">{{ expl.lesson }}</p>
+                    </template>
                     <n-alert v-for="w in expl.warnings" :key="w" type="info" :show-icon="false" class="alert">{{ w }}</n-alert>
                     <p v-if="expl.conditions" class="conditions">分析条件：{{ expl.conditions }}</p>
                   </n-collapse-item>
                 </n-collapse>
 
                 <!-- 6. 学习点与笔记 -->
-                <div class="lesson">
-                  <span class="lesson-title">学习点</span>
-                  <p>{{ expl.lesson }}</p>
+                <!-- 学习点只有一套：有当前有效的 AI 学习要点时用它（带程序依据），否则用规则讲解的学习点 -->
+                <div class="lesson" data-testid="lesson">
+                  <span class="lesson-title">学习点<template v-if="aiLesson"> · AI 讲解</template></span>
+                  <template v-if="aiLesson && coachResult">
+                    <ClaimList scope="ai-lesson" :claims="[aiLesson.claim]" :evidence="coachResult.evidence" class="lesson-claim" />
+                    <BasisList :items="aiLesson.basis" />
+                  </template>
+                  <p v-else>{{ expl.lesson }}</p>
                 </div>
                 <n-button text size="small" class="note-link" @click="tab = 'notes'">
                   <template #icon><Icon name="pen" :size="14" /></template>{{ node?.note ? "查看这一步的笔记" : "为这一步写笔记" }}
@@ -365,10 +402,50 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
   background: var(--tag-red-bg);
   color: var(--accent-red);
 }
+/* 棋盘显示的不是本页讲解的局面时，说明讲解对象并提供返回 */
+.subject-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  padding: 6px 6px 6px var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--tag-blue-bg);
+  font-size: var(--fs-group);
+}
+.subject-move {
+  font-family: var(--piece-font);
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+.alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.rule-lesson {
+  margin: 0;
+  padding-left: var(--sp-3);
+}
+.lesson-claim :deep(.claim) {
+  padding-left: 0;
+  font-family: var(--font-serif);
+}
+.lesson-claim :deep(.claim::before) {
+  display: none;
+}
+.lesson :deep(.basis) {
+  margin-left: 0;
+  background: transparent;
+}
 .move-name {
   margin: 0 2px 0 0;
   font-family: var(--piece-font);
-  font-size: 25px;
+  font-size: var(--fs-move);
   font-weight: 700;
   letter-spacing: 2px;
   line-height: 1.3;
@@ -404,10 +481,13 @@ h4 {
   margin: var(--sp-2) 0;
   font-size: var(--fs-aux);
 }
+.key-actions :deep(.n-button) {
+  padding: 0 12px;
+}
 .key-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2);
+  gap: 6px;
   margin: var(--sp-3) 0 var(--sp-2);
 }
 .detail {
@@ -458,7 +538,7 @@ h4 {
   margin-top: var(--sp-2);
 }
 .conditions {
-  font-size: 12px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
   margin-top: var(--sp-3);
 }

@@ -25,26 +25,51 @@ function stored(key: string, fallback: number) {
   }
 }
 
-const left = ref(stored("xq-left", 260));
-const right = ref(stored("xq-right", 420));
+type Side = "left" | "right";
+const DEFAULT_WIDTH: Record<Side, number> = { left: 260, right: 420 };
+const left = ref(stored("xq-left", DEFAULT_WIDTH.left));
+const right = ref(stored("xq-right", DEFAULT_WIDTH.right));
 
 // 宽屏三栏：中间棋盘至少保留 420px；栏间留出与外边距相同的空隙（兼作拖动条）
 const CENTER_MIN = 420;
 const GAP = 10;
 const CHROME = GAP * 4;
-const effectiveLeft = computed(() => Math.max(200, Math.min(left.value, (viewport.value - CHROME - CENTER_MIN) * 0.3)));
-const effectiveRight = computed(() =>
-  Math.max(340, Math.min(right.value, viewport.value - CHROME - CENTER_MIN - (layout.value === "wide" ? effectiveLeft.value : 0))),
-);
+const clamp = (v: number, lim: { min: number; max: number }) => Math.max(lim.min, Math.min(lim.max, v));
+/** 两侧栏可调整的范围：棋谱栏最多占剩余宽度的三成，讲解栏不挤占棋盘的最小宽度 */
+const leftLimit = computed(() => ({ min: 200, max: Math.round(Math.max(200, Math.min(480, (viewport.value - CHROME - CENTER_MIN) * 0.3))) }));
+const effectiveLeft = computed(() => Math.round(clamp(left.value, leftLimit.value)));
+const rightLimit = computed(() => ({
+  min: 340,
+  max: Math.round(Math.max(340, Math.min(720, viewport.value - CHROME - CENTER_MIN - (layout.value === "wide" ? effectiveLeft.value : 0)))),
+}));
+const effectiveRight = computed(() => Math.round(clamp(right.value, rightLimit.value)));
 const columns = computed(() =>
   layout.value === "wide"
     ? `${effectiveLeft.value}px ${GAP}px minmax(${CENTER_MIN}px, 1fr) ${GAP}px ${effectiveRight.value}px`
     : `minmax(${CENTER_MIN}px, 1fr) ${GAP}px ${effectiveRight.value}px`,
 );
-let resizing: { side: "left" | "right"; x: number; start: number } | null = null;
+let resizing: { side: Side; x: number; start: number } | null = null;
+/** 正在拖动或用键盘调整的分隔条：旁边显示当前宽度 */
+const activeSide = ref<Side | null>(null);
 
-function startResize(side: "left" | "right", e: MouseEvent) {
+function saveWidths() {
+  try {
+    localStorage.setItem("xq-left", String(left.value));
+    localStorage.setItem("xq-right", String(right.value));
+  } catch {
+    // 记不住宽度不影响使用
+  }
+}
+
+function setWidth(side: Side, width: number) {
+  if (side === "left") left.value = clamp(width, leftLimit.value);
+  else right.value = clamp(width, rightLimit.value);
+  saveWidths();
+}
+
+function startResize(side: Side, e: MouseEvent) {
   resizing = { side, x: e.clientX, start: side === "left" ? effectiveLeft.value : effectiveRight.value };
+  activeSide.value = side;
   window.addEventListener("mousemove", onResize);
   window.addEventListener("mouseup", stopResize);
   e.preventDefault();
@@ -53,20 +78,38 @@ function startResize(side: "left" | "right", e: MouseEvent) {
 function onResize(e: MouseEvent) {
   if (!resizing) return;
   const dx = e.clientX - resizing.x;
-  if (resizing.side === "left") left.value = Math.min(480, Math.max(200, resizing.start + dx));
-  else right.value = Math.min(720, Math.max(340, resizing.start - dx));
+  if (resizing.side === "left") left.value = clamp(resizing.start + dx, leftLimit.value);
+  else right.value = clamp(resizing.start - dx, rightLimit.value);
 }
 
 function stopResize() {
+  if (resizing) saveWidths();
   resizing = null;
+  activeSide.value = null;
   window.removeEventListener("mousemove", onResize);
   window.removeEventListener("mouseup", stopResize);
-  try {
-    localStorage.setItem("xq-left", String(left.value));
-    localStorage.setItem("xq-right", String(right.value));
-  } catch {
-    // 记不住宽度不影响使用
-  }
+}
+
+/**
+ * 键盘调整（WAI 窗口分隔条模式）：左右方向键按分隔条移动的方向调整（Shift 加大步长），
+ * Home/End 调到最小与最大，Enter 恢复默认宽度。
+ */
+function onSplitterKey(side: Side, e: KeyboardEvent) {
+  const lim = side === "left" ? leftLimit.value : rightLimit.value;
+  const current = side === "left" ? effectiveLeft.value : effectiveRight.value;
+  const step = e.shiftKey ? 64 : 16;
+  // 分隔条向右移动时，左栏变宽、右栏变窄
+  const grow = side === "left" ? 1 : -1;
+  const next: Record<string, number> = {
+    ArrowRight: current + step * grow,
+    ArrowLeft: current - step * grow,
+    Home: lim.min,
+    End: lim.max,
+    Enter: DEFAULT_WIDTH[side],
+  };
+  if (!(e.key in next)) return;
+  e.preventDefault();
+  setWidth(side, next[e.key]);
 }
 
 onMounted(() => void boot());
@@ -95,8 +138,28 @@ onBeforeUnmount(stopResize);
     </main>
     <main v-else-if="layout !== 'narrow'" class="columns" :style="{ gridTemplateColumns: columns }">
       <template v-if="layout === 'wide'">
-        <aside class="col surface" aria-label="棋谱"><MoveTree /></aside>
-        <div class="splitter" role="separator" aria-orientation="vertical" @mousedown="startResize('left', $event)" />
+        <aside id="pane-tree" class="col surface" aria-label="棋谱"><MoveTree /></aside>
+        <div
+          class="splitter"
+          role="separator"
+          tabindex="0"
+          aria-orientation="vertical"
+          aria-label="调整棋谱栏宽度"
+          aria-controls="pane-tree"
+          :aria-valuenow="effectiveLeft"
+          :aria-valuemin="leftLimit.min"
+          :aria-valuemax="leftLimit.max"
+          :aria-valuetext="`棋谱栏宽 ${effectiveLeft} 像素`"
+          title="拖动或用左右方向键调整宽度；双击或按 Enter 恢复默认宽度"
+          data-testid="splitter-left"
+          @mousedown="startResize('left', $event)"
+          @dblclick="setWidth('left', DEFAULT_WIDTH.left)"
+          @keydown="onSplitterKey('left', $event)"
+          @focus="activeSide = 'left'"
+          @blur="activeSide = null"
+        >
+          <span v-if="activeSide === 'left'" class="size" aria-hidden="true">{{ effectiveLeft }} px</span>
+        </div>
       </template>
       <section class="col center">
         <BoardArea />
@@ -106,8 +169,28 @@ onBeforeUnmount(stopResize);
           <aside class="tree-overlay surface" aria-label="棋谱" data-testid="tree-overlay"><MoveTree /></aside>
         </template>
       </section>
-      <div class="splitter" role="separator" aria-orientation="vertical" @mousedown="startResize('right', $event)" />
-      <aside class="col surface" aria-label="讲解"><ExplanationPanel /></aside>
+      <div
+        class="splitter"
+        role="separator"
+        tabindex="0"
+        aria-orientation="vertical"
+        aria-label="调整讲解栏宽度"
+        aria-controls="pane-explain"
+        :aria-valuenow="effectiveRight"
+        :aria-valuemin="rightLimit.min"
+        :aria-valuemax="rightLimit.max"
+        :aria-valuetext="`讲解栏宽 ${effectiveRight} 像素`"
+        title="拖动或用左右方向键调整宽度；双击或按 Enter 恢复默认宽度"
+        data-testid="splitter-right"
+        @mousedown="startResize('right', $event)"
+        @dblclick="setWidth('right', DEFAULT_WIDTH.right)"
+        @keydown="onSplitterKey('right', $event)"
+        @focus="activeSide = 'right'"
+        @blur="activeSide = null"
+      >
+        <span v-if="activeSide === 'right'" class="size" aria-hidden="true">{{ effectiveRight }} px</span>
+      </div>
+      <aside id="pane-explain" class="col surface" aria-label="讲解"><ExplanationPanel /></aside>
     </main>
     <!-- 窄窗口：棋盘在上，讲解与棋谱用标签切换 -->
     <main v-else class="stack">
@@ -170,6 +253,32 @@ onBeforeUnmount(stopResize);
 }
 .splitter:hover::after {
   background: var(--border-strong);
+}
+.splitter:focus-visible {
+  outline: none;
+}
+.splitter:focus-visible::after {
+  top: 20%;
+  bottom: 20%;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--accent-blue);
+}
+/* 调整时显示当前宽度 */
+.splitter .size {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: var(--panel);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 .backdrop {
   position: absolute;

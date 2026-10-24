@@ -5,7 +5,7 @@ import { computed } from "vue";
 import { NButton } from "naive-ui";
 import Icon from "./Icon.vue";
 import type { CandidateView } from "../api/types";
-import { focusCandidate, showCandidate, thinking, wb } from "../state/workbench";
+import { candidateSource, focusCandidate, showCandidate, thinking, wb } from "../state/workbench";
 import { scoreText } from "../utils/board";
 
 const props = defineProps<{ candidates: CandidateView[]; base: "parent" | "node"; showActual?: boolean; scope: string }>();
@@ -18,7 +18,7 @@ const focused = computed(() => wb.focus?.key ?? null);
 const onBoard = computed(() => props.base === "node" && !wb.preview && !thinking.value);
 
 function previewing(c: CandidateView) {
-  return wb.preview?.label === `${c.notation} 的变化`;
+  return wb.preview?.source === candidateSource(c, props.base);
 }
 </script>
 

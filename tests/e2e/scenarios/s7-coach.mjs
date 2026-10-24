@@ -55,30 +55,36 @@ await page.getByTestId("coach-generate").click();
 await page.getByTestId("coach-status").filter({ hasText: "已生成" }).waitFor({ timeout: 30000 });
 const text = await card.innerText();
 console.log(`  AI 讲解：${text.replace(/\n/g, " | ").slice(0, 200)}…`);
-for (const t of ["为什么考虑这步", "为什么这样走", "学习要点"]) check(text.includes(t), `显示“${t}”段落`);
+for (const t of ["为什么考虑这步", "为什么这样走"]) check(text.includes(t), `显示“${t}”段落`);
+// 主阅读路径只有一套摘要与学习点：摘要由程序要点承担，学习点使用 AI 的学习要点
+check(!text.includes("架起中炮，开始出动子力"), "AI 讲解中不重复显示另一句摘要");
+check(!text.includes("学习要点"), "AI 讲解中不重复显示学习要点");
+const lessonText = await page.getByTestId("lesson").innerText();
+check(lessonText.includes("学习点 · AI 讲解") && lessonText.includes("出子时检查新增的攻击和保护关系"), "学习点使用 AI 的学习要点");
+check((await page.locator('[data-testid="lesson"]').count()) === 1, "学习点只出现一处");
 check(text.includes("引擎分析完整"), "分开显示分析状态");
 check(text.includes("杀棋结论只出现在程序给出的"), "注明硬结论只由程序给出");
 const basis = await page.getByTestId("coach-basis").allInnerTexts();
-check(basis.length >= 2 && basis.every((b) => b.startsWith("依据：")), `每段下方显示程序给出的依据：${basis.join(" / ").slice(0, 80)}`);
+check(basis.length >= 2 && basis.every((b) => b.startsWith("依据")), `每段下方显示程序给出的依据：${basis.join(" / ").slice(0, 80)}`);
 check((await page.getByTestId("key-point").innerText()).length > 0, "一句话要点仍来自程序讲解");
 await page.getByText("详细分析", { exact: true }).click();
 check(await page.getByText("规则依据").isVisible(), "有 AI 讲解时，规则讲解的依据移到详细分析");
 
 // 点击段落：只选中并高亮依据，不进入演示
 const ctx = page.getByTestId("board-context");
-const para = card.locator(".claims .claim").nth(2);
+const para = card.locator(".claims .claim").nth(1);
 await para.click();
 check(await para.evaluate((el) => el.classList.contains("active")), "点击段落后该段被选中");
-check(!(await ctx.innerText()).includes("变化演示"), "点击段落不进入演示");
+check(!(await ctx.innerText()).includes("正在演示"), "点击段落不进入演示");
 const marks = (await page.locator(".xq-board circle.hl").count()) > 0;
 const elsewhere = await para.getByText("这条依据在落子前的局面上").isVisible().catch(() => false);
 check(marks || elsewhere || (await para.innerText()).length > 0, `依据${marks ? "在棋盘上高亮" : elsewhere ? "在落子前局面，提示查看入口" : "没有可标出的棋子"}`);
 // 独立的演示按钮
 await card.getByRole("button", { name: "演示对方的应对" }).click();
-await ctx.filter({ hasText: "变化演示" }).waitFor();
-check(await page.getByRole("button", { name: "返回本步" }).isVisible(), "后续操作进入演示，并可返回本步");
+await ctx.filter({ hasText: "正在演示" }).waitFor();
+check((await page.getByTestId("preview-back").innerText()).includes("返回炮二平五后的局面"), "后续操作进入演示，并可返回这一着之后的局面");
 await snap(page, "coach-ready");
-await page.getByRole("button", { name: "返回本步" }).click();
+await page.getByTestId("preview-back").click();
 
 // 模型请求与密钥
 const calls = await (await fetch(`${LLM}/__calls`)).json();

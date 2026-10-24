@@ -134,16 +134,16 @@ if (only.includes("C")) {
     await page.keyboard.press("Tab");
     check(await focusedIs(".claim .demo"), `Tab 把焦点移到段落内的“演示变化”（${key}）`);
     await page.keyboard.press(key === "Space" ? " " : "Enter");
-    await page.getByTestId("board-context").filter({ hasText: "变化演示" }).waitFor({ timeout: 3000 });
+    await page.getByTestId("board-context").filter({ hasText: "正在演示" }).waitFor({ timeout: 3000 });
     check(true, `焦点在“演示变化”上按 ${key} 进入演示`);
     await page.keyboard.press("Escape");
-    await page.getByTestId("board-context").filter({ hasNotText: "变化演示" }).waitFor();
+    await page.getByTestId("board-context").filter({ hasNotText: "正在演示" }).waitFor();
   }
   // 段落本身获得焦点时，Enter 只选中段落
   await claim.focus();
   await page.keyboard.press("Enter");
   check(await claim.evaluate((el) => el.classList.contains("active")), "焦点在段落上按 Enter 选中段落");
-  check(!(await ctxText(page)).includes("变化演示"), "选中段落不进入演示");
+  check(!(await ctxText(page)).includes("正在演示"), "选中段落不进入演示");
 
   // 候选行内的“演示”
   const row = page.locator(".candidates .row").first();
@@ -152,10 +152,10 @@ if (only.includes("C")) {
     await page.keyboard.press("Tab");
     check(await focusedIs(".row .demo"), `Tab 把焦点移到候选行内的“演示”（${key}）`);
     await page.keyboard.press(key === "Space" ? " " : "Enter");
-    await page.getByTestId("board-context").filter({ hasText: "变化演示" }).waitFor({ timeout: 3000 });
+    await page.getByTestId("board-context").filter({ hasText: "正在演示" }).waitFor({ timeout: 3000 });
     check(true, `焦点在候选“演示”上按 ${key} 进入演示`);
     await page.keyboard.press("Escape");
-    await page.getByTestId("board-context").filter({ hasNotText: "变化演示" }).waitFor();
+    await page.getByTestId("board-context").filter({ hasNotText: "正在演示" }).waitFor();
   }
 
   // 棋谱着法行内的“更多操作”

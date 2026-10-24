@@ -43,52 +43,81 @@ watch(
 </script>
 
 <template>
-  <div class="attempt">
-    <div class="head">
-      <n-tag size="small" type="info" :bordered="false">你的走法</n-tag>
+  <section class="attempt" data-testid="attempt-card">
+    <header class="head">
+      <n-tag size="small" type="info" :bordered="false" round>你的走法</n-tag>
       <strong class="notation">{{ notation }}</strong>
       <VerdictTag v-if="record?.explanation?.verdict" :verdict="record.explanation.verdict" />
-      <n-button size="tiny" quaternary @click="selectNode(nodeId)">打开分支</n-button>
-    </div>
+      <span class="spacer" />
+      <n-button size="small" quaternary @click="selectNode(nodeId)">打开分支</n-button>
+    </header>
     <p v-if="error" class="error">{{ error }}</p>
     <template v-else-if="record?.explanation">
       <p class="summary">{{ record.explanation.summary }}</p>
-      <p v-for="c in record.explanation.comparison" :key="c.text" class="line">{{ c.text }}</p>
+      <ul v-if="record.explanation.comparison.length" class="lines">
+        <li v-for="c in record.explanation.comparison" :key="c.text">{{ c.text }}</li>
+      </ul>
     </template>
     <n-spin v-else size="small" />
     <p v-if="record?.pending" class="muted">正在分析你的走法与候选的差别…</p>
-  </div>
+  </section>
 </template>
 
 <style scoped>
+/* 与讲解中的其他卡片一致：浅色凸起底、细描边、圆角 */
 .attempt {
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-lg);
   background: var(--panel-raised);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.spacer {
+  flex: 1;
 }
 .notation {
   font-family: var(--piece-font);
-  font-size: 16px;
+  font-size: 18px;
+  letter-spacing: 1px;
 }
 .summary {
-  margin: 6px 0 2px;
+  margin: var(--sp-2) 0 var(--sp-1);
+  font-family: var(--font-serif);
+  font-weight: 600;
+  line-height: 1.6;
 }
-.line {
-  margin: 2px 0;
-  font-size: 13px;
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lines li {
+  position: relative;
+  padding-left: 18px;
+  font-size: var(--fs-group);
+  line-height: 1.7;
   color: var(--text-secondary);
 }
+.lines li::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: calc(0.85em - 2px);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
 .muted {
-  font-size: 12px;
+  font-size: var(--fs-aux);
   color: var(--text-muted);
-  margin: 4px 0 0;
+  margin: var(--sp-1) 0 0;
 }
 .error {
   color: var(--accent-red);

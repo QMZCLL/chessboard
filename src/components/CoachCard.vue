@@ -1,13 +1,17 @@
 <script setup lang="ts">
 // AI 讲解：由语言模型根据规则事实与引擎证据组织文字。
-// 显示方式见 state/coachDisplay.ts：结果对应当前条件时作为讲解正文，每段下方紧邻显示程序给出的依据原文
-// （评分、排名、评价与杀棋结论只在这里出现）；只剩上次的结果时，正文仍是规则讲解，上次结果折叠显示并注明；
-// 没有结果时只占一行，说明当前状态与下一步可以做什么。状态全部来自后台，不在界面另做判断。
+// 显示方式见 state/coachDisplay.ts：
+// - 结果对应当前条件：作为“为什么这样走”的正文，各段下方紧邻程序给出的依据原文（评分、排名、评价与杀棋结论只在依据中）。
+//   一句话摘要由程序的要点承担，学习要点放在讲解面板的学习点中，这里不重复显示；
+// - 只剩上次的结果：正文仍是规则讲解，上次结果折叠显示并注明，展开后显示完整的上次讲解；
+// - 没有结果：只占一行，说明当前状态与下一步可以做什么。状态全部来自后台，不在界面另做判断。
 import { computed, ref, watch } from "vue";
 import { NButton, NSpin, NTag } from "naive-ui";
-import type { Claim, CoachResult, CoachText, ExplainLevel } from "../api/types";
+import type { CoachResult, ExplainLevel } from "../api/types";
+import { coachLesson, coachSections, paragraphOf } from "../state/coachContent";
 import { coachDisplay } from "../state/coachDisplay";
 import { canDemo, cancelCoach, coachView, demoEvidence, openSettings, requestCoach, wb } from "../state/workbench";
+import BasisList from "./BasisList.vue";
 import ClaimList from "./ClaimList.vue";
 import Icon from "./Icon.vue";
 
@@ -30,13 +34,6 @@ watch(
   },
 );
 
-const SECTION: Record<string, string> = {
-  purpose: "为什么考虑这步",
-  reason: "为什么这样走",
-  comparison: "换一种走法",
-  reply: "下一步注意",
-  caution: "风险提示",
-};
 const AUDIENCE: Record<string, string> = { beginner: "入门", intermediate: "进阶", advanced: "高级" };
 const DETAIL: Record<string, string> = { brief: "简短", normal: "常规篇幅", deep: "详细" };
 
@@ -74,21 +71,9 @@ const shortReason = computed(() => {
   return first.length > 48 ? `${first.slice(0, 48)}…` : first;
 });
 
-function asClaim(t: CoachText): Claim {
-  const claims = result.value?.claims ?? [];
-  const evidence = t.claim_ids.flatMap((id) => claims.find((c) => c.id === id)?.evidence_ids ?? []);
-  return { text: t.text, evidence: [...new Set(evidence)] };
-}
-
-/** 段落引用的程序结论原文（含评分等数字）。 */
-function basisOf(t: CoachText): string[] {
-  const claims = result.value?.claims ?? [];
-  return t.claim_ids.map((id) => claims.find((c) => c.id === id)?.statement).filter((s): s is string => !!s);
-}
-
-const sections = computed(() =>
-  (result.value?.output.sections ?? []).map((s) => ({ title: SECTION[s.kind] ?? "", claim: asClaim(s), basis: basisOf(s) })),
-);
+const sections = computed(() => (result.value ? coachSections(result.value) : []));
+const summary = computed(() => (result.value ? paragraphOf(result.value, result.value.output.summary) : null));
+const lesson = computed(() => coachLesson(result.value));
 
 const evidenceById = (id: string | null) => result.value?.evidence.find((e) => e.id === id);
 /** 后续操作只保留有可演示变化的。 */
@@ -114,11 +99,11 @@ function follow(id: string | null) {
         <n-spin v-if="display.busy" :size="10" /> {{ display.badge.text }}
       </n-tag>
       <span class="spacer" />
-      <n-button v-if="busy" size="tiny" quaternary @click="cancelCoach">取消</n-button>
-      <n-button v-else-if="display.kind === 'previous'" size="tiny" type="primary" secondary @click="requestCoach(status === 'failed')">
+      <n-button v-if="busy" size="small" quaternary @click="cancelCoach">取消</n-button>
+      <n-button v-else-if="display.kind === 'previous'" size="small" type="primary" secondary @click="requestCoach(status === 'failed')">
         {{ status === "failed" ? "重试" : "更新" }}
       </n-button>
-      <n-button v-else size="tiny" quaternary @click="requestCoach(true)">重新生成</n-button>
+      <n-button v-else size="small" quaternary @click="requestCoach(true)">重新生成</n-button>
     </header>
     <p v-if="display.kind === 'previous'" class="note" data-testid="coach-previous-note">{{ previousNote }}</p>
     <p v-if="view?.reason && !busy" class="note warn">
@@ -132,23 +117,20 @@ function follow(id: string | null) {
 
     <template v-if="display.kind === 'current' || expanded">
       <div :class="{ faded: display.kind === 'previous' }">
-        <ClaimList scope="ai-summary" :claims="[asClaim(result.output.summary)]" :evidence="result.evidence" class="lead" />
-        <ul v-if="basisOf(result.output.summary).length" class="basis" data-testid="coach-basis">
-          <li v-for="(b, j) in basisOf(result.output.summary)" :key="j">依据：{{ b }}</li>
-        </ul>
+        <!-- 上次的讲解作为参考完整显示；当前有效的讲解中，摘要与学习要点由讲解面板的要点与学习点承担 -->
+        <template v-if="display.kind === 'previous' && summary">
+          <ClaimList scope="ai-summary" :claims="[summary.claim]" :evidence="result.evidence" class="lead" />
+          <BasisList :items="summary.basis" />
+        </template>
         <template v-for="(s, i) in sections" :key="i">
           <h5 v-if="s.title">{{ s.title }}</h5>
           <ClaimList :scope="`ai-${i}`" :claims="[s.claim]" :evidence="result.evidence" />
-          <ul v-if="s.basis.length" class="basis" data-testid="coach-basis">
-            <li v-for="(b, j) in s.basis" :key="j">依据：{{ b }}</li>
-          </ul>
+          <BasisList :items="s.basis" />
         </template>
-        <template v-if="result.output.lesson.text">
+        <template v-if="display.kind === 'previous' && lesson">
           <h5>学习要点</h5>
-          <ClaimList scope="ai-lesson" :claims="[asClaim(result.output.lesson)]" :evidence="result.evidence" />
-          <ul v-if="basisOf(result.output.lesson).length" class="basis" data-testid="coach-basis">
-            <li v-for="(b, j) in basisOf(result.output.lesson)" :key="j">依据：{{ b }}</li>
-          </ul>
+          <ClaimList scope="ai-lesson" :claims="[lesson.claim]" :evidence="result.evidence" />
+          <BasisList :items="lesson.basis" />
         </template>
         <div v-if="followups.length" class="followups">
           <n-button v-for="f in followups" :key="f.action" size="small" secondary @click="follow(f.evidence_id)">
@@ -166,7 +148,7 @@ function follow(id: string | null) {
   <section v-else-if="display.kind === 'entry' && view" class="coach entry" data-testid="coach-card">
     <template v-if="status === 'disabled'">
       <span class="muted" data-testid="coach-status">可开启 AI 讲解，帮助理解本步理由</span>
-      <n-button size="tiny" quaternary @click="openSettings('coach')">开启 AI 讲解</n-button>
+      <n-button size="small" quaternary @click="openSettings('coach')">开启 AI 讲解</n-button>
     </template>
     <template v-else-if="status === 'none'">
       <n-button size="small" type="primary" secondary data-testid="coach-generate" @click="requestCoach(false)">
@@ -177,11 +159,11 @@ function follow(id: string | null) {
     <template v-else-if="busy">
       <n-spin :size="12" />
       <span class="muted" data-testid="coach-status">{{ status === "queued" ? view.reason ?? "AI 讲解等待生成…" : "AI 讲解生成中…" }}</span>
-      <n-button size="tiny" quaternary @click="cancelCoach">取消</n-button>
+      <n-button size="small" quaternary @click="cancelCoach">取消</n-button>
     </template>
     <template v-else-if="status === 'failed'">
       <span class="warn" data-testid="coach-status">AI 讲解生成失败：{{ shortReason }}</span>
-      <n-button size="tiny" quaternary @click="requestCoach(true)">重试</n-button>
+      <n-button size="small" quaternary @click="requestCoach(true)">重试</n-button>
       <n-button v-if="shortReason !== view.reason" text size="tiny" @click="showDetail = !showDetail">{{ showDetail ? "收起" : "详情" }}</n-button>
       <p v-if="showDetail" class="note full">{{ view.reason }}</p>
     </template>
@@ -189,12 +171,22 @@ function follow(id: string | null) {
 </template>
 
 <style scoped>
-.coach.body {
-  margin: var(--sp-2) 0;
+/* 当前有效的 AI 讲解是正文：不加卡片外框，标题行与面板中的其他分组一致 */
+.coach.body.current {
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+.coach.body.current header {
+  padding-bottom: 6px;
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+/* 上次的讲解：作为参考的次要卡片 */
+.coach.body.previous {
+  margin: var(--sp-3) 0;
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
   border-radius: var(--radius-lg);
-  background: var(--panel-raised);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 .coach.entry {
   display: flex;
@@ -223,6 +215,9 @@ header {
   font-size: var(--fs-group);
   color: var(--accent-primary);
 }
+.coach.body.previous .title {
+  color: var(--text-secondary);
+}
 .spacer {
   flex: 1;
 }
@@ -236,7 +231,7 @@ header {
 .note {
   margin: var(--sp-1) 0;
   font-size: var(--fs-aux);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 .note.warn {
   color: var(--accent-amber);
@@ -244,33 +239,17 @@ header {
 .note.full {
   flex-basis: 100%;
 }
-/* 上次的讲解：卡片退到次要位置 */
-.coach.body.previous {
-  background: var(--panel);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-}
-.coach.body.previous .title {
-  color: var(--text-secondary);
-}
 .lead :deep(.claim) {
   font-weight: 600;
 }
 h5 {
   margin: var(--sp-3) 0 2px;
-  font-size: var(--fs-aux);
+  font-size: var(--fs-group);
   color: var(--text-secondary);
   font-weight: 600;
 }
-.basis {
-  list-style: none;
-  margin: 0 0 2px;
-  padding: 0 var(--sp-2);
-  font-size: var(--fs-aux);
-  line-height: 1.6;
-  color: var(--text-muted);
-}
 .faded {
-  opacity: 0.65;
+  opacity: 0.7;
 }
 .followups {
   display: flex;
@@ -280,7 +259,7 @@ h5 {
 }
 .source {
   margin: var(--sp-3) 0 0;
-  font-size: 12px;
+  font-size: var(--fs-meta);
   color: var(--text-muted);
 }
 </style>

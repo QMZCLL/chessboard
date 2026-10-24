@@ -94,7 +94,8 @@ function onMore(key: string) {
       </n-tooltip>
     </n-radio-group>
     <div class="actions">
-      <n-button size="small" type="primary" secondary @click="wb.dialogs.newStudy = true">
+      <!-- 全局入口保持中性，最明显的强调留给学习区中正在进行的操作 -->
+      <n-button size="small" secondary @click="wb.dialogs.newStudy = true">
         <template #icon><Icon name="plus" /></template>新建 / 打开
       </n-button>
       <template v-if="layout !== 'narrow'">

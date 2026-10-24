@@ -7,7 +7,10 @@ import { applyLine, moveNumber, placementOf, sideLabel } from "../utils/board";
 import { newerCoach } from "./coachMerge";
 
 export interface Preview {
-  label: string;
+  /** 演示的对象，写明是哪一着的什么变化，如“炮二平五的主要应对” */
+  title: string;
+  /** 发起演示的条目（如某个候选），用于标出正在演示的是哪一行 */
+  source: string | null;
   baseNode: number;
   moves: T.Move[];
   notation: string[];
@@ -166,8 +169,8 @@ export const boardContext = computed<{ kind: BoardContextKind; text: string; hin
   const side = displaySide.value;
   if (!node || !side) return null;
   const p = wb.preview;
-  if (p && p.moves.length === 0) return { kind: "before", text: `落子前局面 · ${p.label}`, hint: null };
-  if (p) return { kind: "preview", text: `变化演示 · ${p.label} · 第 ${p.index} / ${p.moves.length} 着`, hint: null };
+  if (p && p.moves.length === 0) return { kind: "before", text: p.title, hint: null };
+  if (p) return { kind: "preview", text: `正在演示：${p.title} · 第 ${p.index} / ${p.moves.length} 着`, hint: null };
   if (thinking.value) return { kind: "think", text: `先想后讲 · 请为${sideLabel(side)}选择下一步`, hint: null };
   if (wb.trial) {
     const origin = nodeOf(wb.trial.origin);
@@ -697,14 +700,33 @@ export function focusEvidence(key: string, ev: T.Evidence | null) {
     : null;
 }
 
-function startPreview(label: string, base: "parent" | "node", moves: T.Move[], notation: string[], marks: Preview["marks"]) {
+/** 讲解的对象：走子节点为这一着，起始局面为“起始局面”。 */
+const subject = computed(() => {
+  const node = selectedNode.value;
+  if (!node) return "";
+  return node.mv ? (node.notation ?? "这一着") : "起始局面";
+});
+
+/** 退出演示时回到的局面，写在返回按钮上。 */
+export const previewBackLabel = computed(() => (selectedNode.value?.mv ? `返回${subject.value}后的局面` : "返回起始局面"));
+
+interface PreviewStart {
+  title: string;
+  source?: string;
+  base: "parent" | "node";
+  moves: T.Move[];
+  notation: string[];
+  marks: Preview["marks"];
+}
+
+function startPreview(p: PreviewStart) {
   const node = selectedNode.value;
   if (!node) return;
-  const baseNode = base === "parent" ? node.parent : node.id;
+  const baseNode = p.base === "parent" ? node.parent : node.id;
   if (baseNode === null) return;
   wb.highlight = null;
   // 从起点开始：先看清起始局面与依据标记，再逐着前进
-  wb.preview = { label, baseNode, moves, notation, index: 0, marks };
+  wb.preview = { title: p.title, source: p.source ?? null, baseNode, moves: p.moves, notation: p.notation, index: 0, marks: p.marks };
 }
 
 /**
@@ -725,22 +747,40 @@ export function canDemo(ev: T.Evidence | null | undefined): boolean {
   return !!ev && !!demoLine(ev);
 }
 
+/** 演示的对象：对方应对写成“X的主要应对”，落子前的另一种走法写成“X之前的候选 Y”。 */
+function evidenceTitle(ev: T.Evidence, line: T.LineRef): string {
+  const name = subject.value;
+  if (ev.topic === "reply") return `${name}的主要应对`;
+  if (line.base === "node") return selectedNode.value?.mv ? `${name}之后的变化` : `${name}的变化`;
+  return line.notation[0] === name ? `${name}及其后续` : `${name}之前的候选 ${line.notation[0]}`;
+}
+
 export function demoEvidence(ev: T.Evidence) {
   const line = demoLine(ev);
   if (!line) return;
   const marks = ev.on === line.base ? { squares: ev.squares, arrows: ev.arrows } : null;
-  startPreview(shortLabel(ev.text), line.base, line.moves, line.notation, marks);
+  startPreview({ title: evidenceTitle(ev, line), base: line.base, moves: line.moves, notation: line.notation, marks });
 }
 
 /** 在依据所在的局面（落子前）上查看它标出的棋子与关系；所在局面未知的依据不标出。 */
 export function viewEvidenceBoard(ev: T.Evidence) {
   if (!ev.on) return;
-  startPreview(shortLabel(ev.text), ev.on, [], [], { squares: ev.squares, arrows: ev.arrows });
+  const where =
+    ev.on === "parent" ? `${subject.value}落子前的局面` : selectedNode.value?.mv ? `${subject.value}后的局面` : subject.value;
+  startPreview({ title: `${where} · ${shortLabel(ev.text)}`, base: ev.on, moves: [], notation: [], marks: { squares: ev.squares, arrows: ev.arrows } });
+}
+
+/** 候选在演示中的标识。 */
+export function candidateSource(c: T.CandidateView, base: "parent" | "node") {
+  return `candidate:${base}:${c.mv}`;
 }
 
 export function showCandidate(c: T.CandidateView, base: "parent" | "node") {
   if (!c.pv.length) return;
-  startPreview(`${c.notation} 的变化`, base, c.pv, c.pv_notation, null);
+  const name = subject.value;
+  const title =
+    base === "parent" ? `${name}之前的候选 ${c.notation}` : selectedNode.value?.mv ? `${name}之后的候选 ${c.notation}` : `起始局面的候选 ${c.notation}`;
+  startPreview({ title, source: candidateSource(c, base), base, moves: c.pv, notation: c.pv_notation, marks: null });
 }
 
 /** 选中候选：在它的起始局面上标出首着；起始局面不是当前棋盘时只显示说明。 */

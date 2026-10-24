@@ -1,5 +1,5 @@
 // 场景 6：不完整分析的重试（模拟引擎）。第一次搜索不完整：不能给出“严重失误”等结论；
-// 普通查看不重新搜索；点“重试”后请求带 retry，引擎收到第二次搜索，讲解变为详细。
+// 普通查看不重新搜索；点“补充分析”后请求带 retry，引擎收到第二次搜索，讲解变为详细。
 import { BASE, check, launch, snap, waitText } from "../lib.mjs";
 
 const { browser, page, problems } = await launch();
@@ -23,7 +23,8 @@ check(partialText.includes("暂不比较"), "候选比较说明暂不比较");
 check(explainBodies.length >= 1 && explainBodies.every((b) => b.req.retry === false), "普通查看的请求不带重试");
 await snap(page, "retry-partial");
 
-await page.getByRole("button", { name: "重试", exact: true }).click();
+// 分析不完整时，提示中的“补充分析”重新搜索（出错时这个按钮写作“重试”）
+await page.getByTestId("partial-alert").getByRole("button", { name: "补充分析" }).click();
 await page.locator(".panel .n-tag", { hasText: "引擎分析完整" }).waitFor({ timeout: 30000 });
 const retry = explainBodies.at(-1);
 check(retry?.req.retry === true && retry.req.budget === "quick", `重试请求带 retry 与原预算：${JSON.stringify(retry?.req)}`);

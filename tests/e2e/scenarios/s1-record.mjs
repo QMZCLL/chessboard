@@ -37,8 +37,10 @@ await snap(page, "evidence-highlight");
 
 // 演示一个不是实际着法的候选
 await page.locator(".panel .candidates .row:not(.actual)").first().getByRole("button", { name: "演示", exact: true }).click();
-await waitText(page, "返回本步");
-check((await page.getByTestId("board-context").innerText()).includes("变化演示"), "进入变化演示");
+await page.getByTestId("preview-back").waitFor();
+const demoCtx = await page.getByTestId("board-context").innerText();
+check(demoCtx.includes("正在演示：马二进三之前的候选"), `棋盘上方写明演示的对象：${demoCtx}`);
+check((await page.getByTestId("preview-back").innerText()).includes("返回马二进三后的局面"), "返回按钮写明回到哪个局面");
 await page.getByRole("button", { name: "下一步" }).click();
 await snap(page, "preview");
 await page.getByRole("button", { name: /保存已演示的 1 着/ }).click();

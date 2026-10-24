@@ -19,10 +19,14 @@
   --radius-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
+  /* 字号：来源与分析条件 < 辅助说明 < 分组标题、程序依据 < 正文 < 一句话要点 < 当前着法 */
+  --fs-meta: 12.5px;
   --fs-aux: 13px;
   --fs-group: 14px;
+  --fs-basis: 14px;
   --fs-body: 15px;
-  --fs-key: 19px;
+  --fs-key: 18px;
+  --fs-move: 22px;
   --lh-body: 1.7;
   --control-h: 34px;
   --gutter: 10px;
@@ -43,15 +47,15 @@
   --border-strong: rgba(84, 62, 28, 0.24);
   --text-primary: #231f19;
   --text-secondary: #4b4439;
-  --text-muted: #7a7163;
+  --text-muted: #6b6356;
   --hover-bg: rgba(110, 84, 40, 0.07);
   --selected-bg: rgba(37, 99, 235, 0.1);
   --highlight-bg: rgba(217, 119, 6, 0.1);
   --accent-primary: #0f766e;
   --accent-red: #b3261e;
-  --accent-blue: #2563eb;
-  --accent-green: #2f7d4f;
-  --accent-amber: #b45309;
+  --accent-blue: #1d4ed8;
+  --accent-green: #276b43;
+  --accent-amber: #9a4508;
   --seal: #b8322a;
   --tag-red-bg: rgba(179, 38, 30, 0.09);
   --tag-blue-bg: rgba(37, 99, 235, 0.09);

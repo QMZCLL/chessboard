@@ -17,6 +17,7 @@ import {
   flipBoard,
   goRelative,
   playMove,
+  previewBackLabel,
   selectedNode,
   startTrial,
   stepPreview,
@@ -42,6 +43,8 @@ const marks = computed(() => (atStart.value ? preview.value!.marks : null));
 const highlights = computed(() => marks.value?.squares ?? (wb.preview ? [] : wb.highlight?.squares ?? []));
 const arrows = computed(() => marks.value?.arrows ?? (wb.preview ? [] : wb.highlight?.arrows ?? []));
 const shown = computed(() => Math.max(1, preview.value?.index ?? 0));
+/** 演示到最后一着：主要操作从“下一步”变为返回 */
+const atEnd = computed(() => !!preview.value && preview.value.index >= preview.value.moves.length);
 const saveOptions = computed(() => [{ label: `保存整条变化（${preview.value?.moves.length ?? 0} 着）`, key: "all" }]);
 
 // 浏览已有棋谱时才需要“从这里试走”：局面后面还有着法
@@ -79,6 +82,7 @@ function boardKeysAllowed(e: KeyboardEvent): boolean {
     "[role='combobox']",
     "[role='listbox']",
     "[role='slider']",
+    "[role='separator']",
     "[role='radiogroup']",
     "[role='tablist']",
     "[role='menu']",
@@ -145,6 +149,22 @@ onBeforeUnmount(() => {
       <n-tag v-else-if="status === 'stalemate'" type="error" size="small" :bordered="false">困毙（无子可走，判负）</n-tag>
       <n-tag v-else-if="inCheck" type="warning" size="small" :bordered="false">正被将军</n-tag>
       <n-tag v-if="!wb.preview && detailHere && detailHere.repetition > 1" size="small" :bordered="false">局面重复 {{ detailHere.repetition }} 次</n-tag>
+      <!-- 演示时，返回放在写明演示对象的说明旁边 -->
+      <n-tooltip v-if="preview">
+        <template #trigger>
+          <n-button
+            class="context-back"
+            size="small"
+            :type="atEnd ? 'primary' : 'default'"
+            :secondary="!atEnd"
+            data-testid="preview-back"
+            @click="exitPreview"
+          >
+            <template #icon><Icon name="back" /></template>{{ previewBackLabel }}
+          </n-button>
+        </template>
+        键盘 Esc
+      </n-tooltip>
     </div>
 
     <div v-if="preview && preview.notation.length" class="steps" aria-label="演示的着法">
@@ -184,7 +204,7 @@ onBeforeUnmount(() => {
 
     <div class="controls" data-testid="board-controls">
       <template v-if="preview">
-        <n-button-group v-if="preview.moves.length" size="small">
+        <n-button-group v-if="preview.moves.length" size="medium">
           <n-tooltip>
             <template #trigger>
               <n-button :disabled="preview.index === 0" aria-label="起点" @click="preview.index = 0">
@@ -201,7 +221,13 @@ onBeforeUnmount(() => {
           </n-tooltip>
           <n-tooltip>
             <template #trigger>
-              <n-button icon-placement="right" :disabled="preview.index === preview.moves.length" @click="stepPreview(1)">
+              <n-button
+                icon-placement="right"
+                :type="atEnd ? 'default' : 'primary'"
+                :disabled="atEnd"
+                data-testid="preview-next"
+                @click="stepPreview(1)"
+              >
                 <template #icon><Icon name="chevron-right" /></template>下一步
               </n-button>
             </template>
@@ -216,15 +242,10 @@ onBeforeUnmount(() => {
             演示到最后一着
           </n-tooltip>
         </n-button-group>
-        <span class="divider" />
-        <n-tooltip>
-          <template #trigger>
-            <n-button size="small" type="primary" @click="exitPreview"><template #icon><Icon name="back" /></template>返回本步</n-button>
-          </template>
-          键盘 Esc
-        </n-tooltip>
+        <span v-else class="controls-note">落子前的局面只用于查看依据，不能在这里走子</span>
+        <span v-if="preview.moves.length" class="divider" />
         <!-- 保存范围写在按钮上；保存整条变化放在旁边的菜单里 -->
-        <n-button-group v-if="preview.moves.length" size="small">
+        <n-button-group v-if="preview.moves.length" size="medium">
           <n-button quaternary @click="addPreviewAsBranch(false)"><template #icon><Icon name="save" /></template>保存已演示的 {{ shown }} 着</n-button>
           <n-dropdown v-if="shown < preview.moves.length" trigger="click" :options="saveOptions" @select="addPreviewAsBranch(true)">
             <n-button quaternary aria-label="更多保存方式"><template #icon><Icon name="chevron-down" /></template></n-button>
@@ -232,7 +253,7 @@ onBeforeUnmount(() => {
         </n-button-group>
       </template>
       <template v-else>
-        <n-button-group size="small">
+        <n-button-group size="medium">
           <n-tooltip>
             <template #trigger>
               <n-button :disabled="!selectedNode || selectedNode.parent === null" @click="goRelative(-1)">
@@ -251,13 +272,14 @@ onBeforeUnmount(() => {
           </n-tooltip>
         </n-button-group>
         <span v-if="wb.trial || canTrial" class="divider" />
-        <n-button v-if="wb.trial" size="small" type="primary" @click="endTrial"><template #icon><Icon name="back" /></template>结束试走，返回原局面</n-button>
+        <!-- 试走中的主要操作留给之后的“对比这步”；结束试走是次要操作 -->
+        <n-button v-if="wb.trial" size="medium" secondary @click="endTrial"><template #icon><Icon name="back" /></template>结束试走，返回原局面</n-button>
         <n-tooltip v-else-if="canTrial">
-          <template #trigger><n-button size="small" secondary @click="startTrial"><template #icon><Icon name="branch" /></template>从这里试走</n-button></template>
+          <template #trigger><n-button size="medium" secondary @click="startTrial"><template #icon><Icon name="branch" /></template>从这里试走</n-button></template>
           在这个局面走出自己的着法，走法保存在分支中
         </n-tooltip>
         <span class="divider" />
-        <n-button size="small" quaternary @click="flipBoard"><template #icon><Icon name="flip" /></template>翻转棋盘</n-button>
+        <n-button size="medium" quaternary @click="flipBoard"><template #icon><Icon name="flip" /></template>翻转棋盘</n-button>
       </template>
     </div>
   </section>
@@ -305,6 +327,14 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 .context-hint {
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+.context-back {
+  margin-left: auto;
+}
+.controls-note {
+  padding: 0 var(--sp-2);
   color: var(--text-muted);
   font-size: var(--fs-aux);
 }
@@ -395,10 +425,13 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   background: var(--tag-red-bg);
 }
-/* 棋盘下方的操作条 */
+/* 棋盘下方的操作条：按钮略收窄，常用宽度下保持一行 */
+.controls :deep(.n-button) {
+  padding: 0 12px;
+}
 .controls {
   display: flex;
-  gap: var(--sp-2);
+  gap: 6px;
   align-items: center;
   flex-wrap: wrap;
   justify-content: center;
