@@ -46,6 +46,7 @@ const EVENTS = [
   "capture_state",
   "cloud_result",
   "coach_updated",
+  "comparison_updated",
 ] as const;
 export type EventName = (typeof EVENTS)[number];
 
@@ -126,6 +127,9 @@ export const api = {
   coachView: (study_id: string, node_id: number) => call<T.CoachView>("coach_view", { req: { study_id, node_id } }),
   /** 保存或清除模型服务的密钥（只写入后台凭据文件，不会再返回界面）。 */
   setCoachCredential: (key: string | null) => call<T.AppStatus>("set_coach_credential", { req: { key } }),
+  /** 对比同一局面下的两种走法；reference 为空时由后台选择对照（实际着法、引擎首选或其他分支） */
+  compareMoves: (study_id: string, node_id: number, mine: T.Move, reference: T.Move | null) =>
+    call<T.CompareView>("compare_moves", { req: { study_id, node_id, mine, reference } }),
   analyzePosition: (study_id: string, node_id: number, budget: T.Budget, request_id: string) =>
     call<void>("analyze_position", { req: { study_id, node_id, budget, request_id } }),
   cancelAnalysis: (requestId: string) => call<void>("cancel_analysis", { requestId }),

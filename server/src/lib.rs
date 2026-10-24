@@ -89,6 +89,7 @@ pub fn run() {
             commands::coach_view,
             commands::set_coach_credential,
             commands::analyze_position,
+            commands::compare_moves,
             commands::cancel_analysis,
             commands::cloud_lookup,
             commands::export_study_to_file,

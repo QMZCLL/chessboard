@@ -150,7 +150,7 @@ export const displaySide = computed<T.Color | null>(() => {
 });
 
 /** 某个节点之后下一着的回合数。 */
-function roundAfter(node: T.StudyNode): number {
+export function roundAfter(node: T.StudyNode): number {
   const rootSide = nodeOf(0)?.side_to_move ?? "red";
   return parseInt(moveNumber(node.ply + 1, rootSide, node.side_to_move), 10);
 }
@@ -717,6 +717,17 @@ interface PreviewStart {
   moves: T.Move[];
   notation: string[];
   marks: Preview["marks"];
+}
+
+/**
+ * 从指定局面演示一条变化（如试走对比中，从比较起点演示两种选择）。
+ * keepIndexWithin：正在演示的变化来源以此开头时保留当前步数，便于在两条变化之间切换对照。
+ */
+export function previewFrom(p: { title: string; source: string; baseNode: number; moves: T.Move[]; notation: string[]; keepIndexWithin?: string }) {
+  const current = wb.preview;
+  const keep = p.keepIndexWithin && current?.source?.startsWith(p.keepIndexWithin) ? Math.min(current.index, p.moves.length) : 0;
+  wb.highlight = null;
+  wb.preview = { title: p.title, source: p.source, baseNode: p.baseNode, moves: p.moves, notation: p.notation, index: keep, marks: null };
 }
 
 function startPreview(p: PreviewStart) {

@@ -4,6 +4,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { NButton, NButtonGroup, NDropdown, NTag, NTooltip } from "naive-ui";
 import Icon from "./Icon.vue";
+import { openComparison, trialChoice } from "../state/compare";
 import XiangqiBoard from "./XiangqiBoard.vue";
 import {
   addPreviewAsBranch,
@@ -272,7 +273,16 @@ onBeforeUnmount(() => {
           </n-tooltip>
         </n-button-group>
         <span v-if="wb.trial || canTrial" class="divider" />
-        <!-- 试走中的主要操作留给之后的“对比这步”；结束试走是次要操作 -->
+        <!-- 试走中：对比我的走法是主要操作，结束试走是次要操作 -->
+        <n-button
+          v-if="wb.trial && trialChoice"
+          size="medium"
+          type="primary"
+          data-testid="compare-trial"
+          @click="openComparison(trialChoice.origin, trialChoice.mine)"
+        >
+          <template #icon><Icon name="compare" /></template>对比我的走法
+        </n-button>
         <n-button v-if="wb.trial" size="medium" secondary @click="endTrial"><template #icon><Icon name="back" /></template>结束试走，返回原局面</n-button>
         <n-tooltip v-else-if="canTrial">
           <template #trigger><n-button size="medium" secondary @click="startTrial"><template #icon><Icon name="branch" /></template>从这里试走</n-button></template>

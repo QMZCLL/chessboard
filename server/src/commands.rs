@@ -9,6 +9,8 @@ use xq_app::ApiResult;
 use xq_app::AppService;
 use xq_app::api::*;
 use xq_app::capture::CaptureState;
+use xq_app::compare::CompareRequest;
+use xq_app::compare::CompareView;
 use xq_app::capture::Snapshot;
 use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
@@ -161,6 +163,12 @@ pub async fn explain_move(state: State<'_, AppService>, req: ExplainRequest) -> 
 pub async fn analyze_position(state: State<'_, AppService>, req: AnalyzeRequest) -> ApiResult<()> {
     let s = service(&state);
     blocking(move || s.analyze_position(req)).await
+}
+
+#[tauri::command]
+pub async fn compare_moves(state: State<'_, AppService>, req: CompareRequest) -> ApiResult<CompareView> {
+    let s = service(&state);
+    blocking(move || s.compare_moves(req)).await
 }
 
 #[tauri::command]

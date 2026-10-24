@@ -9,6 +9,8 @@
 //! - 其他行原样输出。
 //!
 //! 脚本段用完后，`go` 命令只输出 `bestmove (none)`。
+//!
+//! 收到的 `go` 与 `setoption` 命令追加写入当前目录下的 `mock-uci-commands.log`，测试据此检查引擎实际收到的条件。
 
 use std::collections::VecDeque;
 use std::io::BufRead;
@@ -41,8 +43,14 @@ fn main() {
         let _ = writeln!(out, "{text}");
         let _ = out.flush();
     };
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open("mock-uci-commands.log").ok();
     while let Some(Ok(command)) = input.next() {
         let command = command.trim();
+        if (command.starts_with("go") || command.starts_with("setoption"))
+            && let Some(f) = log.as_mut()
+        {
+            let _ = writeln!(f, "{command}");
+        }
         match command.split_whitespace().next().unwrap_or("") {
             "uci" => {
                 say("id name MockUCI");

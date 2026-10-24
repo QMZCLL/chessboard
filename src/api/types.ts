@@ -522,3 +522,53 @@ export interface CloudEvent {
   record: CloudRecord | null;
   error: string | null;
 }
+
+// ---------- 试走对比 ----------
+
+export type CompareOutcome = "mine_better" | "reference_better" | "close" | "unclear" | "not_analyzed";
+export type ReferenceKind = "actual" | "branch" | "candidate" | "other";
+
+/** 对比中的一方：规则事实、对方最值得关注的回应、从比较起点开始的变化与程序给出的评分说明。 */
+export interface CompareSide {
+  mv: Move;
+  notation: string;
+  changes: Claim[];
+  reply: Claim | null;
+  line: LineRef | null;
+  score_text: string | null;
+}
+
+export interface MoveComparison {
+  generator_version: number;
+  mover: Color;
+  mine: CompareSide;
+  reference: CompareSide;
+  outcome: CompareOutcome;
+  /** 已确认的差别（程序结论） */
+  differences: Claim[];
+  evidence: Evidence[];
+  warnings: string[];
+  conditions: string | null;
+}
+
+export interface CompareOption {
+  mv: Move;
+  notation: string;
+  kind: ReferenceKind;
+  rank: number | null;
+}
+
+export interface CompareView {
+  study_id: string;
+  /** 比较起点 */
+  node_id: number;
+  mine: Move;
+  reference: Move;
+  reference_kind: ReferenceKind;
+  reference_rank: number | null;
+  /** 同一次搜索尚未完成，完成后推送 comparison_updated */
+  pending: boolean;
+  error: string | null;
+  comparison: MoveComparison;
+  options: CompareOption[];
+}

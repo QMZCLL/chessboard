@@ -565,6 +565,11 @@ impl AppService {
 
     pub fn analyze_position(&self, req: AnalyzeRequest) -> ApiResult<()> { self.inner.analyze_position(req) }
 
+    /// 对比同一局面下的两种走法；需要搜索时先返回规则事实，完成后推送 `comparison_updated`。
+    pub fn compare_moves(&self, req: crate::compare::CompareRequest) -> ApiResult<crate::compare::CompareView> {
+        self.inner.compare_moves(req)
+    }
+
     pub fn cancel_analysis(&self, request_id: &str) { self.inner.engine.cancel_group(&format!("analyze:{request_id}")); }
 }
 

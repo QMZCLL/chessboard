@@ -1,13 +1,23 @@
 <script setup lang="ts">
 // 先想后讲：展示用户试走分支的讲解，与实际着法对照。
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { NButton, NSpin, NTag } from "naive-ui";
 import { api, errorMessage, on } from "../api/backend";
 import type { ExplanationEvent, ExplanationRecord } from "../api/types";
-import { newestRecord, selectNode, study } from "../state/workbench";
+import { openComparison } from "../state/compare";
+import { newestRecord, nodeOf, selectNode, selectedNode, study } from "../state/workbench";
 import VerdictTag from "./VerdictTag.vue";
 
 const props = defineProps<{ nodeId: number }>();
+
+// 与实际着法对比：两步都从实际着法落子前的局面走出
+const attemptNode = computed(() => nodeOf(props.nodeId));
+const canCompare = computed(() => !!attemptNode.value?.mv && !!selectedNode.value?.mv && attemptNode.value.parent !== null);
+function compareAttempt() {
+  const a = attemptNode.value;
+  const actual = selectedNode.value;
+  if (a?.mv && a.parent !== null && actual?.mv) void openComparison(a.parent, a.mv, actual.mv);
+}
 const record = ref<ExplanationRecord | null>(null);
 const notation = ref("");
 const error = ref<string | null>(null);
@@ -49,6 +59,7 @@ watch(
       <strong class="notation">{{ notation }}</strong>
       <VerdictTag v-if="record?.explanation?.verdict" :verdict="record.explanation.verdict" />
       <span class="spacer" />
+      <n-button size="small" type="primary" secondary data-testid="compare-attempt" :disabled="!canCompare" @click="compareAttempt">对比我的走法</n-button>
       <n-button size="small" quaternary @click="selectNode(nodeId)">打开分支</n-button>
     </header>
     <p v-if="error" class="error">{{ error }}</p>

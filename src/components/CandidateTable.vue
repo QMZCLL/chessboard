@@ -5,7 +5,8 @@ import { computed } from "vue";
 import { NButton } from "naive-ui";
 import Icon from "./Icon.vue";
 import type { CandidateView } from "../api/types";
-import { candidateSource, focusCandidate, showCandidate, thinking, wb } from "../state/workbench";
+import { openComparison } from "../state/compare";
+import { candidateSource, focusCandidate, selectedNode, showCandidate, thinking, wb } from "../state/workbench";
 import { scoreText } from "../utils/board";
 
 const props = defineProps<{ candidates: CandidateView[]; base: "parent" | "node"; showActual?: boolean; scope: string }>();
@@ -50,6 +51,16 @@ function previewing(c: CandidateView) {
         <p v-if="c.pv_notation.length" class="pv"><span class="muted">主变化：</span>{{ c.pv_notation.join(" ") }}</p>
         <p v-else class="muted">这条候选没有可演示的合法变化。</p>
         <p v-if="!onBoard" class="muted">候选从落子前的局面开始，点击“演示”查看。</p>
+        <n-button
+          v-if="showActual && !c.is_actual && selectedNode?.mv && selectedNode.parent !== null"
+          size="small"
+          secondary
+          class="what-if"
+          data-testid="compare-candidate"
+          @click="openComparison(selectedNode.parent, c.mv, selectedNode.mv)"
+        >
+          <template #icon><Icon name="compare" /></template>如果改走这步，会怎样？
+        </n-button>
       </div>
     </div>
     <p v-if="!candidates.length" class="empty">暂无候选</p>
@@ -145,6 +156,9 @@ function previewing(c: CandidateView) {
 }
 .pv {
   font-family: var(--piece-font);
+}
+.what-if {
+  margin-top: var(--sp-1);
 }
 .muted {
   color: var(--text-muted);

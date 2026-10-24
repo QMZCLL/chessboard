@@ -22,6 +22,7 @@ const PATHS = {
   pen: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z",
   home: "M3 10.5L12 3l9 7.5M5 9v11h14V9",
   latest: "M5 4l10 8-10 8zM19 5v14",
+  compare: "M8 3v18M16 3v18M3 8h5M16 8h5M3 16h5M16 16h5",
 } as const;
 
 export type IconName = keyof typeof PATHS;

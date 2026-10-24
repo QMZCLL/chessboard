@@ -9,6 +9,7 @@ import BasisList from "./BasisList.vue";
 import Icon from "./Icon.vue";
 import CandidateTable from "./CandidateTable.vue";
 import CoachCard from "./CoachCard.vue";
+import ComparePanel from "./ComparePanel.vue";
 import ClaimList from "./ClaimList.vue";
 import VerdictTag from "./VerdictTag.vue";
 import {
@@ -31,11 +32,12 @@ import {
   wb,
 } from "../state/workbench";
 import { coachLesson } from "../state/coachContent";
+import { cmp } from "../state/compare";
 import { coachDisplay } from "../state/coachDisplay";
 import { editNote, noteView, persistNote } from "../state/notes";
 import { sideLabel } from "../utils/board";
 
-const tab = ref<"move" | "position" | "notes">("move");
+const tab = ref<"move" | "position" | "notes" | "compare">("move");
 const node = selectedNode;
 const record = computed(() =>
   newestRecord(wb.detail?.node.id === wb.selected ? wb.detail.explanation : null, wb.records[wb.selected]),
@@ -98,6 +100,14 @@ watch(
 watch(thinking, (t) => {
   if (t) tab.value = "move";
 });
+// 打开对比时切到对比；关闭后回到本步讲解或局面分析
+watch(
+  () => cmp.request && `${cmp.request.origin}:${cmp.request.mine}`,
+  (key, before) => {
+    if (key && key !== before) tab.value = "compare";
+    else if (!key && tab.value === "compare") tab.value = isMove.value ? "move" : "position";
+  },
+);
 
 // ---------- 笔记 ----------
 // 草稿与保存状态在 state/notes.ts 中按（会话, 着法）保存，面板重建（如跨布局断点）后不丢失也不回写旧值
@@ -307,6 +317,12 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
             </template>
           </div>
           <div v-else class="loading"><n-spin size="small" /></div>
+        </n-scrollbar>
+      </n-tab-pane>
+
+      <n-tab-pane v-if="cmp.request" name="compare" tab="对比">
+        <n-scrollbar class="scroll">
+          <ComparePanel />
         </n-scrollbar>
       </n-tab-pane>
 

@@ -112,7 +112,8 @@ impl Inner {
             Budget::Quick => (cfg.analysis.quick_depth, cfg.analysis.quick_time_ms),
             Budget::Deep => (cfg.analysis.deep_depth, cfg.analysis.deep_time_ms),
         };
-        let multipv = if searchmoves.is_empty() { cfg.analysis.multipv } else { 1 };
+        // 限定着法时每一步各给出一条变化（实际着法单独分析时为 1，对比两步时为 2）
+        let multipv = if searchmoves.is_empty() { cfg.analysis.multipv } else { searchmoves.len() as u32 };
         Ok(AnalysisConditions {
             base_fen,
             moves,
@@ -132,7 +133,7 @@ impl Inner {
     ///
     /// 缓存只复用完整一致的结果（以及终局）。不完整的结果仍会保存用于展示，但再次请求时重新搜索，
     /// 用户重试才能真正得到新的分析。
-    fn search(
+    pub(crate) fn search(
         &self, conditions: AnalysisConditions, priority: Priority, group: String,
         on_progress: Option<Box<dyn FnMut(SearchProgress) + Send>>, on_done: impl FnOnce(SearchOutcome) + Send + 'static,
     ) {

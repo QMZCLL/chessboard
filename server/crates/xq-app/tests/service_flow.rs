@@ -13,6 +13,7 @@ use xq_app::AppService;
 use xq_app::api::*;
 use xq_app::capture::CaptureState;
 use xq_app::capture::SimBackend;
+use xq_app::compare::CompareRequest;
 use xq_app::engine::EngineState;
 use xq_app::events::EventSink;
 use xq_app::records::Budget;
@@ -670,5 +671,61 @@ fn engine_unavailable_keeps_basic_explanation_with_reason() {
     assert!(ev["record"]["error"].as_str().unwrap().contains("引擎不可用"), "{ev}");
     let detail = service.node_detail(NodeRef { study_id: sid, node_id: node }).unwrap();
     assert_eq!(detail.status, GameStatus::Checkmate);
+    service.shutdown();
+}
+
+#[test]
+fn comparison_searches_both_moves_together_and_reuses_the_result() {
+    // 对两步棋的同一次搜索：限定两步（searchmoves），每步一条变化
+    let script = "@go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 40 nodes 10 time 1 pv h2e2 h9g7\n\
+        info depth 5 seldepth 5 multipv 2 score cp -150 nodes 10 time 1 pv c3c4 h7e7\n\
+        bestmove h2e2\n";
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let request = |mine: &str, reference: Option<&str>| CompareRequest {
+        study_id: sid.clone(),
+        node_id: ROOT,
+        mine: mv(mine),
+        reference: reference.map(mv),
+    };
+
+    // 先返回规则事实，搜索完成后推送完整结果
+    let first = service.compare_moves(request("c3c4", Some("h2e2"))).unwrap();
+    assert!(first.pending);
+    let facts = serde_json::to_value(&first).unwrap();
+    assert_eq!(facts["comparison"]["outcome"], "not_analyzed");
+    assert!(!facts["comparison"]["mine"]["changes"].as_array().unwrap().is_empty(), "规则事实不等待搜索");
+    let done = rec.wait("对比完成", |e, v| e == "comparison_updated" && v["pending"] == false);
+    assert_eq!(done["comparison"]["outcome"], "reference_better", "{done}");
+    let text = done["comparison"]["differences"].to_string();
+    assert!(text.contains("兵七进一比炮二平五低约 190 分"), "{text}");
+    assert_eq!(done["comparison"]["mine"]["reply"]["text"], "对方最值得关注的回应是炮8平5");
+    assert_eq!(done["comparison"]["reference"]["line"]["moves"][0], "h2e2", "对照的变化从比较起点开始");
+
+    // 引擎收到的是同一次搜索：两步一起限定，两条变化
+    let log = std::fs::read_to_string(dir.path().join("engine").join("mock-uci-commands.log")).unwrap();
+    let gos: Vec<&str> = log.lines().filter(|l| l.starts_with("go")).collect();
+    assert_eq!(gos.len(), 1, "{log}");
+    assert!(gos[0].contains("searchmoves c3c4 h2e2"), "{log}");
+    assert!(log.contains("setoption name MultiPV value 2"), "{log}");
+
+    // 同样两步（不论哪一步是“我的选择”）直接使用缓存的结果，不再搜索
+    let again = service.compare_moves(request("h2e2", Some("c3c4"))).unwrap();
+    assert!(!again.pending);
+    assert_eq!(serde_json::to_value(&again).unwrap()["comparison"]["outcome"], "mine_better");
+    let log = std::fs::read_to_string(dir.path().join("engine").join("mock-uci-commands.log")).unwrap();
+    assert_eq!(log.lines().filter(|l| l.starts_with("go")).count(), 1, "{log}");
+
+    // 两步相同、着法不合法，或没有可以对照的着法时给出说明
+    assert!(service.compare_moves(request("h2e2", Some("h2e2"))).is_err());
+    assert!(service.compare_moves(request("h2e2", Some("a0a5"))).is_err());
+    let none = service.compare_moves(request("h2e2", None)).unwrap_err();
+    assert!(none.message.contains("没有可以对照的着法"), "{}", none.message);
     service.shutdown();
 }
