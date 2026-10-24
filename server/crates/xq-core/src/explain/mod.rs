@@ -7,5 +7,6 @@ pub mod compare;
 pub mod compose;
 pub mod describe;
 pub mod facts;
+pub mod hints;
 
 pub use compose::*;

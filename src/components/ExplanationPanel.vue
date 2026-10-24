@@ -27,6 +27,10 @@ import {
   retryExplanation,
   reveal,
   selectedNode,
+  showHint,
+  thinkHints,
+  toggleHintMove,
+  concealed,
   study,
   thinking,
   wb,
@@ -144,6 +148,27 @@ const thinkSide = computed(() => {
   return parent ? sideLabel(parent.side_to_move) : "";
 });
 const isRoot = computed(() => node.value?.id === 0);
+
+// ---------- 先想后讲 ----------
+/** 正在思考的这一着尚未揭示：隐藏会透露答案的标签 */
+const hiding = computed(() => concealed.value.has(wb.selected));
+const hintLevel = computed(() => (wb.thinkSession?.nodeId === wb.selected ? wb.thinkSession.hints : 0));
+/** 这一着最近一次练习的记录 */
+const practiceText = computed(() => {
+  const p = node.value?.practice;
+  if (!p) return "";
+  const hints = p.hints_used ? `用了 ${p.hints_used} 级提示` : "没有用提示";
+  const choice = p.revealed_directly
+    ? "没有走子就看了讲解"
+    : `第一步${p.matched ? "与棋谱相同" : "与棋谱不同"}（${notationOfChoice(p.first_choice)}）`;
+  return `练习记录：${hints}，${choice}${p.sessions > 1 ? ` · 共练习 ${p.sessions} 次` : ""}`;
+});
+function notationOfChoice(mv: string | null) {
+  if (!mv) return "";
+  const parent = nodeOf(node.value?.parent);
+  const child = parent?.children.map((c) => nodeOf(c)).find((c) => c?.mv === mv);
+  return child?.notation ?? mv;
+}
 const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分析");
 </script>
 
@@ -154,13 +179,50 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
         <n-scrollbar class="scroll">
           <div class="content">
             <!-- 先想后讲 -->
-            <div v-if="thinking" class="think">
+            <div v-if="thinking" class="think" data-testid="think-card">
               <h3>先想一想</h3>
               <p>轮到<strong>{{ thinkSide }}</strong>走。你会怎么走？</p>
               <p class="muted">在棋盘上走出你的选择：与实际着法不同时会建立分支，并与实际着法对照讲解。</p>
-              <n-button size="small" @click="reveal()">直接看讲解</n-button>
+              <!-- 分级提示：只依据当前局面，不透露棋谱中的着法 -->
+              <ol v-if="hintLevel > 0 && thinkHints" class="hints" data-testid="hints">
+                <li class="hint">
+                  <span class="hint-label">提示 1 · 局面需求</span>
+                  <p>{{ thinkHints.observe }}</p>
+                </li>
+                <li v-if="hintLevel >= 2" class="hint">
+                  <span class="hint-label">提示 2 · 相关棋子</span>
+                  <p>{{ thinkHints.focus.text }}</p>
+                  <p v-if="thinkHints.focus.squares.length" class="muted">已在棋盘上标出。</p>
+                </li>
+                <li v-if="hintLevel >= 3" class="hint">
+                  <span class="hint-label">提示 3 · 可以考虑</span>
+                  <div v-if="thinkHints.moves.length" class="hint-moves">
+                    <button
+                      v-for="m in thinkHints.moves"
+                      :key="m.mv"
+                      type="button"
+                      class="hint-move focusable"
+                      :class="{ on: wb.thinkSession?.arrow === m.mv }"
+                      :aria-pressed="wb.thinkSession?.arrow === m.mv"
+                      @click="toggleHintMove(m.mv)"
+                    >
+                      {{ m.notation }}
+                    </button>
+                  </div>
+                  <p class="muted">{{ thinkHints.moves_note }}{{ thinkHints.moves.length ? "。点一步可在棋盘上查看，再自己走出来" : "" }}</p>
+                </li>
+              </ol>
+              <div class="think-actions">
+                <n-button v-if="thinkHints && hintLevel < 3" size="medium" type="primary" data-testid="hint-next" @click="showHint">
+                  {{ hintLevel === 0 ? "给我一点提示" : "再给一点提示" }}
+                </n-button>
+                <n-button size="medium" secondary data-testid="reveal" @click="reveal()">直接看讲解</n-button>
+                <span v-if="thinkHints" class="muted" data-testid="hint-count">已用提示 {{ hintLevel }} / 3</span>
+              </div>
+              <p class="muted note">提示只根据当前局面的事实与候选生成，不会直接告诉你棋谱中的着法。</p>
             </div>
             <template v-else-if="isMove">
+              <p v-if="practiceText" class="practice" data-testid="practice">{{ practiceText }}</p>
               <AttemptCard v-if="attempt !== undefined" :node-id="attempt" />
               <div v-if="wb.detailError" class="error">{{ wb.detailError }}</div>
               <template v-if="expl">
@@ -268,7 +330,8 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
         </n-scrollbar>
       </n-tab-pane>
 
-      <n-tab-pane name="position" tab="局面分析">
+      <!-- 先想后讲时，局面分析显示的是落子后的局面、笔记可能写着答案，揭示前不可用 -->
+      <n-tab-pane name="position" tab="局面分析" :disabled="hiding">
         <n-scrollbar class="scroll">
           <div v-if="position" class="content">
             <div v-if="isRoot && position.status === 'ongoing'" class="intro" data-testid="start-intro">
@@ -326,7 +389,7 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
         </n-scrollbar>
       </n-tab-pane>
 
-      <n-tab-pane name="notes" tab="笔记">
+      <n-tab-pane name="notes" tab="笔记" :disabled="hiding">
         <div class="content notes">
           <div class="note-head">
             <span>收藏这一步</span>
@@ -578,6 +641,69 @@ h4 {
   border-radius: var(--radius-lg);
   background: var(--tag-blue-bg);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-blue) 30%, transparent);
+}
+/* 分级提示 */
+.hints {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.hint {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.hint p {
+  margin: 2px 0 0;
+}
+.hint-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent-amber);
+}
+.hint-moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.hint-move {
+  min-height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--tag-blue-bg);
+  color: var(--accent-blue);
+  font-family: var(--piece-font);
+  font-size: 16px;
+  cursor: pointer;
+}
+.hint-move.on {
+  background: var(--accent-blue);
+  color: var(--panel);
+}
+.think-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.think .note {
+  margin: var(--sp-2) 0 0;
+}
+.practice {
+  margin: 0 0 var(--sp-3);
+  padding: 6px var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--tag-amber-bg);
+  font-size: var(--fs-group);
+  color: var(--text-secondary);
 }
 .think h3 {
   margin: 0 0 6px;

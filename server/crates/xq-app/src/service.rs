@@ -528,6 +528,14 @@ impl AppService {
         self.inner.study_view(&study)
     }
 
+    pub fn record_practice(&self, req: PracticeRequest) -> ApiResult<StudyView> {
+        let study = self.inner.with_study(&req.study_id, |s| {
+            s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, now_ms())?;
+            Ok(s.clone())
+        })?;
+        self.inner.study_view(&study)
+    }
+
     pub fn set_note(&self, req: NoteRequest) -> ApiResult<StudyView> {
         let study = self.inner.with_study(&req.study_id, |s| {
             s.set_note(req.node_id, req.note, req.starred, now_ms())?;
@@ -746,6 +754,7 @@ impl Inner {
         let ctx = self.context_at(&study, node_id)?;
         let engine = self.cached_position_evidence(&study, node_id);
         let position = xq_core::explain::explain_position(&pos, &ctx, engine.as_ref());
+        let hints = xq_core::explain::hints::think_hints(&pos, engine.as_ref());
         let explanation = if node.is_move() { self.store.load_explanation(study_id, node_id)? } else { None };
         let coach = node.is_move().then(|| self.coach_view(study_id, node_id));
         Ok(NodeDetail {
@@ -761,6 +770,7 @@ impl Inner {
             position,
             explanation,
             coach,
+            hints,
         })
     }
 }

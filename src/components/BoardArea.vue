@@ -23,6 +23,7 @@ import {
   startTrial,
   stepPreview,
   study,
+  thinkMarks,
   thinking,
   wb,
 } from "../state/workbench";
@@ -38,11 +39,19 @@ const interactive = computed(() => !wb.preview && status.value !== "checkmate" &
 const preview = computed(() => wb.preview);
 const atStart = computed(() => !!preview.value && preview.value.index === 0);
 const previewArrow = computed(() => (preview.value && preview.value.index > 0 ? displayLastMove.value : null));
-const nextArrow = computed(() => (atStart.value && preview.value!.moves.length ? preview.value!.moves[0] : null));
+// 演示起点的下一着；先想后讲时为三级提示中选看的着法
+const nextArrow = computed(() =>
+  atStart.value && preview.value!.moves.length ? preview.value!.moves[0] : thinking.value ? (thinkMarks.value?.next ?? null) : null,
+);
 const lastMove = computed(() => (wb.preview ? null : displayLastMove.value));
 const marks = computed(() => (atStart.value ? preview.value!.marks : null));
-const highlights = computed(() => marks.value?.squares ?? (wb.preview ? [] : wb.highlight?.squares ?? []));
-const arrows = computed(() => marks.value?.arrows ?? (wb.preview ? [] : wb.highlight?.arrows ?? []));
+// 先想后讲时只显示提示标出的棋子与关系（二级提示起）
+const highlights = computed(
+  () => marks.value?.squares ?? (wb.preview ? [] : thinking.value ? (thinkMarks.value?.squares ?? []) : (wb.highlight?.squares ?? [])),
+);
+const arrows = computed(
+  () => marks.value?.arrows ?? (wb.preview ? [] : thinking.value ? (thinkMarks.value?.arrows ?? []) : (wb.highlight?.arrows ?? [])),
+);
 const shown = computed(() => Math.max(1, preview.value?.index ?? 0));
 /** 演示到最后一着：主要操作从“下一步”变为返回 */
 const atEnd = computed(() => !!preview.value && preview.value.index >= preview.value.moves.length);

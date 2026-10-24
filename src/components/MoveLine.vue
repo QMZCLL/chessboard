@@ -3,7 +3,7 @@
 import { computed } from "vue";
 import { NDropdown, useDialog } from "naive-ui";
 import type { ExplainStatus } from "../api/types";
-import { deleteFrom, nodeOf, promote, selectNode, subtreeSize, wb } from "../state/workbench";
+import { concealed, deleteFrom, nodeOf, promote, selectNode, subtreeSize, wb } from "../state/workbench";
 import { moveNumber } from "../utils/board";
 
 defineOptions({ name: "MoveLine" });
@@ -76,6 +76,11 @@ function onMenu(id: number, key: string) {
   }
 }
 
+/** 先想后讲中尚未揭示的着法不显示名称 */
+function shownNotation(id: number) {
+  return concealed.value.has(id) ? "？？？" : (nodeOf(id)?.notation ?? "");
+}
+
 function toggle() {
   wb.collapsed[props.start] = !collapsed.value;
 }
@@ -85,7 +90,7 @@ function toggle() {
   <div class="line" :class="{ variation: depth > 0 }">
     <button v-if="depth > 0" type="button" class="branch-head" :aria-expanded="!collapsed" @click="toggle">
       <span class="caret">{{ collapsed ? "▸" : "▾" }}</span>
-      分支 · 从 {{ label(start) }} {{ nodeOf(start)?.notation }} 开始 · {{ branchSize }} 着
+      分支 · 从 {{ label(start) }} {{ shownNotation(start) }} 开始 · {{ branchSize }} 着
     </button>
     <template v-if="!collapsed">
       <template v-for="item in items" :key="item.id">
@@ -105,7 +110,9 @@ function toggle() {
           @keydown.space.self.prevent="selectNode(item.id)"
         >
           <span class="num">{{ label(item.id) }}</span>
-          <span class="notation">{{ nodeOf(item.id)?.notation }}</span>
+          <span class="notation" :class="{ concealed: concealed.has(item.id) }" :aria-label="concealed.has(item.id) ? '尚未揭示的着法' : undefined">
+            {{ shownNotation(item.id) }}
+          </span>
           <span class="flags">
             <span v-if="nodeOf(item.id)?.starred" class="star" title="已收藏">★</span>
             <span v-if="nodeOf(item.id)?.note" class="note" title="有笔记">✎</span>
@@ -180,6 +187,10 @@ function toggle() {
   color: var(--text-muted);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+}
+.notation.concealed {
+  color: var(--text-muted);
+  letter-spacing: 4px;
 }
 .notation {
   flex: 1;

@@ -8,6 +8,7 @@ use xq_core::Color;
 use xq_core::Move;
 use xq_core::capture::Rect;
 use xq_core::explain::PositionExplanation;
+use xq_core::explain::hints::ThinkHints;
 use xq_core::record::RecordStop;
 use xq_core::rules::GameStatus;
 use xq_core::rules::IllegalMove;
@@ -147,6 +148,16 @@ pub struct NoteRequest {
     pub starred: bool,
 }
 
+/// 一次先想后讲练习的结果：用了几级提示、是否没有走子就看了讲解、自己走出的第一步。
+#[derive(Clone, Debug, Deserialize)]
+pub struct PracticeRequest {
+    pub study_id: String,
+    pub node_id: NodeId,
+    pub hints_used: u8,
+    pub revealed_directly: bool,
+    pub first_choice: Option<Move>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct StudyPrefsRequest {
     pub study_id: String,
@@ -207,6 +218,8 @@ pub struct NodeDetail {
     /// 走子节点的 AI 讲解状态。
     pub coach: Option<CoachView>,
     pub cloud: Option<CloudRecord>,
+    /// 先想后讲的分级提示：只依据这个局面的事实与已缓存的候选，局面结束时为空。
+    pub hints: Option<ThinkHints>,
 }
 
 #[derive(Clone, Debug, Serialize)]

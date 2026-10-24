@@ -38,7 +38,20 @@ export interface StudyNode {
   gap_reason: string | null;
   note: string;
   starred: boolean;
+  /** 先想后讲的练习记录（最近一次） */
+  practice: Practice | null;
   created_at: number;
+}
+
+export interface Practice {
+  hints_used: number;
+  /** 没有走子就看了讲解 */
+  revealed_directly: boolean;
+  first_choice: Move | null;
+  /** 第一步与棋谱中的这一着相同 */
+  matched: boolean;
+  sessions: number;
+  updated_at: number;
 }
 
 export interface Study {
@@ -212,6 +225,22 @@ export interface NodeDetail {
   /** 走子节点的 AI 讲解状态。 */
   coach: CoachView | null;
   cloud: CloudRecord | null;
+  /** 先想后讲的分级提示（只依据这个局面，局面结束时为空） */
+  hints: ThinkHints | null;
+}
+
+export type HintTopic = "in_check" | "own_threat" | "opportunity" | "development" | "improve";
+
+export interface ThinkHints {
+  side: Color;
+  topic: HintTopic;
+  /** 一级：观察局面需求 */
+  observe: string;
+  /** 二级：相关的棋子与关系 */
+  focus: { text: string; squares: Square[]; arrows: Move[] };
+  /** 三级：可以考虑的着法（不分先后） */
+  moves: { mv: Move; notation: string }[];
+  moves_note: string;
 }
 
 export interface IllegalMove {

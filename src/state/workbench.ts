@@ -1,6 +1,6 @@
 // 学习工作台的统一状态。棋盘、棋谱、讲解面板都从这里取数据，避免各组件直接改动 DOM。
 
-import { computed, reactive } from "vue";
+import { computed, reactive, watch } from "vue";
 import { api, errorMessage, isTauri, newRequestId, on, pickOpenPath, pickSavePath, ready } from "../api/backend";
 import type * as T from "../api/types";
 import { applyLine, moveNumber, placementOf, sideLabel } from "../utils/board";
@@ -59,6 +59,8 @@ export const wb = reactive({
   detailError: null as string | null,
   /** 先想后讲模式下作为试走起点的局面 */
   thinkBase: null as T.NodeDetail | null,
+  /** 先想后讲中正在思考的这一着：已经看了几级提示、三级提示中选看的着法 */
+  thinkSession: null as { nodeId: number; hints: number; arrow: T.Move | null } | null,
   analysis: null as AnalysisState | null,
   preview: null as Preview | null,
   highlight: null as Highlight | null,
@@ -113,6 +115,70 @@ export const thinking = computed(() => {
   const node = selectedNode.value;
   return wb.mode === "think" && !!node?.mv && !wb.revealed[node.id] && !wb.preview;
 });
+
+/**
+ * 先想后讲的训练状态：当前局面之后（含正在思考的这一着）尚未揭示的着法都不能透露，
+ * 即使当前这一着已经揭示，下一着也要等用户思考后才显示。
+ * 棋谱、讲解面板的标签与棋盘标记都按它隐藏答案（与是否正在演示无关）。
+ */
+export const concealed = computed<Set<number>>(() => {
+  const node = selectedNode.value;
+  const hidden = new Set<number>();
+  if (wb.mode !== "think" || !node) return hidden;
+  const visit = (id: number) => {
+    const n = nodeOf(id);
+    if (!n) return;
+    if (n.mv && !wb.revealed[id]) hidden.add(id);
+    n.children.forEach(visit);
+  };
+  visit(node.id);
+  return hidden;
+});
+
+/** 当前局面的分级提示（来自落子前局面的详情）。 */
+export const thinkHints = computed(() => (thinking.value ? (wb.thinkBase?.hints ?? null) : null));
+
+/** 二级提示在棋盘上标出的棋子与关系，三级提示中选看的着法。 */
+export const thinkMarks = computed(() => {
+  const h = thinkHints.value;
+  const session = wb.thinkSession;
+  if (!h || !session || session.nodeId !== wb.selected || session.hints < 2) return null;
+  return { squares: h.focus.squares, arrows: h.focus.arrows, next: session.arrow };
+});
+
+// 换到另一着思考时开始新的一次练习
+watch(
+  () => (thinking.value ? wb.selected : null),
+  (id) => {
+    if (id !== null && wb.thinkSession?.nodeId !== id) wb.thinkSession = { nodeId: id, hints: 0, arrow: null };
+  },
+);
+
+/** 再给一级提示（最多三级）。 */
+export function showHint() {
+  const session = wb.thinkSession;
+  if (session && session.nodeId === wb.selected) session.hints = Math.min(3, session.hints + 1);
+}
+
+/** 三级提示：在棋盘上标出（或取消标出）一步可以考虑的着法，由用户自己走出来。 */
+export function toggleHintMove(mv: T.Move) {
+  const session = wb.thinkSession;
+  if (session && session.nodeId === wb.selected) session.arrow = session.arrow === mv ? null : mv;
+}
+
+/** 记录这一着的练习：没有走子就看讲解时 firstChoice 为空。只在这一着正在练习时记录。 */
+async function recordPractice(nodeId: number, firstChoice: T.Move | null) {
+  const s = study.value;
+  const session = wb.thinkSession;
+  if (!s || !session || session.nodeId !== nodeId) return;
+  wb.thinkSession = null;
+  try {
+    const view = await api.recordPractice(s.id, nodeId, session.hints, firstChoice === null, firstChoice);
+    if (wb.view?.study.id === s.id && view.study.revision >= wb.view.study.revision) setView(view);
+  } catch (e) {
+    notify("error", errorMessage(e));
+  }
+}
 
 /** 棋盘当前显示的局面 FEN（含行棋方）。 */
 export const displayFen = computed(() => {
@@ -542,6 +608,8 @@ async function loadThinkBase() {
 }
 
 export function reveal(id = wb.selected) {
+  // 没有走子就看讲解：记为直接揭示
+  if (!wb.revealed[id]) void recordPractice(id, null);
   wb.revealed[id] = true;
   if (id === wb.selected) autoCoach(wb.coach[id] ?? null);
 }
@@ -603,7 +671,10 @@ export async function playMove(mv: T.Move) {
     wb.illegal = null;
     if (resp.study) setView(resp.study);
     const target = resp.node_id!;
+    // 用户自己走出的着法是已知的，先想后讲中不再隐藏或要求思考
+    if (target !== node.id) wb.revealed[target] = true;
     if (thinkingNow) {
+      void recordPractice(node.id, mv);
       if (target !== node.id) wb.attempts[node.id] = target;
       reveal(node.id);
       notify(target === node.id ? "success" : "info", target === node.id ? "与实际着法相同" : "已建立你的试走分支，下面对照讲解");

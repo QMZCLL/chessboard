@@ -89,6 +89,7 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         "delete_node" => to_value(service.delete_node(arg(args, "req")?)?),
         "promote_node" => to_value(service.promote_node(arg(args, "req")?)?),
         "set_note" => to_value(service.set_note(arg(args, "req")?)?),
+        "record_practice" => to_value(service.record_practice(arg(args, "req")?)?),
         "focus_node" => {
             service.focus_node(arg(args, "req")?);
             Ok(Value::Null)

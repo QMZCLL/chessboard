@@ -729,3 +729,29 @@ fn comparison_searches_both_moves_together_and_reuses_the_result() {
     assert!(none.message.contains("没有可以对照的着法"), "{}", none.message);
     service.shutdown();
 }
+
+#[test]
+fn think_hints_come_with_the_position_and_practice_is_recorded_on_the_move() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    // 落子前局面的详情带有分级提示（不依赖棋谱中的实际着法）
+    let detail = serde_json::to_value(service.node_detail(NodeRef { study_id: sid.clone(), node_id: ROOT }).unwrap()).unwrap();
+    assert_eq!(detail["hints"]["topic"], "development", "{}", detail["hints"]);
+    assert!(detail["hints"]["observe"].as_str().unwrap().contains("没有出动的子力"));
+
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let view = service
+        .record_practice(PracticeRequest { study_id: sid.clone(), node_id: node, hints_used: 2, revealed_directly: false, first_choice: Some(mv("h2e2")) })
+        .unwrap();
+    let practice = serde_json::to_value(&view.study.nodes[&node].practice).unwrap();
+    assert_eq!((practice["hints_used"].as_u64(), practice["matched"].as_bool(), practice["sessions"].as_u64()), (Some(2), Some(true), Some(1)));
+    // 练习记录随会话保存，重新打开仍在
+    let reopened = service.load_study(&sid).unwrap();
+    assert!(reopened.study.nodes[&node].practice.is_some());
+    service.shutdown();
+}

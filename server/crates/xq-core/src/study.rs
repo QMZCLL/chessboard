@@ -81,7 +81,23 @@ pub struct Node {
     pub note: String,
     #[serde(default)]
     pub starred: bool,
+    /// 先想后讲的练习记录（最近一次）。
+    #[serde(default)]
+    pub practice: Option<Practice>,
     pub created_at: i64,
+}
+
+/// 先想后讲的练习记录：用了几级提示、是否没有走子就看了讲解、自己走出的第一步，供以后复习。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Practice {
+    pub hints_used: u8,
+    pub revealed_directly: bool,
+    pub first_choice: Option<Move>,
+    /// 第一步与棋谱中的这一着相同。
+    pub matched: bool,
+    /// 这一着练习过的次数。
+    pub sessions: u32,
+    pub updated_at: i64,
 }
 
 impl Node {
@@ -175,6 +191,7 @@ impl Study {
             gap_reason: None,
             note: String::new(),
             starred: false,
+            practice: None,
             created_at: spec.now,
         };
         Ok(Study {
@@ -243,6 +260,7 @@ impl Study {
                 gap_reason: None,
                 note: String::new(),
                 starred: false,
+                practice: None,
                 created_at: now,
             },
         );
@@ -276,6 +294,7 @@ impl Study {
                 gap_reason: Some(reason.to_string()),
                 note: String::new(),
                 starred: false,
+                practice: None,
                 created_at: now,
             },
         );
@@ -367,6 +386,21 @@ impl Study {
         Ok(removed)
     }
 
+    /// 记录这一着的一次先想后讲练习（覆盖上一次的记录，累计练习次数）。
+    pub fn record_practice(
+        &mut self, id: NodeId, hints_used: u8, revealed_directly: bool, first_choice: Option<Move>, now: i64,
+    ) -> Result<(), StudyError> {
+        let node = self.nodes.get_mut(&id).ok_or(StudyError::NoSuchNode(id))?;
+        if node.mv.is_none() {
+            return Err(StudyError::NoSuchNode(id));
+        }
+        let sessions = node.practice.as_ref().map_or(0, |p| p.sessions) + 1;
+        let matched = first_choice.is_some() && first_choice == node.mv;
+        node.practice = Some(Practice { hints_used: hints_used.min(3), revealed_directly, first_choice, matched, sessions, updated_at: now });
+        self.touch(now);
+        Ok(())
+    }
+
     pub fn set_note(&mut self, id: NodeId, note: String, starred: bool, now: i64) -> Result<(), StudyError> {
         let node = self.nodes.get_mut(&id).ok_or(StudyError::NoSuchNode(id))?;
         node.note = note;
@@ -404,6 +438,23 @@ mod tests {
     }
 
     fn mv(s: &str) -> Move { Move::parse_iccs(s).unwrap() }
+
+    #[test]
+    fn practice_record_counts_sessions_and_whether_the_first_choice_matched() {
+        let mut s = study(Position::startpos());
+        let node = s.apply_move(ROOT, mv("h2e2"), MoveSource::User, 1).unwrap().node;
+        let rev = s.revision;
+        s.record_practice(node, 2, false, Some(mv("b0c2")), 5).unwrap();
+        let p = s.node(node).unwrap().practice.clone().unwrap();
+        assert_eq!((p.hints_used, p.revealed_directly, p.matched, p.sessions), (2, false, false, 1));
+        assert!(s.revision > rev, "练习记录写入后会话版本递增");
+        s.record_practice(node, 9, false, Some(mv("h2e2")), 6).unwrap();
+        let p = s.node(node).unwrap().practice.clone().unwrap();
+        assert_eq!((p.hints_used, p.matched, p.sessions), (3, true, 2), "提示最多三级，第二次练习走对了");
+        s.record_practice(node, 0, true, None, 7).unwrap();
+        assert!(!s.node(node).unwrap().practice.as_ref().unwrap().matched, "直接看讲解不算走对");
+        assert!(s.record_practice(ROOT, 0, true, None, 8).is_err(), "起始局面不是一着，没有练习记录");
+    }
 
     #[test]
     fn branches_and_mainline() {

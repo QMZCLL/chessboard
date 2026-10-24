@@ -82,6 +82,7 @@ pub fn run() {
             commands::delete_node,
             commands::promote_node,
             commands::set_note,
+            commands::record_practice,
             commands::focus_node,
             commands::explain_move,
             commands::coach_explain,
