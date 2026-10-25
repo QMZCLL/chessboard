@@ -116,8 +116,14 @@ export const api = {
   deleteNode: (study_id: string, node_id: number) => call<T.StudyView>("delete_node", { req: { study_id, node_id } }),
   promoteNode: (study_id: string, node_id: number) => call<T.StudyView>("promote_node", { req: { study_id, node_id } }),
   /** 记录一次先想后讲练习：用了几级提示、是否直接看讲解、自己走出的第一步 */
-  recordPractice: (study_id: string, node_id: number, hints_used: number, revealed_directly: boolean, first_choice: T.Move | null) =>
-    call<T.StudyView>("record_practice", { req: { study_id, node_id, hints_used, revealed_directly, first_choice } }),
+  recordPractice: (
+    study_id: string,
+    node_id: number,
+    hints_used: number,
+    revealed_directly: boolean,
+    first_choice: T.Move | null,
+    hints: T.UsedHints | null,
+  ) => call<T.StudyView>("record_practice", { req: { study_id, node_id, hints_used, revealed_directly, first_choice, hints } }),
   setNote: (study_id: string, node_id: number, note: string, starred: boolean) =>
     call<T.StudyView>("set_note", { req: { study_id, node_id, note, starred } }),
   focusNode: (study_id: string, node_id: number) => call<void>("focus_node", { req: { study_id, node_id } }),

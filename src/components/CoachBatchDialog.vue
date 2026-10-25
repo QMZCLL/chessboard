@@ -4,7 +4,7 @@ import { computed, watch } from "vue";
 import { NAlert, NButton, NModal, NProgress, NRadioButton, NRadioGroup, NTag } from "naive-ui";
 import { batch, batchActive, pauseBatch, prepareBatch, resumeBatch, retryFailed, startBatch, stopBatch, type ItemState } from "../state/coachBatch";
 import { batchTargets, SCOPE_LABEL, type BatchScope } from "../state/coachBatchPlan";
-import { nodeOf, selectNode, study, wb } from "../state/workbench";
+import { nodeOf, selectNode, shownNotation, study, wb } from "../state/workbench";
 import { moveNumber } from "../utils/board";
 
 const SCOPES: BatchScope[] = ["starred", "line", "mainline"];
@@ -50,7 +50,8 @@ function label(id: number) {
   const node = nodeOf(id);
   const parent = nodeOf(node?.parent);
   if (!node || !parent) return "";
-  return `${moveNumber(node.ply, nodeOf(0)?.side_to_move ?? "red", parent.side_to_move)} ${node.notation ?? ""}`;
+  // 先想后讲中尚未揭示的着法只显示回合与走棋方
+  return `${moveNumber(node.ply, nodeOf(0)?.side_to_move ?? "red", parent.side_to_move)} ${shownNotation(id, `${parent.side_to_move === "red" ? "红方" : "黑方"} · 尚未揭示`)}`;
 }
 
 // 打开时按当前着法重新计划（运行或暂停中保持原样，显示进度）

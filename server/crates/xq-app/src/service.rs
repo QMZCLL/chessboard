@@ -536,22 +536,11 @@ impl AppService {
         self.inner.study_view(&study)
     }
 
+    /// 记录一次练习。看过的提示用界面记下的那份内容：提交时重新生成可能与当时看到的不同
+    /// （练习期间分析完成或条件改变，候选着法就会变化）。
     pub fn record_practice(&self, req: PracticeRequest) -> ApiResult<StudyView> {
-        // 记下这次看过的提示原文：提示与界面显示的一样，由落子前局面的事实与已缓存的候选生成
-        let hints = match req.hints_used {
-            0 => None,
-            level => {
-                let study = self.inner.with_study(&req.study_id, |s| Ok(s.clone()))?;
-                let parent = study.node(req.node_id)?.parent;
-                parent.and_then(|p| {
-                    let pos = study.position(p).ok()?;
-                    let engine = self.inner.cached_position_evidence(&study, p);
-                    xq_core::explain::hints::think_hints(&pos, engine.as_ref())?.used(level.min(3))
-                })
-            }
-        };
         let study = self.inner.with_study(&req.study_id, |s| {
-            s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, hints, now_ms())?;
+            s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, req.hints, now_ms())?;
             Ok(s.clone())
         })?;
         self.inner.study_view(&study)

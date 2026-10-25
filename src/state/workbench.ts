@@ -5,6 +5,7 @@ import { api, errorMessage, isTauri, newRequestId, on, pickOpenPath, pickSavePat
 import type * as T from "../api/types";
 import { applyLine, moveNumber, placementOf, sideLabel } from "../utils/board";
 import { newerCoach } from "./coachMerge";
+import { snapshotHints, usedHints } from "./hintSnapshot";
 
 export interface Preview {
   /** 演示的对象，写明是哪一着的什么变化，如“炮二平五的主要应对” */
@@ -60,7 +61,7 @@ export const wb = reactive({
   /** 先想后讲模式下作为试走起点的局面 */
   thinkBase: null as T.NodeDetail | null,
   /** 先想后讲中正在思考的这一着：已经看了几级提示、三级提示中选看的着法 */
-  thinkSession: null as { nodeId: number; hints: number; arrow: T.Move | null } | null,
+  thinkSession: null as { nodeId: number; hints: number; arrow: T.Move | null; shown: T.ThinkHints | null } | null,
   analysis: null as AnalysisState | null,
   preview: null as Preview | null,
   highlight: null as Highlight | null,
@@ -135,8 +136,24 @@ export const concealed = computed<Set<number>>(() => {
   return hidden;
 });
 
-/** 当前局面的分级提示（来自落子前局面的详情）。 */
-export const thinkHints = computed(() => (thinking.value ? (wb.thinkBase?.hints ?? null) : null));
+/**
+ * 着法的显示名称。先想后讲中尚未揭示的着法不显示名称：棋谱、批量生成的列表、确认框等
+ * 所有显示着法名称的地方都用它，不直接读取 notation。
+ */
+export function shownNotation(id: number, hidden = "？？？"): string {
+  return concealed.value.has(id) ? hidden : (nodeOf(id)?.notation ?? "");
+}
+
+/**
+ * 当前局面的分级提示：打开第一级之后显示当时记下的快照（见 hintSnapshot.ts），
+ * 之前显示落子前局面详情中的提示（只用来判断有没有提示）。
+ */
+export const thinkHints = computed(() => {
+  if (!thinking.value) return null;
+  const session = wb.thinkSession;
+  if (session?.nodeId === wb.selected && session.shown) return session.shown;
+  return wb.thinkBase?.hints ?? null;
+});
 
 /** 二级提示在棋盘上标出的棋子与关系，三级提示中选看的着法。 */
 export const thinkMarks = computed(() => {
@@ -150,14 +167,17 @@ export const thinkMarks = computed(() => {
 watch(
   () => (thinking.value ? wb.selected : null),
   (id) => {
-    if (id !== null && wb.thinkSession?.nodeId !== id) wb.thinkSession = { nodeId: id, hints: 0, arrow: null };
+    if (id !== null && wb.thinkSession?.nodeId !== id) wb.thinkSession = { nodeId: id, hints: 0, arrow: null, shown: null };
   },
 );
 
 /** 再给一级提示（最多三级）。 */
 export function showHint() {
   const session = wb.thinkSession;
-  if (session && session.nodeId === wb.selected) session.hints = Math.min(3, session.hints + 1);
+  if (!session || session.nodeId !== wb.selected) return;
+  // 第一次打开提示时记下显示的内容，之后的各级提示与练习记录都用这份内容
+  if (!session.shown) session.shown = snapshotHints(wb.thinkBase?.hints);
+  if (session.shown) session.hints = Math.min(3, session.hints + 1);
 }
 
 /** 三级提示：在棋盘上标出（或取消标出）一步可以考虑的着法，由用户自己走出来。 */
@@ -173,7 +193,8 @@ async function recordPractice(nodeId: number, firstChoice: T.Move | null) {
   if (!s || !session || session.nodeId !== nodeId) return;
   wb.thinkSession = null;
   try {
-    const view = await api.recordPractice(s.id, nodeId, session.hints, firstChoice === null, firstChoice);
+    const shown = usedHints(session.shown, session.hints);
+    const view = await api.recordPractice(s.id, nodeId, session.hints, firstChoice === null, firstChoice, shown);
     if (wb.view?.study.id === s.id && view.study.revision >= wb.view.study.revision) setView(view);
   } catch (e) {
     notify("error", errorMessage(e));

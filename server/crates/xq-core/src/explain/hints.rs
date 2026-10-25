@@ -75,11 +75,23 @@ pub struct UsedHints {
 impl ThinkHints {
     /// 前 `level` 级提示；没有用提示时为 `None`。
     pub fn used(&self, level: u8) -> Option<UsedHints> {
-        (level > 0).then(|| UsedHints {
-            observe: self.observe.clone(),
-            focus: (level >= 2).then(|| self.focus.clone()),
-            moves: if level >= 3 { self.moves.clone() } else { Vec::new() },
-        })
+        UsedHints { observe: self.observe.clone(), focus: Some(self.focus.clone()), moves: self.moves.clone() }.up_to(level)
+    }
+}
+
+impl UsedHints {
+    /// 只保留前 `level` 级；没有用提示时为 `None`。
+    pub fn up_to(mut self, level: u8) -> Option<UsedHints> {
+        if level == 0 {
+            return None;
+        }
+        if level < 2 {
+            self.focus = None;
+        }
+        if level < 3 {
+            self.moves.clear();
+        }
+        Some(self)
     }
 }
 

@@ -402,7 +402,7 @@ impl Study {
         let sessions = node.practice.as_ref().map_or(0, |p| p.sessions) + 1;
         let matched = first_choice.is_some() && first_choice == node.mv;
         let hints_used = hints_used.min(3);
-        let hints = hints.filter(|_| hints_used > 0);
+        let hints = hints.and_then(|h| h.up_to(hints_used));
         node.practice = Some(Practice { hints_used, revealed_directly, first_choice, matched, sessions, hints, updated_at: now });
         self.touch(now);
         Ok(())

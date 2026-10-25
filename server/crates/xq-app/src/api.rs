@@ -9,6 +9,7 @@ use xq_core::Move;
 use xq_core::capture::Rect;
 use xq_core::explain::PositionExplanation;
 use xq_core::explain::hints::ThinkHints;
+use xq_core::explain::hints::UsedHints;
 use xq_core::record::RecordStop;
 use xq_core::rules::GameStatus;
 use xq_core::rules::IllegalMove;
@@ -157,6 +158,9 @@ pub struct PracticeRequest {
     pub hints_used: u8,
     pub revealed_directly: bool,
     pub first_choice: Option<Move>,
+    /// 这次练习实际看过的提示（界面在第一次打开提示时记下的内容）。
+    #[serde(default)]
+    pub hints: Option<UsedHints>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

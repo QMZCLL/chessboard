@@ -25,6 +25,9 @@ use xq_core::Board;
 use xq_core::Color;
 use xq_core::Move;
 use xq_core::capture::Rect;
+use xq_core::explain::hints::HintFocus;
+use xq_core::explain::hints::HintMove;
+use xq_core::explain::hints::UsedHints;
 use xq_core::fen;
 use xq_core::rules::GameStatus;
 use xq_core::study::Orientation;
@@ -754,11 +757,27 @@ fn think_hints_come_with_the_position_and_practice_is_recorded_on_the_move() {
     assert!(detail["hints"]["observe"].as_str().unwrap().contains("没有出动的子力"));
 
     let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    // 保存的是界面记下的、练习时实际看到的提示，不按提交时的分析重新生成；只保留用到的两级
+    let shown = UsedHints {
+        observe: "练习时看到的一级提示".into(),
+        focus: Some(HintFocus { text: "练习时看到的二级提示".into(), squares: vec![], arrows: vec![] }),
+        moves: vec![HintMove { mv: mv("b0c2"), notation: "马八进七".into() }],
+    };
     let view = service
-        .record_practice(PracticeRequest { study_id: sid.clone(), node_id: node, hints_used: 2, revealed_directly: false, first_choice: Some(mv("h2e2")) })
+        .record_practice(PracticeRequest {
+            study_id: sid.clone(),
+            node_id: node,
+            hints_used: 2,
+            revealed_directly: false,
+            first_choice: Some(mv("h2e2")),
+            hints: Some(shown),
+        })
         .unwrap();
     let practice = serde_json::to_value(&view.study.nodes[&node].practice).unwrap();
     assert_eq!((practice["hints_used"].as_u64(), practice["matched"].as_bool(), practice["sessions"].as_u64()), (Some(2), Some(true), Some(1)));
+    assert_eq!(practice["hints"]["observe"], "练习时看到的一级提示");
+    assert_eq!(practice["hints"]["focus"]["text"], "练习时看到的二级提示");
+    assert_eq!(practice["hints"]["moves"].as_array().unwrap().len(), 0, "没有用到三级提示：{practice}");
     // 练习记录随会话保存，重新打开仍在
     let reopened = service.load_study(&sid).unwrap();
     assert!(reopened.study.nodes[&node].practice.is_some());
@@ -776,9 +795,17 @@ fn review_card_keeps_the_position_and_the_thinking_and_survives_the_study() {
     let sid = created.study.study.id.clone();
     let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
     let second = service.apply_move(MoveRequest { study_id: sid.clone(), parent: first, mv: mv("h9g7"), variation: false }).unwrap().node_id.unwrap();
-    // 先想后讲：用了两级提示，第一步走了马2进3
+    // 先想后讲：用了两级提示（界面记下的是落子前局面详情中的提示），第一步走了马2进3
+    let shown = service.node_detail(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().hints.unwrap().used(3);
     service
-        .record_practice(PracticeRequest { study_id: sid.clone(), node_id: second, hints_used: 2, revealed_directly: false, first_choice: Some(mv("b9c7")) })
+        .record_practice(PracticeRequest {
+            study_id: sid.clone(),
+            node_id: second,
+            hints_used: 2,
+            revealed_directly: false,
+            first_choice: Some(mv("b9c7")),
+            hints: shown,
+        })
         .unwrap();
     service.set_note(NoteRequest { study_id: sid.clone(), node_id: second, note: "为什么不走马2进3？".into(), starred: true }).unwrap();
     rec.wait("第二着的讲解完成", |e, v| e == "explanation_updated" && v["node_id"] == second && v["record"]["pending"] == false);

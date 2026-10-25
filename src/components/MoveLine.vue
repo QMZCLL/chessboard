@@ -3,7 +3,7 @@
 import { computed } from "vue";
 import { NDropdown, useDialog } from "naive-ui";
 import type { ExplainStatus } from "../api/types";
-import { concealed, deleteFrom, nodeOf, promote, selectNode, subtreeSize, wb } from "../state/workbench";
+import { concealed, deleteFrom, nodeOf, promote, selectNode, shownNotation, subtreeSize, wb } from "../state/workbench";
 import { moveNumber } from "../utils/board";
 
 defineOptions({ name: "MoveLine" });
@@ -68,17 +68,12 @@ function onMenu(id: number, key: string) {
     const n = subtreeSize(id);
     dialog.warning({
       title: "删除着法",
-      content: `删除“${nodeOf(id)?.notation ?? ""}”及之后共 ${n} 着（含其中的分支），对应的讲解与笔记一并删除，无法撤销。`,
+      content: `删除“${label(id)} ${shownNotation(id, "尚未揭示的一着")}”及之后共 ${n} 着（含其中的分支），对应的讲解与笔记一并删除，无法撤销。`,
       positiveText: "删除",
       negativeText: "取消",
       onPositiveClick: () => deleteFrom(id),
     });
   }
-}
-
-/** 先想后讲中尚未揭示的着法不显示名称 */
-function shownNotation(id: number) {
-  return concealed.value.has(id) ? "？？？" : (nodeOf(id)?.notation ?? "");
 }
 
 function toggle() {
