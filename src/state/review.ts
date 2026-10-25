@@ -6,6 +6,8 @@ import type * as T from "../api/types";
 import { counts, filterItems, nextTodoId, type ReviewFilter } from "./reviewList";
 import { nodeOf, openStudy, selectNode, setMode, study, wb } from "./workbench";
 
+type NoteDraft = { text: string; state: "idle" | "editing" | "saving" | "saved" | "failed"; error: string | null };
+
 export const review = reactive({
   items: [] as T.ReviewItem[],
   loaded: false,
@@ -17,8 +19,31 @@ export const review = reactive({
   attempt: null as { choice: T.ReviewMove | null; matched: boolean } | null,
   busy: false,
   error: null as string | null,
-  note: { text: "", state: "idle" as "idle" | "editing" | "saving" | "saved" | "failed", error: null as string | null },
+  /** 理解或疑问的草稿与保存状态，按卡片保存：切换卡片后，迟到的保存结果只影响它自己的卡片 */
+  notes: {} as Record<string, NoteDraft>,
 });
+
+/**
+ * 当前视图的代次：每次打开一张卡片、再试一次都会递增。请求发出时记下代次，
+ * 响应回来时代次已经改变，就只更新列表中的卡片，不改动正在复习的卡片的揭示状态、结果与提示。
+ */
+let view = 0;
+
+/**
+ * 同一张卡片的修改（笔记、状态、复习记录）依次发送：后一次修改等前一次完成后再发出，
+ * 响应也按顺序到达，列表中的卡片不会被较早的响应覆盖。
+ */
+const writes = new Map<string, Promise<unknown>>();
+function queued<R>(id: string, task: () => Promise<R>): Promise<R> {
+  const run = (writes.get(id) ?? Promise.resolve()).catch(() => undefined).then(task);
+  writes.set(id, run);
+  // 清理不改变结果；失败由调用方处理，这里不再产生未处理的拒绝
+  const cleanup = () => {
+    if (writes.get(id) === run) writes.delete(id);
+  };
+  void run.then(cleanup, cleanup);
+  return run;
+}
 
 export const reviewCounts = computed(() => counts(review.items));
 export const shownItems = computed(() => filterItems(review.items, review.filter));
@@ -34,8 +59,10 @@ export const starredNotInReview = computed(() => {
     .sort((a, b) => (nodeOf(a)?.ply ?? 0) - (nodeOf(b)?.ply ?? 0) || a - b);
 });
 
+/** 采用后台返回的卡片；较早读取的卡片（更新时间更早）不覆盖较新的。 */
 function upsert(item: T.ReviewItem) {
   const i = review.items.findIndex((x) => x.card.id === item.card.id);
+  if (i >= 0 && review.items[i].card.updated_at > item.card.updated_at) return;
   if (i >= 0) review.items[i] = item;
   else review.items.push(item);
   if (review.current?.card.id === item.card.id) Object.assign(review.current, item);
@@ -79,21 +106,27 @@ export function openReviews(id?: string) {
   });
 }
 
-/** 开始复习一张卡片：只显示局面，等待重新选择 */
+export const currentNote = computed<NoteDraft | null>(() => (review.current ? (review.notes[review.current.card.id] ?? null) : null));
+
+/** 开始复习一张卡片：只显示局面，等待重新选择。快速切换时只采用最后一次打开的卡片。 */
 export async function showCard(id: string) {
+  const v = ++view;
   review.busy = true;
   try {
     const detail = await api.reviewDetail(id);
+    upsert(detail);
+    if (v !== view) return;
     review.current = detail;
     review.phase = "choose";
     review.attempt = null;
-    review.note = { text: detail.card.note, state: "idle", error: null };
     review.error = null;
-    upsert(detail);
+    // 正在编辑或保存失败的草稿保留，其余按卡片中保存的内容显示
+    const draft = review.notes[id];
+    if (!draft || draft.state === "idle" || draft.state === "saved") review.notes[id] = { text: detail.card.note, state: "idle", error: null };
   } catch (e) {
-    review.error = errorMessage(e);
+    if (v === view) review.error = errorMessage(e);
   } finally {
-    review.busy = false;
+    if (v === view) review.busy = false;
   }
 }
 
@@ -101,56 +134,67 @@ export async function showCard(id: string) {
 export async function submitChoice(choice: T.Move | null) {
   const current = review.current;
   if (!current || review.phase !== "choose" || review.busy) return;
+  const v = view;
+  const id = current.card.id;
   review.busy = true;
   try {
-    const item = await api.reviewAttempt(current.card.id, choice);
+    const item = await queued(id, () => api.reviewAttempt(id, choice));
+    upsert(item);
+    // 等待期间换了卡片（或再试一次）：这次的结果只记在它自己的卡片上
+    if (v !== view || review.current?.card.id !== id) return;
     const last = item.card.attempts[item.card.attempts.length - 1];
     review.attempt = { choice: last?.choice ?? null, matched: !!last?.matched };
     review.phase = "revealed";
-    upsert(item);
   } catch (e) {
-    review.error = errorMessage(e);
+    if (v === view) review.error = errorMessage(e);
   } finally {
-    review.busy = false;
+    if (v === view) review.busy = false;
   }
 }
 
 /** 再试一次：回到只显示局面 */
 export function retryCard() {
+  view += 1;
   review.phase = "choose";
   review.attempt = null;
+  review.busy = false;
 }
 
 export async function setStatus(status: T.ReviewStatus) {
   const current = review.current;
   if (!current) return;
+  const id = current.card.id;
   try {
-    upsert(await api.updateReview(current.card.id, { status }));
+    upsert(await queued(id, () => api.updateReview(id, { status })));
   } catch (e) {
-    review.error = errorMessage(e);
+    if (review.current?.card.id === id) review.error = errorMessage(e);
   }
 }
 
 export function editNote(text: string) {
-  review.note.text = text;
-  review.note.state = "editing";
+  const id = review.current?.card.id;
+  if (!id) return;
+  review.notes[id] = { text, state: "editing", error: null };
 }
 
-export async function saveNote() {
-  const current = review.current;
-  if (!current || (review.note.state !== "editing" && review.note.state !== "failed")) return;
-  const text = review.note.text;
-  review.note.state = "saving";
-  try {
-    const item = await api.updateReview(current.card.id, { note: text });
-    upsert(item);
-    // 保存期间又有修改时保持“编辑中”
-    if (review.note.text === text) review.note = { text, state: "saved", error: null };
-    else review.note.state = "editing";
-  } catch (e) {
-    review.note.state = "failed";
-    review.note.error = errorMessage(e);
-  }
+/** 保存一张卡片（默认当前卡片）的理解或疑问；排在这张卡片之前的修改之后发送，发送时取最新的草稿。 */
+export function saveNote(id = review.current?.card.id): Promise<void> {
+  if (!id) return Promise.resolve();
+  return queued(id, async () => {
+    const draft = review.notes[id];
+    if (!draft || (draft.state !== "editing" && draft.state !== "failed")) return;
+    const text = draft.text;
+    draft.state = "saving";
+    try {
+      upsert(await api.updateReview(id, { note: text }));
+      // 保存期间又有修改时保持“编辑中”
+      const latest = review.notes[id];
+      if (latest.text === text) review.notes[id] = { text, state: "saved", error: null };
+      else latest.state = "editing";
+    } catch (e) {
+      review.notes[id] = { ...review.notes[id], state: "failed", error: errorMessage(e) };
+    }
+  });
 }
 
 export async function deleteCard(id: string) {

@@ -224,7 +224,44 @@ impl Store {
         self.get(COACH_CACHE, &coach_cache_key(study, node, key))
     }
 
-    pub fn save_review(&self, card: &ReviewCard) -> Result<(), StoreError> { self.put(REVIEWS, &card.id, card) }
+    /// 卡片还不存在时写入；已经存在时不覆盖，返回已有的卡片。读取与写入在同一写事务中完成。
+    pub fn insert_review(&self, card: &ReviewCard) -> Result<ReviewCard, StoreError> {
+        let tx = self.db.begin_write()?;
+        let stored = {
+            let mut t = tx.open_table(REVIEWS)?;
+            let existing = t.get(card.id.as_str())?.map(|v| serde_json::from_str::<ReviewCard>(v.value())).transpose()?;
+            match existing {
+                Some(existing) => existing,
+                None => {
+                    t.insert(card.id.as_str(), serde_json::to_string(card)?.as_str())?;
+                    card.clone()
+                }
+            }
+        };
+        tx.commit()?;
+        Ok(stored)
+    }
+
+    /// 修改一张卡片：在同一写事务中读取最新的卡片、修改并写回。写事务一次只有一个，
+    /// 并发的修改（笔记、状态、追加复习记录、补充讲解）依次进行，不会用旧快照覆盖彼此。
+    /// 卡片不存在时返回 `None`。
+    pub fn update_review(&self, id: &str, f: impl FnOnce(&mut ReviewCard)) -> Result<Option<ReviewCard>, StoreError> {
+        let tx = self.db.begin_write()?;
+        let updated = {
+            let mut t = tx.open_table(REVIEWS)?;
+            let current = t.get(id)?.map(|v| serde_json::from_str::<ReviewCard>(v.value())).transpose()?;
+            match current {
+                Some(mut card) => {
+                    f(&mut card);
+                    t.insert(id, serde_json::to_string(&card)?.as_str())?;
+                    Some(card)
+                }
+                None => None,
+            }
+        };
+        tx.commit()?;
+        Ok(updated)
+    }
 
     pub fn load_review(&self, id: &str) -> Result<Option<ReviewCard>, StoreError> { self.get(REVIEWS, id) }
 
@@ -304,5 +341,62 @@ fn parse_usage(value: &str, day: i64) -> u32 {
     match value.split_once(':') {
         Some((d, n)) if d.parse::<i64>().ok() == Some(day) => n.parse().unwrap_or(0),
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::review::ReviewStatus;
+
+    fn card(id: &str) -> ReviewCard {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "study_id": "s", "node_id": 1, "study_name": "测试", "created_at": 1, "updated_at": 1,
+            "status": "due", "fen": "4k4/9/9/9/9/9/9/9/9/4K4 w", "side": "red", "orientation": "red_bottom",
+            "turn": 1, "history": [], "history_complete": true, "answer": { "mv": "e0e1", "notation": "帅五进一" },
+            "thinking": null, "basis": null, "note": "", "attempts": [], "reviewed_at": null
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn concurrent_card_updates_do_not_overwrite_each_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&dir.path().join("db.redb")).unwrap());
+        store.insert_review(&card("s/1")).unwrap();
+        // 保存笔记的修改读到卡片后停一会儿；同时标记状态。状态的修改必须读到笔记写入之后的卡片
+        let (inside, wait_inside) = mpsc::channel();
+        let notes = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                store
+                    .update_review("s/1", |c| {
+                        inside.send(()).unwrap();
+                        std::thread::sleep(Duration::from_millis(300));
+                        c.note = "新的理解".into();
+                    })
+                    .unwrap()
+            })
+        };
+        wait_inside.recv().unwrap();
+        store.update_review("s/1", |c| c.status = ReviewStatus::Understood).unwrap();
+        notes.join().unwrap();
+        let saved = store.load_review("s/1").unwrap().unwrap();
+        assert_eq!((saved.note.as_str(), saved.status), ("新的理解", ReviewStatus::Understood));
+    }
+
+    #[test]
+    fn inserting_an_existing_card_keeps_the_stored_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.redb")).unwrap();
+        store.insert_review(&card("s/1")).unwrap();
+        store.update_review("s/1", |c| c.note = "已有的笔记".into()).unwrap();
+        let again = store.insert_review(&card("s/1")).unwrap();
+        assert_eq!(again.note, "已有的笔记");
+        assert!(store.update_review("s/2", |c| c.note = "x".into()).unwrap().is_none(), "不存在的卡片不会被建立");
     }
 }

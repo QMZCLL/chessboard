@@ -269,8 +269,14 @@ impl Inner {
         }
         let study = self.with_study(study_id, |s| Ok(s.clone()))?;
         let card = self.build_card(&study, node_id)?;
-        self.store.save_review(&card)?;
-        Ok(self.review_item(card))
+        // 同时加入同一着时只保留先写入的一张
+        let stored = self.store.insert_review(&card)?;
+        Ok(self.review_item(stored))
+    }
+
+    /// 修改卡片（见 `Store::update_review`：读取最新的卡片、修改、写回在同一写事务中完成）。
+    fn modify_card(&self, id: &str, f: impl FnOnce(&mut ReviewCard)) -> ApiResult<ReviewCard> {
+        self.store.update_review(id, f)?.ok_or_else(|| ApiError::from("找不到这张复习卡片，可能已经删除"))
     }
 
     /// 全部卡片：需要再练、待复习在前，同一状态中较久没有复习的在前。
@@ -291,14 +297,15 @@ impl Inner {
 
     pub(crate) fn review_detail(&self, id: &str) -> ApiResult<ReviewDetail> {
         let mut card = self.load_card(id)?;
-        // 加入时讲解还没有完成：原会话中的这一着仍在、讲解已经完成时补上
+        // 加入时讲解还没有完成：原会话中的这一着仍在、讲解已经完成时补上（只补空缺，不改动其他内容）
         if card.basis.is_none()
             && let Ok(Some(study)) = self.store.load_study(&card.study_id)
             && source_available(Some(&study), &card)
             && let Some(basis) = self.review_basis(&card.study_id, card.node_id)
         {
-            card.basis = Some(basis);
-            self.store.save_review(&card)?;
+            card = self.modify_card(id, |c| {
+                c.basis.get_or_insert(basis);
+            })?;
         }
         let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
         let legal_moves = rules::legal_moves(&pos);
@@ -307,7 +314,8 @@ impl Inner {
 
     /// 记一次复习：重新选择的着法是否与棋谱相同。
     pub(crate) fn review_attempt(&self, id: &str, choice: Option<Move>) -> ApiResult<ReviewItem> {
-        let mut card = self.load_card(id)?;
+        // 局面与棋谱着法在卡片建立后不再改变，可以先读出来检查着法
+        let card = self.load_card(id)?;
         let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
         let choice = match choice {
             Some(mv) if rules::legal_moves(&pos).contains(&mv) => {
@@ -317,27 +325,29 @@ impl Inner {
             None => None,
         };
         let now = now_ms();
-        let matched = choice.as_ref().is_some_and(|c| c.mv == card.answer.mv);
-        card.attempts.push(ReviewAttempt { at: now, choice, matched });
-        if card.attempts.len() > MAX_ATTEMPTS {
-            card.attempts.drain(..card.attempts.len() - MAX_ATTEMPTS);
-        }
-        card.reviewed_at = Some(now);
-        card.updated_at = now;
-        self.store.save_review(&card)?;
+        let card = self.modify_card(id, |c| {
+            let matched = choice.as_ref().is_some_and(|m| m.mv == c.answer.mv);
+            c.attempts.push(ReviewAttempt { at: now, choice, matched });
+            if c.attempts.len() > MAX_ATTEMPTS {
+                c.attempts.drain(..c.attempts.len() - MAX_ATTEMPTS);
+            }
+            c.reviewed_at = Some(now);
+            c.updated_at = now;
+        })?;
         Ok(self.review_item(card))
     }
 
+    /// 只改请求中给出的字段（状态、笔记）；其他字段保持最新的值。
     pub(crate) fn update_review(&self, req: ReviewUpdateRequest) -> ApiResult<ReviewItem> {
-        let mut card = self.load_card(&req.id)?;
-        if let Some(status) = req.status {
-            card.status = status;
-        }
-        if let Some(note) = req.note {
-            card.note = note;
-        }
-        card.updated_at = now_ms();
-        self.store.save_review(&card)?;
+        let card = self.modify_card(&req.id, |c| {
+            if let Some(status) = req.status {
+                c.status = status;
+            }
+            if let Some(note) = req.note {
+                c.note = note;
+            }
+            c.updated_at = now_ms();
+        })?;
         Ok(self.review_item(card))
     }
 

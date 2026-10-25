@@ -169,6 +169,74 @@ await orphan.waitFor({ state: "detached" });
 check((await cards()).length === 2, "删除卡片");
 await snap(page, "review-list");
 
+// ---------- F. 迟到的响应与并发保存 ----------
+const A = `${sid}/0000000002`;
+const B = `${sid}/0000000004`;
+/** 拦住某个命令的响应，直到调用返回的函数才交给页面（请求本身照常到达后台） */
+async function holdResponse(cmd, match = () => true) {
+  let release;
+  let delivered;
+  const released = new Promise((r) => (release = r));
+  const done = new Promise((r) => (delivered = r));
+  await page.route(`**/__bridge/invoke/${cmd}`, async (route) => {
+    if (!match(route.request().postDataJSON())) return route.continue();
+    const response = await route.fetch();
+    await released;
+    await route.fulfill({ response });
+    delivered();
+  });
+  // 放行后等响应确实交给页面、界面处理完，再检查
+  return async () => {
+    release();
+    await done;
+    await sleep(300);
+    await page.unroute(`**/__bridge/invoke/${cmd}`);
+  };
+}
+// 卡片 A 的作答响应迟到：期间换到卡片 B，B 仍在等待选择，不显示 A 的结果
+await pick(A);
+let release = await holdResponse("review_attempt");
+await reviewMove("h9g7");
+await pick(B);
+await release();
+check(
+  (await dialog.getByTestId("review-prompt").isVisible()) && (await dialog.getByTestId("review-result").count()) === 0,
+  "换到另一张卡片后，迟到的作答结果不会揭示这张卡片",
+);
+check((await dialog.locator(`[data-review="${B}"].active`).count()) === 1, "当前仍是后打开的卡片");
+check((await cards()).find((i) => i.card.id === A).card.attempts.length === 2, "迟到的作答仍记在原来的卡片上");
+// 两张卡片的详情倒序返回：最后打开的卡片保持为当前卡片
+release = await holdResponse("review_detail", (body) => body.req.id === A);
+await dialog.locator(`[data-review="${A}"]`).click();
+await sleep(200);
+await dialog.locator(`[data-review="${B}"]`).click();
+// 后打开的卡片先加载完成，再放行先打开的那张：两次详情的响应倒序到达
+await dialog.locator(`[data-review="${B}"].active`).waitFor();
+await release();
+check(
+  (await dialog.locator(`[data-review="${B}"].active`).count()) === 1 && (await dialog.getByTestId("review-history").innerText()) === "此前：炮二平五 马8进7 马二进三",
+  "先打开的卡片详情较晚返回时，不会跳回那张卡片",
+);
+// 保存理解与标记状态：标记状态等理解保存完成后再发送，两者都保留
+const order = [];
+await page.route("**/__bridge/invoke/update_review", async (route) => {
+  const kind = route.request().postDataJSON().req.note !== null ? "note" : "status";
+  order.push(`${kind}:发出`);
+  if (kind === "note") await sleep(800);
+  const response = await route.fetch();
+  order.push(`${kind}:完成`);
+  await route.fulfill({ response });
+});
+await dialog.getByTestId("review-reveal").click();
+await dialog.getByTestId("review-result").waitFor();
+await dialog.getByTestId("review-note").locator("textarea").fill("车9平8 出车，准备过河");
+await dialog.getByTestId("review-mark-understood").click();
+await dialog.getByTestId("review-status").filter({ hasText: "已理解" }).waitFor();
+await page.unroute("**/__bridge/invoke/update_review");
+check(order.join() === "note:发出,note:完成,status:发出,status:完成", `同一张卡片的修改依次发送：${order.join("，")}`);
+const saved = (await cards()).find((i) => i.card.id === B).card;
+check(saved.note === "车9平8 出车，准备过河" && saved.status === "understood", "理解与状态都保存下来");
+
 // ---------- 窄窗口 ----------
 await page.keyboard.press("Escape");
 await dialog.waitFor({ state: "hidden" });

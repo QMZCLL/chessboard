@@ -11,6 +11,7 @@ import { errorMessage } from "../api/backend";
 import {
   addStarred,
   deleteCard,
+  currentNote,
   editNote,
   loadReviews,
   nextCardId,
@@ -77,7 +78,7 @@ onMounted(loadReviews);
 </script>
 
 <template>
-  <n-modal v-model:show="wb.dialogs.review" preset="card" title="复习" style="width: min(1120px, 96vw)" data-testid="review-dialog" @after-leave="saveNote">
+  <n-modal v-model:show="wb.dialogs.review" preset="card" title="复习" style="width: min(1120px, 96vw)" data-testid="review-dialog" @after-leave="() => saveNote()">
     <div class="review">
       <!-- 卡片列表 -->
       <aside class="list">
@@ -204,19 +205,19 @@ onMounted(loadReviews);
 
               <h4>你的理解或疑问</h4>
               <n-input
-                :value="review.note.text"
+                :value="currentNote?.text ?? ''"
                 type="textarea"
                 :autosize="{ minRows: 3, maxRows: 8 }"
                 placeholder="写下这次复习的理解，或还没想通的地方"
                 data-testid="review-note"
                 @update:value="editNote"
-                @blur="saveNote"
+                @blur="() => saveNote()"
               />
               <p class="muted note-state" data-testid="review-note-state">
-                <template v-if="review.note.state === 'saving'">保存中…</template>
-                <template v-else-if="review.note.state === 'saved'">已保存</template>
-                <span v-else-if="review.note.state === 'failed'" class="error">保存失败：{{ review.note.error }}（离开输入框时会再次保存）</span>
-                <template v-else-if="review.note.state === 'editing'">有未保存的修改，离开输入框时保存。</template>
+                <template v-if="currentNote?.state === 'saving'">保存中…</template>
+                <template v-else-if="currentNote?.state === 'saved'">已保存</template>
+                <span v-else-if="currentNote?.state === 'failed'" class="error">保存失败：{{ currentNote.error }}（离开输入框时会再次保存）</span>
+                <template v-else-if="currentNote?.state === 'editing'">有未保存的修改，离开输入框时保存。</template>
                 <template v-else>加入复习时从这一步的笔记带入；离开输入框时保存。</template>
               </p>
 
