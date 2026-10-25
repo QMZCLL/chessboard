@@ -3,6 +3,7 @@
 import { computed, reactive, watch } from "vue";
 import { api, errorMessage, on } from "../api/backend";
 import type * as T from "../api/types";
+import { newerCompare } from "./compareMerge";
 import { exitPreview, nodeOf, previewFrom, selectedNode, study, wb } from "./workbench";
 
 interface CompareRequest {
@@ -24,8 +25,6 @@ export const cmp = reactive({
 let seq = 0;
 let subscribed = false;
 
-const keyOf = (v: { study_id: string; node_id: number; mine: T.Move; reference: T.Move }) => `${v.study_id}:${v.node_id}:${v.mine}:${v.reference}`;
-
 function subscribe() {
   if (subscribed) return;
   subscribed = true;
@@ -33,7 +32,7 @@ function subscribe() {
     const r = cmp.request;
     if (!r || v.study_id !== r.studyId || v.node_id !== r.origin || v.mine !== r.mine) return;
     if (r.reference !== null && v.reference !== r.reference) return;
-    cmp.view = v;
+    cmp.view = newerCompare(cmp.view, v);
   });
 }
 
@@ -53,8 +52,8 @@ export async function openComparison(origin: number, mine: T.Move, reference: T.
     const v = await api.compareMoves(s.id, origin, mine, reference);
     if (id !== seq || !cmp.request) return;
     cmp.request.reference = v.reference;
-    // 推送的完整结果可能先于这次响应到达，不用尚未完成的结果覆盖它
-    if (!(cmp.view && keyOf(cmp.view) === keyOf(v) && !cmp.view.pending)) cmp.view = v;
+    // 推送的完整结果可能先于这次响应到达；按请求序号判断，较早请求的完整结果不会挡住这次的结果
+    cmp.view = newerCompare(cmp.view, v);
   } catch (e) {
     if (id === seq) cmp.error = errorMessage(e);
   } finally {

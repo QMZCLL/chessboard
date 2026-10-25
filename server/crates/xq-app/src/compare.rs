@@ -3,6 +3,9 @@
 //! 对比的评分来自对两步棋的同一次搜索（`searchmoves` 两步、两条候选），与讲解使用相同的快速分析条件，
 //! 结果按条件缓存。请求时先返回规则事实；需要搜索时，完成后通过 `comparison_updated` 推送完整结果。
 //! 同一局面只保留最新的对比请求，切换对照时取消尚未完成的上一次搜索。
+//!
+//! 每次请求有递增的序号，返回的结果与随后推送的完整结果都带有它：同一组走法可能先后在不同的分析条件下比较，
+//! “已经完成”不代表“属于最新的请求”，界面按序号判断新旧，只让同一次请求的完整结果代替它尚未完成的结果。
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -62,6 +65,10 @@ pub struct CompareOption {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CompareView {
+    /// 这次对比请求的序号（推送的完整结果沿用请求时的序号）。
+    pub seq: u64,
+    /// 搜索条件的键；引擎不可用、不能搜索时为空。
+    pub conditions_key: Option<String>,
     pub study_id: String,
     pub node_id: NodeId,
     pub mine: Move,
@@ -94,7 +101,13 @@ impl Inner {
             .find(|o| o.mv == reference)
             .map(|o| (o.kind, o.rank))
             .unwrap_or((ReferenceKind::Other, None));
+        // 搜索两步棋时不分先后，条件相同即可复用
+        let mut searchmoves = vec![req.mine, reference];
+        searchmoves.sort_by_key(|m| m.iccs());
+        let cond = self.conditions(&study, req.node_id, Budget::Quick, searchmoves);
         let base = CompareView {
+            seq: self.compare_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1,
+            conditions_key: cond.as_ref().ok().map(|c| c.key()),
             study_id: req.study_id.clone(),
             node_id: req.node_id,
             mine: req.mine,
@@ -113,10 +126,7 @@ impl Inner {
             ..base.clone()
         };
 
-        // 搜索两步棋时不分先后，条件相同即可复用
-        let mut searchmoves = vec![req.mine, reference];
-        searchmoves.sort_by_key(|m| m.iccs());
-        let cond = match self.conditions(&study, req.node_id, Budget::Quick, searchmoves) {
+        let cond = match cond {
             Ok(c) => c,
             // 引擎不可用时只给出规则事实
             Err(e) => return Ok(view(facts_only, false, Some(e.message))),

@@ -168,6 +168,8 @@ pub(crate) struct Inner {
     pub(crate) focus: Mutex<Option<(String, NodeId)>>,
     /// 每次讲解记录变化递增；视图与事件都带上它，界面据此识别过期的视图。
     pub(crate) explain_seq: AtomicU64,
+    /// 每次对比请求递增；对比结果与推送都带上请求时的序号，界面据此判断新旧（见 `compare`）。
+    pub(crate) compare_seq: AtomicU64,
     pub(crate) explain_tx: Mutex<Sender<ExplainMsg>>,
     pub(crate) commit_hook: Mutex<Option<CommitHook>>,
     pub(crate) coach: CoachRuntime,
@@ -226,6 +228,7 @@ impl AppService {
             explain_generation: AtomicU64::new(0),
             focus: Mutex::new(None),
             explain_seq: AtomicU64::new(0),
+            compare_seq: AtomicU64::new(0),
             explain_tx: Mutex::new(tx),
             commit_hook: Mutex::new(None),
             coach: CoachRuntime::new(coach_tx),

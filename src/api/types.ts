@@ -680,6 +680,10 @@ export interface CompareOption {
 }
 
 export interface CompareView {
+  /** 这次对比请求的序号：推送的完整结果沿用请求时的序号，按它判断新旧 */
+  seq: number;
+  /** 搜索条件的键（引擎不可用时为空） */
+  conditions_key: string | null;
   study_id: string;
   /** 比较起点 */
   node_id: number;

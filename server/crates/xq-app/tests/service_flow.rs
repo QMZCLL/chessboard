@@ -707,6 +707,10 @@ fn comparison_searches_both_moves_together_and_reuses_the_result() {
     assert!(!facts["comparison"]["mine"]["changes"].as_array().unwrap().is_empty(), "规则事实不等待搜索");
     let done = rec.wait("对比完成", |e, v| e == "comparison_updated" && v["pending"] == false);
     assert_eq!(done["comparison"]["outcome"], "reference_better", "{done}");
+    // 推送的完整结果带有请求时的序号与搜索条件，界面据此判断它属于哪一次请求
+    assert_eq!(done["seq"], first.seq, "{done}");
+    assert!(first.conditions_key.is_some());
+    assert_eq!(done["conditions_key"].as_str(), first.conditions_key.as_deref());
     let text = done["comparison"]["differences"].to_string();
     assert!(text.contains("兵七进一比炮二平五低约 190 分"), "{text}");
     assert_eq!(done["comparison"]["mine"]["reply"]["text"], "对方最值得关注的回应是炮8平5");
@@ -722,6 +726,7 @@ fn comparison_searches_both_moves_together_and_reuses_the_result() {
     // 同样两步（不论哪一步是“我的选择”）直接使用缓存的结果，不再搜索
     let again = service.compare_moves(request("h2e2", Some("c3c4"))).unwrap();
     assert!(!again.pending);
+    assert!(again.seq > first.seq, "每次请求的序号递增，较新的请求直接返回的结果也能被识别为较新");
     assert_eq!(serde_json::to_value(&again).unwrap()["comparison"]["outcome"], "mine_better");
     let log = std::fs::read_to_string(dir.path().join("engine").join("mock-uci-commands.log")).unwrap();
     assert_eq!(log.lines().filter(|l| l.starts_with("go")).count(), 1, "{log}");

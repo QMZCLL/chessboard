@@ -257,16 +257,29 @@ pub fn judge_pair(mine: &EngineLine, reference: &EngineLine, a: &str, b: &str) -
             return (Unclear, "涉及将杀分的搜索边界值，需要继续搜索才能比较".to_string());
         }
         return match (mine.score, reference.score) {
+            // 普通评分只说明这次搜索没有发现强制杀棋，不能证明以后不会被杀：结论都限定为本次搜索的结果
             (Score::Mate(x), Score::Mate(y)) if x > 0 && y > 0 => match x.cmp(&y) {
-                std::cmp::Ordering::Equal => (Close, format!("两步都能在 {x} 步内杀棋")),
-                std::cmp::Ordering::Less => (MineBetter, format!("两步都能杀棋，{a}更快（{x} 步对 {y} 步）")),
-                std::cmp::Ordering::Greater => (ReferenceBetter, format!("两步都能杀棋，{b}更快（{y} 步对 {x} 步）")),
+                std::cmp::Ordering::Equal => (Close, format!("本次搜索中两步都能在 {x} 步内杀棋")),
+                std::cmp::Ordering::Less => (MineBetter, format!("本次搜索中两步都能杀棋，{a}更快（{x} 步对 {y} 步）")),
+                std::cmp::Ordering::Greater => (ReferenceBetter, format!("本次搜索中两步都能杀棋，{b}更快（{y} 步对 {x} 步）")),
             },
-            (Score::Mate(x), _) if x > 0 => (MineBetter, format!("{a}可以在 {x} 步内杀棋，{b}没有找到杀棋")),
-            (_, Score::Mate(y)) if y > 0 => (ReferenceBetter, format!("{b}可以在 {y} 步内杀棋，{a}没有找到杀棋")),
-            (Score::Mate(x), Score::Mate(y)) => (Close, format!("两步之后都难以避免被杀（{} 步与 {} 步）", -x, -y)),
-            (Score::Mate(x), _) => (ReferenceBetter, format!("{a}之后会被对方在 {} 步内杀棋，{b}不会", -x)),
-            (_, Score::Mate(y)) => (MineBetter, format!("{b}之后会被对方在 {} 步内杀棋，{a}不会", -y)),
+            (Score::Mate(x), _) if x > 0 => {
+                (MineBetter, format!("本次搜索发现{a}可以在 {x} 步内杀棋；{b}的搜索结果未发现杀棋"))
+            }
+            (_, Score::Mate(y)) if y > 0 => {
+                (ReferenceBetter, format!("本次搜索发现{b}可以在 {y} 步内杀棋；{a}的搜索结果未发现杀棋"))
+            }
+            (Score::Mate(x), Score::Mate(y)) => {
+                (Close, format!("本次搜索发现两步之后都会被对方杀棋（{} 步与 {} 步）", -x, -y))
+            }
+            (Score::Mate(x), _) => (
+                ReferenceBetter,
+                format!("本次搜索发现{a}之后会被对方在 {} 步内杀棋；{b}的搜索结果未发现同类强制杀棋", -x),
+            ),
+            (_, Score::Mate(y)) => (
+                MineBetter,
+                format!("本次搜索发现{b}之后会被对方在 {} 步内杀棋；{a}的搜索结果未发现同类强制杀棋", -y),
+            ),
             _ => (Unclear, "将杀判断不一致".to_string()),
         };
     }
@@ -309,6 +322,21 @@ mod tests {
 
     fn engine(lines: Vec<EngineLine>, complete: bool) -> CompareEvidence {
         CompareEvidence { lines, conditions: "测试 · 深度 12".into(), complete, notes: vec![] }
+    }
+
+    #[test]
+    fn mate_against_one_side_is_limited_to_what_this_search_found() {
+        let mated = line("h2e2", Score::Mate(-4), Bound::Exact, &["h2e2"]);
+        let normal = line("c3c4", Score::Cp(0), Bound::Exact, &["c3c4"]);
+        for (outcome, text) in [judge_pair(&mated, &normal, "甲", "乙"), judge_pair(&normal, &mated, "乙", "甲")] {
+            assert!(matches!(outcome, CompareOutcome::ReferenceBetter | CompareOutcome::MineBetter));
+            assert!(text.contains("本次搜索发现甲之后会被对方在 4 步内杀棋"), "{text}");
+            assert!(text.contains("乙的搜索结果未发现同类强制杀棋"), "{text}");
+            assert!(!text.contains("不会") && !text.contains("一定") && !text.contains("避免"), "普通评分不能证明不会被杀：{text}");
+        }
+        let winning = line("h2e2", Score::Mate(3), Bound::Exact, &["h2e2"]);
+        let (_, text) = judge_pair(&winning, &normal, "甲", "乙");
+        assert!(text.contains("本次搜索发现甲可以在 3 步内杀棋") && text.contains("乙的搜索结果未发现杀棋"), "{text}");
     }
 
     #[test]
