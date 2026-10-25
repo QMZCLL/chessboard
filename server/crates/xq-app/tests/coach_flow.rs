@@ -690,3 +690,44 @@ fn failed_update_marks_kept_result_as_not_current() {
     assert!(!failed.result_current, "保留的结果不对应当前设置，界面不能当作已生成");
     service.shutdown();
 }
+
+#[test]
+fn leaving_a_move_cancels_only_unsent_requests() {
+    let dir = tempfile::tempdir().unwrap();
+    let (service, llm, rec, sid) = two_moves_with_slow_first_call(dir.path());
+    let node = |n| NodeRef { study_id: sid.clone(), node_id: n };
+    // 离开两着：第 1 着的请求已经发出，继续生成并写给第 1 着；第 2 着还在排队，不再发送
+    service.coach_leave(node(1)).unwrap();
+    service.coach_leave(node(2)).unwrap();
+    rec.coach("第 1 着完成", 1, "ready");
+    std::thread::sleep(Duration::from_millis(800));
+    assert_eq!(llm.count(), 1, "排队的第 2 着离开后不再发送");
+    let second = service.coach_view(node(2)).unwrap();
+    assert_eq!(second.status, CoachStatus::None, "{:?}", second.reason);
+    let first = service.coach_view(node(1)).unwrap();
+    assert!(first.result_current, "已经发出的请求返回后归属第 1 着");
+    // 回到第 2 着时重新排队并生成
+    rec.clear();
+    explain(&service, &sid, 2, false);
+    rec.coach("第 2 着完成", 2, "ready");
+    assert_eq!(llm.count(), 2);
+    service.shutdown();
+}
+
+#[test]
+fn a_cancelled_request_that_returns_is_cached_for_the_next_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let (service, llm, rec, sid) = two_moves_with_slow_first_call(dir.path());
+    let node = |n| NodeRef { study_id: sid.clone(), node_id: n };
+    // 取消已经发出的第 1 着：讲解状态回到空闲；请求返回后不改动状态，但结果存入缓存
+    service.coach_cancel(node(1)).unwrap();
+    rec.coach("第 2 着得到名额并完成", 2, "ready");
+    let first = service.coach_view(node(1)).unwrap();
+    assert!(first.record.as_ref().is_none_or(|r| r.result.is_none()), "取消后不把结果写入讲解状态");
+    let calls = llm.count();
+    rec.clear();
+    explain(&service, &sid, 1, false);
+    rec.coach("第 1 着使用缓存", 1, "ready");
+    assert_eq!(llm.count(), calls, "再次请求第 1 着时直接使用缓存，不再调用模型");
+    service.shutdown();
+}

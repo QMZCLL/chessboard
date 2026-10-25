@@ -87,6 +87,7 @@ pub fn run() {
             commands::explain_move,
             commands::coach_explain,
             commands::coach_cancel,
+            commands::coach_leave,
             commands::coach_view,
             commands::set_coach_credential,
             commands::analyze_position,

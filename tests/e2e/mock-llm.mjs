@@ -1,9 +1,11 @@
 // 模拟 DeepSeek 接口：根据请求中的证据包生成合格（或故意不合格）的讲解。
-// POST /__mode {"mode":"valid"|"bad"} 切换；GET /__calls 返回收到的请求（含 Authorization 头）。
+// POST /__mode {"mode":"valid"|"bad", "delay_ms": 0} 切换输出与回复前的延迟；POST /__reset 恢复默认并清空记录；
+// GET /__calls 返回收到的请求（含 Authorization 头、这一着的记法与收到的时间）。
 import http from "node:http";
 
 const port = Number(process.env.MOCK_LLM_PORT ?? 1440);
 let mode = "valid";
+let delay = 0;
 const calls = [];
 
 function pick(claims, groups) {
@@ -37,12 +39,15 @@ http
     req.on("data", (c) => (body += c));
     req.on("end", () => {
       if (req.url === "/__mode") {
-        mode = JSON.parse(body).mode;
+        const m = JSON.parse(body);
+        mode = m.mode ?? mode;
+        delay = m.delay_ms ?? delay;
         res.end("{}");
         return;
       }
       if (req.url === "/__reset") {
         mode = "valid";
+        delay = 0;
         calls.length = 0;
         res.end("{}");
         return;
@@ -53,11 +58,14 @@ http
         return;
       }
       const request = JSON.parse(body || "{}");
-      calls.push({ url: req.url, authorization: req.headers.authorization ?? null, body: request });
       const pack = JSON.parse(request.messages[1].content).evidence;
+      calls.push({ url: req.url, authorization: req.headers.authorization ?? null, notation: pack.move_notation, at: Date.now(), body: request });
+      // 按收到请求时的设置回复
       const content = JSON.stringify(output(pack));
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }] }));
+      setTimeout(() => {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }] }));
+      }, delay);
     });
   })
   .listen(port, "127.0.0.1", () => console.log(`mock llm on ${port}`));

@@ -4,12 +4,19 @@ import { computed, nextTick, ref, watch } from "vue";
 import { NButton, NScrollbar, NTag, NTooltip } from "naive-ui";
 import Icon from "./Icon.vue";
 import MoveLine from "./MoveLine.vue";
+import { batch, batchActive } from "../state/coachBatch";
 import { backToMainline, latestNode, mainline, nodeOf, selectedEnded, selectNode, study, wb } from "../state/workbench";
 import { sideLabel } from "../utils/board";
 
 const root = computed(() => nodeOf(0));
 const stats = computed(() => wb.view?.stats);
 const onMainline = computed(() => mainline.value.has(wb.selected));
+const coach = computed(() => wb.status?.coach ?? null);
+const batchProgress = computed(() => {
+  if (!batchActive() && batch.phase !== "paused") return null;
+  const finished = batch.items.filter((i) => i.state === "done" || i.state === "failed").length;
+  return `${finished}/${batch.items.length}${batch.phase === "paused" ? " 已暂停" : ""}`;
+});
 const SOURCE: Record<string, string> = {
   standard: "标准开局",
   setup: "摆棋",
@@ -62,6 +69,14 @@ watch(
       <n-button size="tiny" quaternary :disabled="latestNode === null || latestNode === wb.selected" @click="latestNode !== null && selectNode(latestNode)">
         <template #icon><Icon name="latest" :size="13" /></template>回到最新局面
       </n-button>
+      <n-tooltip v-if="coach?.enabled" placement="bottom">
+        <template #trigger>
+          <n-button size="tiny" quaternary class="batch" data-testid="coach-batch-open" @click="wb.dialogs.coachBatch = true">
+            <template #icon><Icon name="sparkles" :size="13" /></template>批量 AI 讲解<span v-if="batchProgress" class="batch-progress">{{ batchProgress }}</span>
+          </n-button>
+        </template>
+        {{ coach.ready ? "为收藏的着法、这条线或整条主线生成 AI 讲解，先看要调用几次再开始" : `AI 讲解当前不可用：${coach.reason}` }}
+      </n-tooltip>
     </div>
     <n-scrollbar class="body">
       <div ref="body">
@@ -153,10 +168,19 @@ header {
 }
 .nav {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-1);
   padding: 0 var(--sp-3) var(--sp-2);
   margin-bottom: var(--sp-1);
   border-bottom: 1px solid var(--border);
+}
+.batch {
+  margin-left: auto;
+}
+.batch-progress {
+  margin-left: 4px;
+  color: var(--accent-blue);
+  font-variant-numeric: tabular-nums;
 }
 .body {
   flex: 1;

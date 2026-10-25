@@ -537,30 +537,33 @@ impl Inner {
     /// 提交结果（讲解线程）：任务仍是最新请求，且证据版本与模型设置都没有改变时才写入。
     fn coach_commit(&self, job: CoachJob, outcome: Result<CoachExplanation, String>) {
         let key = (job.request.study_id.clone(), job.request.node_id);
-        {
+        let latest = {
             let mut inflight = lock(&self.coach.inflight);
-            if inflight.get(&key).map(|(g, _)| *g) != Some(job.generation) {
-                debug!("节点 {} 的 AI 讲解已被取消或被更新的请求取代，丢弃结果", job.request.node_id);
-                return;
+            let latest = inflight.get(&key).map(|(g, _)| *g) == Some(job.generation);
+            if latest {
+                inflight.remove(&key);
             }
-            inflight.remove(&key);
-        }
+            latest
+        };
         let (sid, nid) = key;
         let Ok(study) = self.with_study(&sid, |s| Ok(s.clone())) else { return };
         if !study.nodes.contains_key(&nid) {
             return;
         }
-        let evidence_same = self
-            .store
-            .load_explanation(&sid, nid)
-            .ok()
-            .flatten()
-            .filter(|r| !r.pending)
-            .and_then(|r| evidence::build(&study, nid, &r).ok())
-            .is_some_and(|b| b.revision == job.bundle.revision);
-        let settings_same = self.coach_settings().is_ok_and(|s| s.revision() == job.settings.revision())
-            && self.coach.config_rev.load(Ordering::SeqCst) == job.config_rev;
-        if !(evidence_same && settings_same) {
+        if !latest {
+            // 已经发出的请求在取消（或被更新的请求取代）后返回：不改动讲解状态，
+            // 但证据与设置都没有改变时把结果存入缓存，再次查看这一着时直接使用
+            if let Ok(output) = outcome
+                && self.coach_inputs_unchanged(&study, &job)
+            {
+                debug!("节点 {nid} 的 AI 讲解在取消后返回，结果存入缓存");
+                if let Err(e) = self.store.save_coach_cache(&sid, nid, &result_of(&job, output)) {
+                    warn!("保存 AI 讲解缓存失败：{e}");
+                }
+            }
+            return;
+        }
+        if !self.coach_inputs_unchanged(&study, &job) {
             debug!("节点 {nid} 的讲解依据或模型设置在生成期间改变，按当前状态重新安排");
             self.coach_request(CoachRequest { refresh: false, ..job.request });
             return;
@@ -586,7 +589,43 @@ impl Inner {
         }
     }
 
-    /// 取消排队的请求；已经发出的请求在返回后丢弃结果。
+    /// 任务生成期间，讲解依据与模型设置都没有改变。
+    fn coach_inputs_unchanged(&self, study: &Study, job: &CoachJob) -> bool {
+        let (sid, nid) = (&job.request.study_id, job.request.node_id);
+        let evidence_same = self
+            .store
+            .load_explanation(sid, nid)
+            .ok()
+            .flatten()
+            .filter(|r| !r.pending)
+            .and_then(|r| evidence::build(study, nid, &r).ok())
+            .is_some_and(|b| b.revision == job.bundle.revision);
+        evidence_same
+            && self.coach_settings().is_ok_and(|s| s.revision() == job.settings.revision())
+            && self.coach.config_rev.load(Ordering::SeqCst) == job.config_rev
+    }
+
+    /// 离开这一着时取消尚未发出的请求：等待引擎分析、在队列中或等待并发名额的请求不再发送；
+    /// 已经开始生成的请求继续，结果写给这一着。
+    fn coach_leave(&self, study_id: &str, node_id: NodeId) {
+        let key = (study_id.to_string(), node_id);
+        let state = self.store.load_coach(study_id, node_id).ok().flatten().map(|r| r.state);
+        let waited = lock(&self.coach.waiting).remove(&key).is_some();
+        if state == Some(CoachState::Queued) {
+            // 请求在发送前会确认自己仍是最新的；移除后它不再发出
+            lock(&self.coach.inflight).remove(&key);
+        }
+        if waited || state == Some(CoachState::Queued) {
+            self.update_coach(study_id, node_id, |c| {
+                if c.state == CoachState::Queued {
+                    c.state = CoachState::Idle;
+                }
+                c.waiting_evidence = false;
+            });
+        }
+    }
+
+    /// 取消排队的请求；已经发出的请求在返回后不改动讲解状态（结果仍可存入缓存）。
     fn coach_cancel(&self, study_id: &str, node_id: NodeId) {
         let key = (study_id.to_string(), node_id);
         lock(&self.coach.waiting).remove(&key);
@@ -659,6 +698,14 @@ impl AppService {
         self.inner.enqueue(&req.study_id, req.node_id, Budget::Quick, Priority::Interactive, true);
         self.inner.on_explain_thread(move |inner| inner.coach_request(request));
         Ok(self.inner.coach_view(&req.study_id, req.node_id))
+    }
+
+    /// 离开这一着：只取消尚未发出的请求（见 `coach_leave`）。
+    pub fn coach_leave(&self, r: NodeRef) -> ApiResult<CoachView> {
+        self.inner.with_study(&r.study_id, |s| Ok(s.node(r.node_id).map(|_| ())?))?;
+        let (sid, nid) = (r.study_id.clone(), r.node_id);
+        self.inner.on_explain_thread(move |inner| inner.coach_leave(&sid, nid));
+        Ok(self.inner.coach_view(&r.study_id, r.node_id))
     }
 
     pub fn coach_cancel(&self, r: NodeRef) -> ApiResult<CoachView> {

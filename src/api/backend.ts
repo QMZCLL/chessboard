@@ -127,6 +127,8 @@ export const api = {
   coachExplain: (study_id: string, node_id: number, refresh = false) =>
     call<T.CoachView>("coach_explain", { req: { study_id, node_id, refresh } }),
   coachCancel: (study_id: string, node_id: number) => call<T.CoachView>("coach_cancel", { req: { study_id, node_id } }),
+  /** 离开这一着：只取消尚未发出的 AI 讲解请求，已经发出的照常完成 */
+  coachLeave: (study_id: string, node_id: number) => call<T.CoachView>("coach_leave", { req: { study_id, node_id } }),
   coachView: (study_id: string, node_id: number) => call<T.CoachView>("coach_view", { req: { study_id, node_id } }),
   /** 保存或清除模型服务的密钥（只写入后台凭据文件，不会再返回界面）。 */
   setCoachCredential: (key: string | null) => call<T.AppStatus>("set_coach_credential", { req: { key } }),

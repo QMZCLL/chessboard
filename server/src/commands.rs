@@ -148,6 +148,12 @@ pub async fn coach_cancel(state: State<'_, AppService>, req: NodeRef) -> ApiResu
 }
 
 #[tauri::command]
+pub async fn coach_leave(state: State<'_, AppService>, req: NodeRef) -> ApiResult<CoachView> {
+    let s = service(&state);
+    blocking(move || s.coach_leave(req)).await
+}
+
+#[tauri::command]
 pub async fn coach_view(state: State<'_, AppService>, req: NodeRef) -> ApiResult<CoachView> {
     let s = service(&state);
     blocking(move || s.coach_view(req)).await
