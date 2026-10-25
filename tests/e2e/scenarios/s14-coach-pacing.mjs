@@ -146,7 +146,10 @@ async function closeBatch() {
 await openBatch("mainline");
 let text = await summary();
 check(text.includes("共 8 着") && text.includes("已有讲解 3 着") && text.includes("需要生成 5 着"), `生成前说明要生成几着：${text.replace(/\n/g, " ")}`);
-check(text.includes("预计调用模型 5–10 次") && text.includes("不限次数"), "说明预计调用几次与今天的剩余次数");
+check(
+  text.includes("预计调用模型 5 次；输出需要修正时最多 10 次，遇到网络错误或限流而重试时最多 20 次") && text.includes("不限次数"),
+  "按后台的重试策略说明预计调用几次，以及今天的剩余次数",
+);
 check((await dialog.getByTestId("batch-scope-starred").innerText()).includes("2 着"), "收藏的着法有 2 着");
 check((await calls()).length === before + 1, "只打开批量生成不调用模型");
 await snap(page, "batch-plan");
@@ -226,6 +229,24 @@ check(added.join() === NAMES[2], `次数用完后自动停止：${added.join("�
 check((await itemStates()).filter((s) => s.endsWith(":waiting")).length === 6, "其余的着法没有生成");
 check(await dialog.getByTestId("batch-start").isDisabled(), "次数用完后不能继续生成，并说明可以调高上限");
 await snap(page, "batch-budget");
+await closeBatch();
+
+// 重试策略：一着可能用到全部重试，每次调用都计入今天的次数，与生成前的说明一致
+await bridge("update_config", { config: await coachConfig({ audience: "advanced", daily_request_budget: 0 }) });
+await mock({ delay_ms: 0, script: ["503", "bad", "503", "valid"] });
+await openBatch("starred");
+text = await summary();
+check(text.includes("需要生成 2 着") && text.includes("最多 8 次"), `两着最多调用 8 次：${text.replace(/\n/g, " ")}`);
+before = (await calls()).length;
+const usedBefore = (await bridge("app_status")).coach.used_today;
+await dialog.getByTestId("batch-start").click();
+await waitPhase("全部完成", 90000);
+added = await callsSince(before);
+const usedAfter = (await bridge("app_status")).coach.used_today;
+check(
+  added.join() === [NAMES[5], NAMES[5], NAMES[5], NAMES[5], NAMES[7]].join() && usedAfter - usedBefore === 5,
+  `服务端错误、输出修正与网络重试都实际发出并计入今天的次数：${added.join("、")}，今天增加 ${usedAfter - usedBefore} 次`,
+);
 await closeBatch();
 
 // 恢复设置，不影响之后的场景

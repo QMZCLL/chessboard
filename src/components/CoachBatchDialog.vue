@@ -86,7 +86,7 @@ watch(
           <b>{{ plan.need.length }}</b> 着。
         </p>
         <p v-if="plan.need.length">
-          预计调用模型 {{ plan.calls.min }}{{ plan.calls.max > plan.calls.min ? `–${plan.calls.max}` : "" }} 次（每着一次，输出需要修正时再加一次）。
+          {{ `预计调用模型 ${plan.calls.usual} 次；输出需要修正时最多 ${plan.calls.repair} 次，遇到网络错误或限流而重试时最多 ${plan.calls.max} 次。每次调用都计入今天的次数。` }}
         </p>
         <p class="muted">今天已调用 {{ coach?.used_today ?? 0 }} 次，{{ left === null ? "不限次数" : `还剩 ${left} 次` }}。</p>
       </template>

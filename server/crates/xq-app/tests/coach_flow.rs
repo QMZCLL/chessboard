@@ -91,6 +91,30 @@ impl MockLlm {
 }
 
 /// `script` 给出第 i 次请求的回复与延迟（毫秒）；超出脚本时返回 HTTP 500。
+#[test]
+fn one_move_can_take_every_retry_and_each_call_counts_against_the_budget() {
+    // 服务端错误后网络重试成功但输出不合格；修正请求又遇到服务端错误，重试后得到合格输出
+    let llm = mock_llm(|i| match i {
+        0 | 2 => (Reply::Raw(503, r#"{"error":{"message":"busy"}}"#.into()), 0),
+        1 => (Reply::Content(unknown_claim), 0),
+        _ => (Reply::Content(valid_output), 0),
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start(dir.path(), &format!("@go\n{ROUND}"), &llm, rec.clone());
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk".into()) }).unwrap();
+    let policy = service.status().coach.calls_per_move;
+    assert_eq!((policy.usual, policy.with_repair, policy.max), (1, 2, 4), "界面说明的次数与重试策略一致");
+    let sid = standard_study(&service);
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("详细讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+    explain(&service, &sid, node, false);
+    rec.coach("经过全部重试后生成", node, "ready");
+    assert_eq!(llm.count(), policy.max as usize, "一着最多调用的次数");
+    assert_eq!(service.status().coach.used_today, policy.max, "每次调用都计入每日次数");
+    service.shutdown();
+}
+
 fn mock_llm(script: impl Fn(usize) -> (Reply, u64) + Send + Sync + 'static) -> MockLlm {
     let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
     let url = format!("http://{}", server.server_addr().to_ip().unwrap());

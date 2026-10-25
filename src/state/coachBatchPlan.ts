@@ -54,8 +54,11 @@ export interface BatchPlan {
   need: number[];
   /** 已有对应当前条件的结果，直接使用 */
   skip: number[];
-  /** 预计调用模型的次数：每着至少一次，输出需要修正时再加一次 */
-  calls: { min: number; max: number };
+  /**
+   * 预计调用模型的次数（按后台的重试策略）：usual 每着一次；repair 输出需要修正时；
+   * max 请求还遇到网络错误、限流或服务端错误而重试时的最多次数
+   */
+  calls: { usual: number; repair: number; max: number };
   /** 今天还能调用几次；null 表示不限 */
   left: number | null;
   /** 今天剩余的次数可能不够生成全部 */
@@ -69,12 +72,15 @@ export function budgetLeft(coach: Pick<CoachAvailability, "used_today" | "daily_
 export function planBatch(
   targets: number[],
   views: Record<number, CoachView | null | undefined>,
-  coach: Pick<CoachAvailability, "used_today" | "daily_budget">,
+  coach: Pick<CoachAvailability, "used_today" | "daily_budget" | "calls_per_move">,
 ): BatchPlan {
   const need = targets.filter((id) => !hasCurrentResult(views[id]));
   const skip = targets.filter((id) => hasCurrentResult(views[id]));
   const left = budgetLeft(coach);
-  return { need, skip, calls: { min: need.length, max: need.length * 2 }, left, short: left !== null && left < need.length };
+  const n = need.length;
+  const policy = coach.calls_per_move;
+  const calls = { usual: n * policy.usual, repair: n * policy.with_repair, max: n * policy.max };
+  return { need, skip, calls, left, short: left !== null && left < calls.usual };
 }
 
 /** 生成失败是因为今天的调用次数已经用完：之后的着法也不会成功，应停止。 */

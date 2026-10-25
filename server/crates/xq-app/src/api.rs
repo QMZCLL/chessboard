@@ -140,6 +140,19 @@ pub struct CoachAvailability {
     pub model_label: String,
     pub used_today: u32,
     pub daily_budget: u32,
+    /// 生成一着可能调用模型的次数。
+    pub calls_per_move: CoachCallPolicy,
+}
+
+/// 生成一着 AI 讲解可能调用模型的次数，与后台的重试策略一致；每次调用都计入每日次数。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct CoachCallPolicy {
+    /// 输出一次通过检查。
+    pub usual: u32,
+    /// 输出需要修正时。
+    pub with_repair: u32,
+    /// 请求还遇到网络错误、限流或服务端错误而重试时，最多的次数。
+    pub max: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]

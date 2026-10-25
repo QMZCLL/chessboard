@@ -508,6 +508,18 @@ export interface CoachAvailability {
   model_label: string;
   used_today: number;
   daily_budget: number;
+  /** 生成一着可能调用模型的次数（与后台的重试策略一致） */
+  calls_per_move: CoachCallPolicy;
+}
+
+/** 生成一着 AI 讲解可能调用模型的次数；每次调用都计入每日次数 */
+export interface CoachCallPolicy {
+  /** 输出一次通过检查 */
+  usual: number;
+  /** 输出需要修正时 */
+  with_repair: number;
+  /** 请求还遇到网络错误、限流或服务端错误而重试时，最多的次数 */
+  max: number;
 }
 
 export interface AllowedClaim {

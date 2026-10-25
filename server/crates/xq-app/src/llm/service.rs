@@ -45,6 +45,7 @@ use super::provider::ProviderSettings;
 use super::validate;
 use crate::api::AppStatus;
 use crate::api::CoachAvailability;
+use crate::api::CoachCallPolicy;
 use crate::api::CoachCredentialRequest;
 use crate::api::CoachExplainRequest;
 use crate::api::NodeRef;
@@ -165,7 +166,17 @@ fn worker(weak: Weak<Inner>, rx: Arc<Mutex<Receiver<CoachJob>>>) {
     }
 }
 
-/// 请求模型并检查输出；没有通过检查时，带着检查结果让模型修正一次。
+/// 一着的输出最多请求几次：第一次没有通过检查时，带着检查结果让模型修正一次。
+pub(crate) const OUTPUT_ATTEMPTS: u32 = 2;
+/// 每次请求最多发送几次：网络错误、超时、限流与服务端错误稍后重试一次。
+pub(crate) const NETWORK_ATTEMPTS: u32 = 2;
+
+/// 生成一着可能调用模型的次数，界面据此说明批量生成会用掉多少次（与上面的重试策略一致）。
+pub(crate) fn call_policy() -> CoachCallPolicy {
+    CoachCallPolicy { usual: 1, with_repair: OUTPUT_ATTEMPTS, max: OUTPUT_ATTEMPTS * NETWORK_ATTEMPTS }
+}
+
+/// 请求模型并检查输出；没有通过检查时，带着检查结果让模型修正（见 `OUTPUT_ATTEMPTS`）。
 fn run_job(inner: &Inner, job: &CoachJob) -> Result<CoachExplanation, String> {
     let ids: Vec<String> = job.bundle.pack.claims.iter().map(|c| c.id.clone()).collect();
     let schema = prompt::output_schema(&ids);
@@ -174,7 +185,7 @@ fn run_job(inner: &Inner, job: &CoachJob) -> Result<CoachExplanation, String> {
         Message::user(prompt::user_message(&job.bundle.pack, job.request.audience, job.request.detail)),
     ];
     let mut errors = Vec::new();
-    for attempt in 0..2 {
+    for attempt in 0..OUTPUT_ATTEMPTS {
         let content = inner.coach_call(job, &messages, &schema)?;
         match validate::validate(&content, &job.bundle, job.request.detail) {
             Ok(out) => return Ok(out),
@@ -219,6 +230,7 @@ impl Inner {
             model_label: format!("{} · {}", cfg.provider.label(), cfg.model),
             used_today: self.store.coach_usage(today()).unwrap_or(0),
             daily_budget: cfg.daily_request_budget,
+            calls_per_move: call_policy(),
         }
     }
 
@@ -371,11 +383,11 @@ impl Inner {
         self.coach.slot_free.notify_all();
     }
 
-    /// 发出一次请求（计入每日调用次数）；网络错误与限流稍后重试一次。
+    /// 发出一次请求（每次发送都计入每日调用次数）；网络错误与限流稍后重试（见 `NETWORK_ATTEMPTS`）。
     fn coach_call(&self, job: &CoachJob, messages: &[Message], schema: &Value) -> Result<String, String> {
         let budget = self.config_snapshot().coach.daily_request_budget;
         let mut last = String::new();
-        for attempt in 0..2 {
+        for attempt in 0..NETWORK_ATTEMPTS {
             if !self.coach_current(job) {
                 return Err("请求已取消、已被更新的请求取代，或模型服务设置已改变".into());
             }
@@ -387,7 +399,7 @@ impl Inner {
             }
             match provider::complete(&job.settings, messages, schema) {
                 Ok(text) => return Ok(text),
-                Err(e) if e.retryable() && attempt == 0 => {
+                Err(e) if e.retryable() && attempt + 1 < NETWORK_ATTEMPTS => {
                     warn!("AI 讲解请求失败，稍后重试：{e}");
                     last = e.to_string();
                     thread::sleep(Duration::from_millis(800));

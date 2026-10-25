@@ -1,20 +1,23 @@
 // 模拟 DeepSeek 接口：根据请求中的证据包生成合格（或故意不合格）的讲解。
-// POST /__mode {"mode":"valid"|"bad", "delay_ms": 0} 切换输出与回复前的延迟；POST /__reset 恢复默认并清空记录；
+// POST /__mode {"mode":"valid"|"bad", "delay_ms": 0} 切换输出与回复前的延迟；
+// POST /__mode {"script": ["503", "bad", "valid", ...]} 之后的请求依次按脚本回复（503 为服务端错误），用完后按 mode；
+// POST /__reset 恢复默认并清空记录；
 // GET /__calls 返回收到的请求（含 Authorization 头、这一着的记法与收到的时间）。
 import http from "node:http";
 
 const port = Number(process.env.MOCK_LLM_PORT ?? 1440);
 let mode = "valid";
 let delay = 0;
+let script = [];
 const calls = [];
 
 function pick(claims, groups) {
   return claims.find((c) => groups.includes(c.group))?.id;
 }
 
-function output(pack) {
+function output(pack, how = mode) {
   const claims = pack.claims;
-  if (mode === "bad") {
+  if (how === "bad") {
     return { summary: { text: "这步是最佳着法，胜率很高。", claim_ids: ["c999"] }, sections: [], lesson: { text: "", claim_ids: [] }, followups: [] };
   }
   const sections = [
@@ -42,12 +45,14 @@ http
         const m = JSON.parse(body);
         mode = m.mode ?? mode;
         delay = m.delay_ms ?? delay;
+        script = m.script ?? script;
         res.end("{}");
         return;
       }
       if (req.url === "/__reset") {
         mode = "valid";
         delay = 0;
+        script = [];
         calls.length = 0;
         res.end("{}");
         return;
@@ -61,9 +66,15 @@ http
       const pack = JSON.parse(request.messages[1].content).evidence;
       calls.push({ url: req.url, authorization: req.headers.authorization ?? null, notation: pack.move_notation, at: Date.now(), body: request });
       // 按收到请求时的设置回复
-      const content = JSON.stringify(output(pack));
+      const how = script.length ? script.shift() : mode;
+      const content = how === "503" ? null : JSON.stringify(output(pack, how));
       setTimeout(() => {
         res.setHeader("Content-Type", "application/json");
+        if (content === null) {
+          res.statusCode = 503;
+          res.end(JSON.stringify({ error: { message: "service busy" } }));
+          return;
+        }
         res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }] }));
       }, delay);
     });
