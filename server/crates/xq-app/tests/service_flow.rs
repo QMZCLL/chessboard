@@ -17,6 +17,10 @@ use xq_app::compare::CompareRequest;
 use xq_app::engine::EngineState;
 use xq_app::events::EventSink;
 use xq_app::records::Budget;
+use xq_app::review::ReviewAttemptRequest;
+use xq_app::review::ReviewRef;
+use xq_app::review::ReviewStatus;
+use xq_app::review::ReviewUpdateRequest;
 use xq_core::Board;
 use xq_core::Color;
 use xq_core::Move;
@@ -753,5 +757,84 @@ fn think_hints_come_with_the_position_and_practice_is_recorded_on_the_move() {
     // 练习记录随会话保存，重新打开仍在
     let reopened = service.load_study(&sid).unwrap();
     assert!(reopened.study.nodes[&node].practice.is_some());
+    service.shutdown();
+}
+
+#[test]
+fn review_card_keeps_the_position_and_the_thinking_and_survives_the_study() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: Some("复习测试".into()), kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let second = service.apply_move(MoveRequest { study_id: sid.clone(), parent: first, mv: mv("h9g7"), variation: false }).unwrap().node_id.unwrap();
+    // 先想后讲：用了两级提示，第一步走了马2进3
+    service
+        .record_practice(PracticeRequest { study_id: sid.clone(), node_id: second, hints_used: 2, revealed_directly: false, first_choice: Some(mv("b9c7")) })
+        .unwrap();
+    service.set_note(NoteRequest { study_id: sid.clone(), node_id: second, note: "为什么不走马2进3？".into(), starred: true }).unwrap();
+    rec.wait("第二着的讲解完成", |e, v| e == "explanation_updated" && v["node_id"] == second && v["record"]["pending"] == false);
+
+    let item = service.add_review(NodeRef { study_id: sid.clone(), node_id: second }).unwrap();
+    let card = &item.card;
+    let before = service.node_detail(NodeRef { study_id: sid.clone(), node_id: first }).unwrap();
+    assert_eq!(card.fen, format!("{} b", before.node.fen.split(' ').next().unwrap()), "卡片保存落子前的局面与行棋方");
+    assert_eq!((card.side, card.turn, card.status), (Color::Black, 1, ReviewStatus::Due));
+    assert_eq!(card.history.iter().map(|m| m.notation.as_str()).collect::<Vec<_>>(), ["炮二平五"], "保存此前的着法");
+    assert!(card.history_complete);
+    assert_eq!(card.answer.notation, "马8进7");
+    let thinking = card.thinking.as_ref().expect("保存当时的练习记录");
+    assert_eq!(thinking.first_choice.as_ref().map(|m| m.notation.as_str()), Some("马2进3"));
+    let hints = thinking.hints.as_ref().expect("保存当时看过的提示原文");
+    assert!(!hints.observe.is_empty() && hints.focus.is_some() && hints.moves.is_empty(), "只保留用到的两级提示：{hints:?}");
+    assert_eq!(card.note, "为什么不走马2进3？", "加入时带入这一着的笔记");
+    let basis = card.basis.as_ref().expect("保存程序讲解");
+    assert!(!basis.summary.is_empty() && basis.generator_version > 0);
+    assert!(item.source_available);
+
+    // 再次加入不覆盖原来的卡片；这一着的详情显示复习状态
+    let again = service.add_review(NodeRef { study_id: sid.clone(), node_id: second }).unwrap();
+    assert_eq!(again.card.created_at, card.created_at);
+    assert_eq!(service.node_detail(NodeRef { study_id: sid.clone(), node_id: second }).unwrap().review, Some(ReviewStatus::Due));
+    assert!(service.add_review(NodeRef { study_id: sid.clone(), node_id: ROOT }).is_err(), "起始局面不能加入复习");
+
+    // 复习：先给出局面与合法着法，重新选择后记下是否与棋谱相同
+    let id = card.id.clone();
+    let detail = service.review_detail(ReviewRef { id: id.clone() }).unwrap();
+    assert!(detail.legal_moves.contains(&mv("h9g7")) && detail.legal_moves.contains(&mv("b9c7")));
+    let err = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")) }).unwrap_err();
+    assert!(err.message.contains("不合规则"), "{}", err.message);
+    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h9g7")) }).unwrap();
+    assert!(tried.card.attempts.last().unwrap().matched);
+    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None }).unwrap();
+    assert_eq!(tried.card.attempts.len(), 2);
+    assert!(!tried.card.attempts[1].matched, "直接看答案不算走对");
+    assert!(tried.card.reviewed_at.is_some());
+    let updated = service
+        .update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Again), note: Some("马8进7保护中卒".into()) })
+        .unwrap();
+    assert_eq!((updated.card.status, updated.card.note.as_str()), (ReviewStatus::Again, "马8进7保护中卒"));
+
+    // 列表：需要再练在前，然后是待复习
+    service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap();
+    let list = service.list_reviews().unwrap();
+    assert_eq!(list.iter().map(|i| i.card.status).collect::<Vec<_>>(), [ReviewStatus::Again, ReviewStatus::Due]);
+
+    // 重新启动后仍在；删除会话后卡片保留，仍可复习，只是不能打开原局面
+    service.shutdown();
+    drop(service);
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    assert_eq!(service.list_reviews().unwrap().len(), 2);
+    service.delete_study(&sid).unwrap();
+    let list = service.list_reviews().unwrap();
+    assert!(list.iter().all(|i| !i.source_available && i.study_name == "复习测试"), "原会话删除后保留卡片");
+    let detail = service.review_detail(ReviewRef { id: id.clone() }).unwrap();
+    assert_eq!(detail.item.card.answer.notation, "马8进7");
+    service.delete_review(ReviewRef { id: id.clone() }).unwrap();
+    assert_eq!(service.list_reviews().unwrap().len(), 1);
+    assert!(service.review_detail(ReviewRef { id }).is_err());
     service.shutdown();
 }

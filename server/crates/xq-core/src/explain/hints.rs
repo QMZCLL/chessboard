@@ -62,6 +62,27 @@ pub struct ThinkHints {
     pub moves_note: String,
 }
 
+/// 练习时实际看过的提示：只保留用到的级数，供复习时回看当时的思考。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsedHints {
+    pub observe: String,
+    /// 用到二级时才有。
+    pub focus: Option<HintFocus>,
+    /// 用到三级时才有。
+    pub moves: Vec<HintMove>,
+}
+
+impl ThinkHints {
+    /// 前 `level` 级提示；没有用提示时为 `None`。
+    pub fn used(&self, level: u8) -> Option<UsedHints> {
+        (level > 0).then(|| UsedHints {
+            observe: self.observe.clone(),
+            focus: (level >= 2).then(|| self.focus.clone()),
+            moves: if level >= 3 { self.moves.clone() } else { Vec::new() },
+        })
+    }
+}
+
 const MAX_MOVES: usize = 3;
 
 /// 生成某个局面的分级提示；局面已经结束（无着可走）时返回 `None`。

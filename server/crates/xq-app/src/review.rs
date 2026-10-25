@@ -1,0 +1,365 @@
+//! 复习卡片：把学过的一着连同当时的思考保存下来。复习时先只给出局面，让用户重新选择，
+//! 再对照原来的思考、棋谱中的这一着与程序讲解。
+//!
+//! 卡片在加入复习时保存快照：落子前的局面与此前的着法、先想后讲时的第一次选择与看过的提示、
+//! 棋谱中的这一着、程序讲解的要点与依据（连同分析条件与讲解规则版本）、用户自己的理解或疑问。
+//! 原会话之后被修改或删除，卡片仍按快照复习；只有“打开原局面”需要原会话中的这一着仍在。
+//! 第一版只有三种状态（待复习、需要再练、已理解），不做间隔调度。
+
+use std::collections::HashMap;
+
+use serde::Deserialize;
+use serde::Serialize;
+use xq_core::Color;
+use xq_core::Move;
+use xq_core::explain::ExplainLevel;
+use xq_core::explain::Verdict;
+use xq_core::explain::hints::UsedHints;
+use xq_core::fen;
+use xq_core::notation;
+use xq_core::rules;
+use xq_core::study::NodeId;
+use xq_core::study::Orientation;
+use xq_core::study::Study;
+
+use crate::records::Budget;
+use crate::service::ApiError;
+use crate::service::ApiResult;
+use crate::service::Inner;
+use crate::service::now_ms;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewStatus {
+    /// 待复习：刚加入，或还没有复习过。
+    Due,
+    /// 需要再练。
+    Again,
+    /// 已理解。
+    Understood,
+}
+
+impl ReviewStatus {
+    /// 列表中的顺序：需要再练、待复习在前。
+    fn order(self) -> u8 {
+        match self {
+            ReviewStatus::Again => 0,
+            ReviewStatus::Due => 1,
+            ReviewStatus::Understood => 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewMove {
+    pub mv: Move,
+    pub notation: String,
+}
+
+/// 加入复习时的思考记录（来自这一着最近一次先想后讲的练习）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewThinking {
+    pub first_choice: Option<ReviewMove>,
+    pub hints_used: u8,
+    pub revealed_directly: bool,
+    pub matched: bool,
+    /// 当时看过的提示原文；早期的练习记录没有保存原文。
+    pub hints: Option<UsedHints>,
+    pub practiced_at: i64,
+}
+
+/// 加入复习时这一着的程序讲解：要点、依据与分析版本。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewBasis {
+    pub level: ExplainLevel,
+    pub summary: String,
+    pub verdict: Option<Verdict>,
+    pub need: Vec<String>,
+    pub basis: Vec<String>,
+    pub replies: Vec<String>,
+    pub lesson: String,
+    pub warnings: Vec<String>,
+    /// 引擎分析条件（引擎、预算、深度等）。
+    pub conditions: Option<String>,
+    pub budget: Option<Budget>,
+    /// 讲解规则的版本。
+    pub generator_version: u32,
+    pub explained_at: i64,
+}
+
+/// 一次复习：重新选择的着法（直接看答案时为空）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewAttempt {
+    pub at: i64,
+    pub choice: Option<ReviewMove>,
+    pub matched: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewCard {
+    /// 与讲解记录相同的“会话/节点”：同一着只有一张卡片。
+    pub id: String,
+    pub study_id: String,
+    pub node_id: NodeId,
+    /// 加入时的会话名称。
+    pub study_name: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub status: ReviewStatus,
+    /// 落子前局面（含行棋方），复习时先显示它。
+    pub fen: String,
+    /// 这一着的走棋方。
+    pub side: Color,
+    pub orientation: Orientation,
+    /// 这一着在第几回合。
+    pub turn: u32,
+    /// 本段棋谱起点到这个局面的着法。
+    pub history: Vec<ReviewMove>,
+    /// 起点之前的历史是否完整（残局、截图起点为不完整）。
+    pub history_complete: bool,
+    /// 棋谱中的这一着，作为对照。
+    pub answer: ReviewMove,
+    pub thinking: Option<ReviewThinking>,
+    pub basis: Option<ReviewBasis>,
+    /// 用户自己的理解或疑问；加入时从这一着的笔记带入。
+    pub note: String,
+    pub attempts: Vec<ReviewAttempt>,
+    pub reviewed_at: Option<i64>,
+}
+
+/// 保留的复习次数。
+const MAX_ATTEMPTS: usize = 20;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ReviewItem {
+    pub card: ReviewCard,
+    /// 原会话中的这一着仍在，可以打开原局面。
+    pub source_available: bool,
+    /// 原会话当前的名称（可能已改名）；原会话不在时为加入时的名称。
+    pub study_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ReviewDetail {
+    #[serde(flatten)]
+    pub item: ReviewItem,
+    /// 这个局面的合法着法，用于在棋盘上重新选择。
+    pub legal_moves: Vec<Move>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ReviewRef {
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ReviewAttemptRequest {
+    pub id: String,
+    /// 重新选择的着法；为空表示没有走子，直接查看原来的思考与讲解。
+    pub choice: Option<Move>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ReviewUpdateRequest {
+    pub id: String,
+    pub status: Option<ReviewStatus>,
+    pub note: Option<String>,
+}
+
+pub fn card_id(study_id: &str, node_id: NodeId) -> String { format!("{study_id}/{node_id:010}") }
+
+/// 回合数：根局面黑先时第一着就是第一回合的黑方。
+fn turn_of(ply: u32, root_side: Color) -> u32 { (ply.saturating_sub(1) + u32::from(root_side == Color::Black)) / 2 + 1 }
+
+fn source_available(study: Option<&Study>, card: &ReviewCard) -> bool {
+    study.and_then(|s| s.nodes.get(&card.node_id)).is_some_and(|n| n.mv == Some(card.answer.mv))
+}
+
+impl Inner {
+    /// 这一着的程序讲解快照；还没有完成的讲解不保存。
+    fn review_basis(&self, study_id: &str, node_id: NodeId) -> Option<ReviewBasis> {
+        let record = self.store.load_explanation(study_id, node_id).ok().flatten()?;
+        let e = record.explanation.filter(|_| !record.pending)?;
+        let texts = |claims: &[xq_core::explain::Claim]| claims.iter().map(|c| c.text.clone()).collect();
+        Some(ReviewBasis {
+            level: e.level,
+            summary: e.summary.clone(),
+            verdict: e.verdict.clone(),
+            need: texts(&e.need),
+            basis: texts(&e.basis),
+            replies: texts(&e.replies),
+            lesson: e.lesson.clone(),
+            warnings: e.warnings.clone(),
+            conditions: e.conditions.clone(),
+            budget: record.budget,
+            generator_version: e.generator_version,
+            explained_at: record.updated_at,
+        })
+    }
+
+    fn build_card(&self, study: &Study, node_id: NodeId) -> ApiResult<ReviewCard> {
+        let node = study.node(node_id)?;
+        let (Some(answer), Some(parent)) = (node.mv, node.parent) else {
+            return Err("起始局面和缺口没有着法，不能加入复习".into());
+        };
+        let before = study.node(parent)?;
+        let pos = study.position(parent)?;
+        let name = |mv: Move| notation::move_to_chinese(&pos, mv).unwrap_or_else(|_| mv.iccs());
+        // 本段起点（根或缺口）之后、这个局面之前的着法
+        let start = study.segment_start(parent)?;
+        let path = study.path(parent)?;
+        let from = path.iter().position(|n| *n == start).unwrap_or(0);
+        let history = path[from + 1..]
+            .iter()
+            .filter_map(|id| study.nodes.get(id))
+            .filter_map(|n| {
+                let mv = n.mv?;
+                Some(ReviewMove { mv, notation: n.notation.clone().unwrap_or_else(|| mv.iccs()) })
+            })
+            .collect();
+        let root_side = study.node(xq_core::study::ROOT)?.side_to_move;
+        let thinking = node.practice.as_ref().map(|p| ReviewThinking {
+            first_choice: p.first_choice.map(|mv| ReviewMove { mv, notation: name(mv) }),
+            hints_used: p.hints_used,
+            revealed_directly: p.revealed_directly,
+            matched: p.matched,
+            hints: p.hints.clone(),
+            practiced_at: p.updated_at,
+        });
+        let now = now_ms();
+        Ok(ReviewCard {
+            id: card_id(&study.id, node_id),
+            study_id: study.id.clone(),
+            node_id,
+            study_name: study.name.clone(),
+            created_at: now,
+            updated_at: now,
+            status: ReviewStatus::Due,
+            fen: fen::position_fen(&pos),
+            side: before.side_to_move,
+            orientation: study.orientation,
+            turn: turn_of(node.ply, root_side),
+            history,
+            history_complete: study.history_complete_at(parent)?,
+            answer: ReviewMove { mv: answer, notation: node.notation.clone().unwrap_or_else(|| name(answer)) },
+            thinking,
+            basis: self.review_basis(&study.id, node_id),
+            note: node.note.clone(),
+            attempts: Vec::new(),
+            reviewed_at: None,
+        })
+    }
+
+    fn load_card(&self, id: &str) -> ApiResult<ReviewCard> {
+        self.store.load_review(id)?.ok_or_else(|| ApiError::from("找不到这张复习卡片，可能已经删除"))
+    }
+
+    fn review_item(&self, card: ReviewCard) -> ReviewItem {
+        let study = self.store.load_study(&card.study_id).ok().flatten();
+        let source_available = source_available(study.as_ref(), &card);
+        let study_name = study.map(|s| s.name).unwrap_or_else(|| card.study_name.clone());
+        ReviewItem { card, source_available, study_name }
+    }
+
+    /// 把一着加入复习；已经在复习中时返回原来的卡片，不覆盖当时的记录。
+    pub(crate) fn add_review(&self, study_id: &str, node_id: NodeId) -> ApiResult<ReviewItem> {
+        let id = card_id(study_id, node_id);
+        if let Some(card) = self.store.load_review(&id)? {
+            return Ok(self.review_item(card));
+        }
+        let study = self.with_study(study_id, |s| Ok(s.clone()))?;
+        let card = self.build_card(&study, node_id)?;
+        self.store.save_review(&card)?;
+        Ok(self.review_item(card))
+    }
+
+    /// 全部卡片：需要再练、待复习在前，同一状态中较久没有复习的在前。
+    pub(crate) fn list_reviews(&self) -> ApiResult<Vec<ReviewItem>> {
+        let studies: HashMap<String, Study> = self.store.list_studies()?.into_iter().map(|s| (s.id.clone(), s)).collect();
+        let mut cards = self.store.list_reviews()?;
+        cards.sort_by_key(|c| (c.status.order(), c.reviewed_at.unwrap_or(0), c.created_at));
+        Ok(cards
+            .into_iter()
+            .map(|card| {
+                let study = studies.get(&card.study_id);
+                let source_available = source_available(study, &card);
+                let study_name = study.map(|s| s.name.clone()).unwrap_or_else(|| card.study_name.clone());
+                ReviewItem { card, source_available, study_name }
+            })
+            .collect())
+    }
+
+    pub(crate) fn review_detail(&self, id: &str) -> ApiResult<ReviewDetail> {
+        let mut card = self.load_card(id)?;
+        // 加入时讲解还没有完成：原会话中的这一着仍在、讲解已经完成时补上
+        if card.basis.is_none()
+            && let Ok(Some(study)) = self.store.load_study(&card.study_id)
+            && source_available(Some(&study), &card)
+            && let Some(basis) = self.review_basis(&card.study_id, card.node_id)
+        {
+            card.basis = Some(basis);
+            self.store.save_review(&card)?;
+        }
+        let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
+        let legal_moves = rules::legal_moves(&pos);
+        Ok(ReviewDetail { item: self.review_item(card), legal_moves })
+    }
+
+    /// 记一次复习：重新选择的着法是否与棋谱相同。
+    pub(crate) fn review_attempt(&self, id: &str, choice: Option<Move>) -> ApiResult<ReviewItem> {
+        let mut card = self.load_card(id)?;
+        let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
+        let choice = match choice {
+            Some(mv) if rules::legal_moves(&pos).contains(&mv) => {
+                Some(ReviewMove { mv, notation: notation::move_to_chinese(&pos, mv).unwrap_or_else(|_| mv.iccs()) })
+            }
+            Some(mv) => return Err(format!("{} 在这个局面中不合规则", mv.iccs()).into()),
+            None => None,
+        };
+        let now = now_ms();
+        let matched = choice.as_ref().is_some_and(|c| c.mv == card.answer.mv);
+        card.attempts.push(ReviewAttempt { at: now, choice, matched });
+        if card.attempts.len() > MAX_ATTEMPTS {
+            card.attempts.drain(..card.attempts.len() - MAX_ATTEMPTS);
+        }
+        card.reviewed_at = Some(now);
+        card.updated_at = now;
+        self.store.save_review(&card)?;
+        Ok(self.review_item(card))
+    }
+
+    pub(crate) fn update_review(&self, req: ReviewUpdateRequest) -> ApiResult<ReviewItem> {
+        let mut card = self.load_card(&req.id)?;
+        if let Some(status) = req.status {
+            card.status = status;
+        }
+        if let Some(note) = req.note {
+            card.note = note;
+        }
+        card.updated_at = now_ms();
+        self.store.save_review(&card)?;
+        Ok(self.review_item(card))
+    }
+
+    pub(crate) fn delete_review(&self, id: &str) -> ApiResult<()> {
+        self.load_card(id)?;
+        Ok(self.store.delete_review(id)?)
+    }
+
+    /// 这一着是否在复习中，以及当前状态。
+    pub(crate) fn review_status(&self, study_id: &str, node_id: NodeId) -> Option<ReviewStatus> {
+        self.store.load_review(&card_id(study_id, node_id)).ok().flatten().map(|c| c.status)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn turn_numbers_follow_the_side_that_moved_first() {
+        assert_eq!((turn_of(1, Color::Red), turn_of(2, Color::Red), turn_of(3, Color::Red)), (1, 1, 2));
+        // 黑先的残局：第一着是第一回合的黑方，第二着是第二回合的红方
+        assert_eq!((turn_of(1, Color::Black), turn_of(2, Color::Black), turn_of(3, Color::Black)), (1, 2, 2));
+    }
+}

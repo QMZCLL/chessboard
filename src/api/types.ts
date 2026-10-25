@@ -51,6 +51,8 @@ export interface Practice {
   /** 第一步与棋谱中的这一着相同 */
   matched: boolean;
   sessions: number;
+  /** 这次练习看过的提示原文（早期记录没有） */
+  hints: UsedHints | null;
   updated_at: number;
 }
 
@@ -227,6 +229,8 @@ export interface NodeDetail {
   cloud: CloudRecord | null;
   /** 先想后讲的分级提示（只依据这个局面，局面结束时为空） */
   hints: ThinkHints | null;
+  /** 这一着在复习中时的状态 */
+  review: ReviewStatus | null;
 }
 
 export type HintTopic = "in_check" | "own_threat" | "opportunity" | "development" | "improve";
@@ -241,6 +245,94 @@ export interface ThinkHints {
   /** 三级：可以考虑的着法（不分先后） */
   moves: { mv: Move; notation: string }[];
   moves_note: string;
+}
+
+/** 练习时实际看过的提示：只有用到的级数 */
+export interface UsedHints {
+  observe: string;
+  focus: ThinkHints["focus"] | null;
+  moves: ThinkHints["moves"];
+}
+
+// ---------- 复习卡片 ----------
+
+/** due 待复习；again 需要再练；understood 已理解 */
+export type ReviewStatus = "due" | "again" | "understood";
+
+export interface ReviewMove {
+  mv: Move;
+  notation: string;
+}
+
+/** 加入复习时的思考记录（这一着最近一次先想后讲的练习） */
+export interface ReviewThinking {
+  first_choice: ReviewMove | null;
+  hints_used: number;
+  revealed_directly: boolean;
+  matched: boolean;
+  hints: UsedHints | null;
+  practiced_at: number;
+}
+
+/** 加入复习时的程序讲解：要点、依据与分析版本 */
+export interface ReviewBasis {
+  level: ExplainLevel;
+  summary: string;
+  verdict: Verdict | null;
+  need: string[];
+  basis: string[];
+  replies: string[];
+  lesson: string;
+  warnings: string[];
+  conditions: string | null;
+  budget: Budget | null;
+  generator_version: number;
+  explained_at: number;
+}
+
+export interface ReviewAttempt {
+  at: number;
+  choice: ReviewMove | null;
+  matched: boolean;
+}
+
+export interface ReviewCard {
+  id: string;
+  study_id: string;
+  node_id: number;
+  study_name: string;
+  created_at: number;
+  updated_at: number;
+  status: ReviewStatus;
+  /** 落子前局面（含行棋方） */
+  fen: string;
+  /** 这一着的走棋方 */
+  side: Color;
+  orientation: Orientation;
+  turn: number;
+  /** 本段棋谱起点到这个局面的着法 */
+  history: ReviewMove[];
+  history_complete: boolean;
+  /** 棋谱中的这一着 */
+  answer: ReviewMove;
+  thinking: ReviewThinking | null;
+  basis: ReviewBasis | null;
+  /** 用户自己的理解或疑问 */
+  note: string;
+  attempts: ReviewAttempt[];
+  reviewed_at: number | null;
+}
+
+export interface ReviewItem {
+  card: ReviewCard;
+  /** 原会话中的这一着仍在，可以打开原局面 */
+  source_available: boolean;
+  /** 原会话当前的名称 */
+  study_name: string;
+}
+
+export interface ReviewDetail extends ReviewItem {
+  legal_moves: Move[];
 }
 
 export interface IllegalMove {

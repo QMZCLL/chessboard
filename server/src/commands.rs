@@ -16,6 +16,11 @@ use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
 use xq_app::llm::CoachView;
 use xq_app::records::ExplanationRecord;
+use xq_app::review::ReviewAttemptRequest;
+use xq_app::review::ReviewDetail;
+use xq_app::review::ReviewItem;
+use xq_app::review::ReviewRef;
+use xq_app::review::ReviewUpdateRequest;
 
 use crate::StartupError;
 
@@ -181,6 +186,42 @@ pub async fn analyze_position(state: State<'_, AppService>, req: AnalyzeRequest)
 pub async fn compare_moves(state: State<'_, AppService>, req: CompareRequest) -> ApiResult<CompareView> {
     let s = service(&state);
     blocking(move || s.compare_moves(req)).await
+}
+
+#[tauri::command]
+pub async fn add_review(state: State<'_, AppService>, req: NodeRef) -> ApiResult<ReviewItem> {
+    let s = service(&state);
+    blocking(move || s.add_review(req)).await
+}
+
+#[tauri::command]
+pub async fn list_reviews(state: State<'_, AppService>) -> ApiResult<Vec<ReviewItem>> {
+    let s = service(&state);
+    blocking(move || s.list_reviews()).await
+}
+
+#[tauri::command]
+pub async fn review_detail(state: State<'_, AppService>, req: ReviewRef) -> ApiResult<ReviewDetail> {
+    let s = service(&state);
+    blocking(move || s.review_detail(req)).await
+}
+
+#[tauri::command]
+pub async fn review_attempt(state: State<'_, AppService>, req: ReviewAttemptRequest) -> ApiResult<ReviewItem> {
+    let s = service(&state);
+    blocking(move || s.review_attempt(req)).await
+}
+
+#[tauri::command]
+pub async fn update_review(state: State<'_, AppService>, req: ReviewUpdateRequest) -> ApiResult<ReviewItem> {
+    let s = service(&state);
+    blocking(move || s.update_review(req)).await
+}
+
+#[tauri::command]
+pub async fn delete_review(state: State<'_, AppService>, req: ReviewRef) -> ApiResult<()> {
+    let s = service(&state);
+    blocking(move || s.delete_review(req)).await
 }
 
 #[tauri::command]

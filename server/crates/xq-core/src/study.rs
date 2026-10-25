@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::board::Position;
+use crate::explain::hints::UsedHints;
 use crate::fen;
 use crate::notation;
 use crate::rules;
@@ -97,6 +98,9 @@ pub struct Practice {
     pub matched: bool,
     /// 这一着练习过的次数。
     pub sessions: u32,
+    /// 这次练习看过的提示原文（早期记录没有）。
+    #[serde(default)]
+    pub hints: Option<UsedHints>,
     pub updated_at: i64,
 }
 
@@ -388,7 +392,8 @@ impl Study {
 
     /// 记录这一着的一次先想后讲练习（覆盖上一次的记录，累计练习次数）。
     pub fn record_practice(
-        &mut self, id: NodeId, hints_used: u8, revealed_directly: bool, first_choice: Option<Move>, now: i64,
+        &mut self, id: NodeId, hints_used: u8, revealed_directly: bool, first_choice: Option<Move>, hints: Option<UsedHints>,
+        now: i64,
     ) -> Result<(), StudyError> {
         let node = self.nodes.get_mut(&id).ok_or(StudyError::NoSuchNode(id))?;
         if node.mv.is_none() {
@@ -396,7 +401,9 @@ impl Study {
         }
         let sessions = node.practice.as_ref().map_or(0, |p| p.sessions) + 1;
         let matched = first_choice.is_some() && first_choice == node.mv;
-        node.practice = Some(Practice { hints_used: hints_used.min(3), revealed_directly, first_choice, matched, sessions, updated_at: now });
+        let hints_used = hints_used.min(3);
+        let hints = hints.filter(|_| hints_used > 0);
+        node.practice = Some(Practice { hints_used, revealed_directly, first_choice, matched, sessions, hints, updated_at: now });
         self.touch(now);
         Ok(())
     }
@@ -444,16 +451,16 @@ mod tests {
         let mut s = study(Position::startpos());
         let node = s.apply_move(ROOT, mv("h2e2"), MoveSource::User, 1).unwrap().node;
         let rev = s.revision;
-        s.record_practice(node, 2, false, Some(mv("b0c2")), 5).unwrap();
+        s.record_practice(node, 2, false, Some(mv("b0c2")), None, 5).unwrap();
         let p = s.node(node).unwrap().practice.clone().unwrap();
         assert_eq!((p.hints_used, p.revealed_directly, p.matched, p.sessions), (2, false, false, 1));
         assert!(s.revision > rev, "练习记录写入后会话版本递增");
-        s.record_practice(node, 9, false, Some(mv("h2e2")), 6).unwrap();
+        s.record_practice(node, 9, false, Some(mv("h2e2")), None, 6).unwrap();
         let p = s.node(node).unwrap().practice.clone().unwrap();
         assert_eq!((p.hints_used, p.matched, p.sessions), (3, true, 2), "提示最多三级，第二次练习走对了");
-        s.record_practice(node, 0, true, None, 7).unwrap();
+        s.record_practice(node, 0, true, None, None, 7).unwrap();
         assert!(!s.node(node).unwrap().practice.as_ref().unwrap().matched, "直接看讲解不算走对");
-        assert!(s.record_practice(ROOT, 0, true, None, 8).is_err(), "起始局面不是一着，没有练习记录");
+        assert!(s.record_practice(ROOT, 0, true, None, None, 8).is_err(), "起始局面不是一着，没有练习记录");
     }
 
     #[test]

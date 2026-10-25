@@ -30,6 +30,7 @@ use crate::records::Budget;
 use crate::records::CloudRecord;
 use crate::records::ExplainStatus;
 use crate::records::ExplanationRecord;
+use crate::review::ReviewStatus;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -220,6 +221,8 @@ pub struct NodeDetail {
     pub cloud: Option<CloudRecord>,
     /// 先想后讲的分级提示：只依据这个局面的事实与已缓存的候选，局面结束时为空。
     pub hints: Option<ThinkHints>,
+    /// 这一着在复习中时的状态。
+    pub review: Option<ReviewStatus>,
 }
 
 #[derive(Clone, Debug, Serialize)]

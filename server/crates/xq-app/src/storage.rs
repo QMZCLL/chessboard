@@ -1,4 +1,4 @@
-//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存。
+//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存、复习卡片。
 //! 使用嵌入式数据库 redb，值以 JSON 保存，并带有数据版本，便于后续迁移。
 
 use std::path::Path;
@@ -17,6 +17,7 @@ use crate::llm::CoachState;
 use crate::records::AnalysisRecord;
 use crate::records::CloudRecord;
 use crate::records::ExplanationRecord;
+use crate::review::ReviewCard;
 
 const META: TableDefinition<&str, &str> = TableDefinition::new("meta");
 const STUDIES: TableDefinition<&str, &str> = TableDefinition::new("studies");
@@ -27,6 +28,8 @@ const COACH: TableDefinition<&str, &str> = TableDefinition::new("coach");
 /// 通过检查的 AI 讲解，键为“会话/节点/缓存键”；证据、模型或讲解设置相同时直接复用。
 const COACH_CACHE: TableDefinition<&str, &str> = TableDefinition::new("coach_cache");
 const COACH_USAGE: &str = "coach_usage";
+/// 复习卡片，键为“会话/节点”（与讲解记录相同）。卡片是独立的快照，删除会话时保留。
+const REVIEWS: TableDefinition<&str, &str> = TableDefinition::new("reviews");
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -98,6 +101,7 @@ impl Store {
             tx.open_table(EXPLANATIONS)?;
             tx.open_table(COACH)?;
             tx.open_table(COACH_CACHE)?;
+            tx.open_table(REVIEWS)?;
         }
         tx.commit()?;
         Ok(Store { db })
@@ -218,6 +222,31 @@ impl Store {
 
     pub fn load_coach_cache(&self, study: &str, node: NodeId, key: &str) -> Result<Option<CoachResult>, StoreError> {
         self.get(COACH_CACHE, &coach_cache_key(study, node, key))
+    }
+
+    pub fn save_review(&self, card: &ReviewCard) -> Result<(), StoreError> { self.put(REVIEWS, &card.id, card) }
+
+    pub fn load_review(&self, id: &str) -> Result<Option<ReviewCard>, StoreError> { self.get(REVIEWS, id) }
+
+    pub fn list_reviews(&self) -> Result<Vec<ReviewCard>, StoreError> {
+        let tx = self.db.begin_read()?;
+        let t = tx.open_table(REVIEWS)?;
+        let mut out = Vec::new();
+        for item in t.iter()? {
+            let (_, v) = item?;
+            match serde_json::from_str::<ReviewCard>(v.value()) {
+                Ok(c) => out.push(c),
+                Err(e) => tracing::warn!("跳过无法解析的复习卡片：{e}"),
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn delete_review(&self, id: &str) -> Result<(), StoreError> {
+        let tx = self.db.begin_write()?;
+        tx.open_table(REVIEWS)?.remove(id)?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// 把上次运行遗留的排队中、生成中的 AI 讲解标为中断（保留已有结果），返回处理的条数。

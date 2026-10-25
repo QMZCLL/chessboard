@@ -135,6 +135,15 @@ export const api = {
   /** 对比同一局面下的两种走法；reference 为空时由后台选择对照（实际着法、引擎首选或其他分支） */
   compareMoves: (study_id: string, node_id: number, mine: T.Move, reference: T.Move | null) =>
     call<T.CompareView>("compare_moves", { req: { study_id, node_id, mine, reference } }),
+  /** 把一着加入复习；已经在复习中时返回原来的卡片 */
+  addReview: (study_id: string, node_id: number) => call<T.ReviewItem>("add_review", { req: { study_id, node_id } }),
+  listReviews: () => call<T.ReviewItem[]>("list_reviews"),
+  reviewDetail: (id: string) => call<T.ReviewDetail>("review_detail", { req: { id } }),
+  /** 记一次复习；choice 为空表示没有走子，直接查看原来的思考与讲解 */
+  reviewAttempt: (id: string, choice: T.Move | null) => call<T.ReviewItem>("review_attempt", { req: { id, choice } }),
+  updateReview: (id: string, patch: { status?: T.ReviewStatus; note?: string }) =>
+    call<T.ReviewItem>("update_review", { req: { id, status: patch.status ?? null, note: patch.note ?? null } }),
+  deleteReview: (id: string) => call<void>("delete_review", { req: { id } }),
   analyzePosition: (study_id: string, node_id: number, budget: T.Budget, request_id: string) =>
     call<void>("analyze_position", { req: { study_id, node_id, budget, request_id } }),
   cancelAnalysis: (requestId: string) => call<void>("cancel_analysis", { requestId }),

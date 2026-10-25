@@ -2,8 +2,9 @@
 // 顶栏：学习会话名称、学习方式（看谱学习 / 先想后讲）与全局操作。
 // AI 是否自动生成属于 AI 讲解设置，不在这里切换。
 import { computed, ref } from "vue";
-import { NButton, NDropdown, NInput, NRadioButton, NRadioGroup, NTag, NTooltip, useMessage } from "naive-ui";
+import { NBadge, NButton, NDropdown, NInput, NRadioButton, NRadioGroup, NTag, NTooltip, useMessage } from "naive-ui";
 import { errorMessage } from "../api/backend";
+import { openReviews, reviewCounts } from "../state/review";
 import { exportStudy, setMode, study, updateStudyPrefs, wb } from "../state/workbench";
 import { layout, ui } from "../state/layout";
 import Icon from "./Icon.vue";
@@ -108,6 +109,17 @@ function onMore(key: string) {
       <n-dropdown v-else trigger="click" :options="moreOptions" @select="onMore">
         <n-button size="small" quaternary>更多</n-button>
       </n-dropdown>
+      <n-badge :value="reviewCounts.todo" :show="reviewCounts.todo > 0" :max="99" type="info">
+        <n-button
+          size="small"
+          quaternary
+          data-testid="open-review"
+          :aria-label="reviewCounts.todo ? `复习，${reviewCounts.todo} 张待复习` : '复习'"
+          @click="openReviews()"
+        >
+          <template #icon><Icon name="book" /></template>复习
+        </n-button>
+      </n-badge>
       <n-button size="small" quaternary @click="wb.dialogs.settings = true"><template #icon><Icon name="sliders" /></template>设置</n-button>
     </div>
   </header>

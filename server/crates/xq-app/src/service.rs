@@ -50,6 +50,11 @@ use crate::llm::service::CoachRuntime;
 use crate::records::Budget;
 use crate::records::ExplainStatus;
 use crate::records::ExplanationRecord;
+use crate::review::ReviewAttemptRequest;
+use crate::review::ReviewDetail;
+use crate::review::ReviewItem;
+use crate::review::ReviewRef;
+use crate::review::ReviewUpdateRequest;
 use crate::storage::Store;
 use crate::storage::StoreError;
 
@@ -529,8 +534,21 @@ impl AppService {
     }
 
     pub fn record_practice(&self, req: PracticeRequest) -> ApiResult<StudyView> {
+        // 记下这次看过的提示原文：提示与界面显示的一样，由落子前局面的事实与已缓存的候选生成
+        let hints = match req.hints_used {
+            0 => None,
+            level => {
+                let study = self.inner.with_study(&req.study_id, |s| Ok(s.clone()))?;
+                let parent = study.node(req.node_id)?.parent;
+                parent.and_then(|p| {
+                    let pos = study.position(p).ok()?;
+                    let engine = self.inner.cached_position_evidence(&study, p);
+                    xq_core::explain::hints::think_hints(&pos, engine.as_ref())?.used(level.min(3))
+                })
+            }
+        };
         let study = self.inner.with_study(&req.study_id, |s| {
-            s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, now_ms())?;
+            s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, hints, now_ms())?;
             Ok(s.clone())
         })?;
         self.inner.study_view(&study)
@@ -577,6 +595,21 @@ impl AppService {
     pub fn compare_moves(&self, req: crate::compare::CompareRequest) -> ApiResult<crate::compare::CompareView> {
         self.inner.compare_moves(req)
     }
+
+    /// 把一着加入复习（见 `review`）。已经在复习中时返回原来的卡片。
+    pub fn add_review(&self, r: NodeRef) -> ApiResult<ReviewItem> { self.inner.add_review(&r.study_id, r.node_id) }
+
+    pub fn list_reviews(&self) -> ApiResult<Vec<ReviewItem>> { self.inner.list_reviews() }
+
+    pub fn review_detail(&self, r: ReviewRef) -> ApiResult<ReviewDetail> { self.inner.review_detail(&r.id) }
+
+    pub fn review_attempt(&self, req: ReviewAttemptRequest) -> ApiResult<ReviewItem> {
+        self.inner.review_attempt(&req.id, req.choice)
+    }
+
+    pub fn update_review(&self, req: ReviewUpdateRequest) -> ApiResult<ReviewItem> { self.inner.update_review(req) }
+
+    pub fn delete_review(&self, r: ReviewRef) -> ApiResult<()> { self.inner.delete_review(&r.id) }
 
     pub fn cancel_analysis(&self, request_id: &str) { self.inner.engine.cancel_group(&format!("analyze:{request_id}")); }
 }
@@ -757,6 +790,7 @@ impl Inner {
         let hints = xq_core::explain::hints::think_hints(&pos, engine.as_ref());
         let explanation = if node.is_move() { self.store.load_explanation(study_id, node_id)? } else { None };
         let coach = node.is_move().then(|| self.coach_view(study_id, node_id));
+        let review = if node.is_move() { self.review_status(study_id, node_id) } else { None };
         Ok(NodeDetail {
             study_id: study_id.to_string(),
             revision: study.revision,
@@ -771,6 +805,7 @@ impl Inner {
             explanation,
             coach,
             hints,
+            review,
         })
     }
 }

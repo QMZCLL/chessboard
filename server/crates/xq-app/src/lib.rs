@@ -13,6 +13,7 @@ pub mod events;
 pub mod llm;
 mod pipeline;
 pub mod records;
+pub mod review;
 mod service;
 pub mod storage;
 mod transfer;

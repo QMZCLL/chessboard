@@ -85,7 +85,7 @@ export const wb = reactive({
   coach: {} as Record<number, T.CoachView>,
   capture: { state: "idle" } as T.CaptureState,
   followLive: true,
-  dialogs: { newStudy: false, capture: false, settings: false, studies: false, coachBatch: false },
+  dialogs: { newStudy: false, capture: false, settings: false, studies: false, coachBatch: false, review: false },
   /** 下次打开设置时显示的分组（从其他位置跳转到某项设置时使用） */
   settingsTab: null as SettingsTab | null,
 });

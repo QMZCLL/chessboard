@@ -77,7 +77,7 @@ const board = ref<InstanceType<typeof XiangqiBoard> | null>(null);
 /** 当前焦点所在的界面会自己处理键盘时，棋谱导航让路。 */
 function boardKeysAllowed(e: KeyboardEvent): boolean {
   if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return false;
-  if (wb.dialogs.newStudy || wb.dialogs.capture || wb.dialogs.settings || wb.dialogs.studies) return false;
+  if (Object.values(wb.dialogs).some(Boolean)) return false;
   // 确认框等由组件库直接弹出的对话框打开时，焦点可能仍在页面上
   if (document.querySelector(".n-modal-mask, .n-drawer-mask")) return false;
   const t = e.target as HTMLElement | null;

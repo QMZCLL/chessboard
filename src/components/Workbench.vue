@@ -5,6 +5,7 @@ import { NButton, NResult, NSpin, NTabPane, NTabs, useMessage } from "naive-ui";
 import BoardArea from "./BoardArea.vue";
 import CaptureDialog from "./CaptureDialog.vue";
 import CoachBatchDialog from "./CoachBatchDialog.vue";
+import ReviewDialog from "./ReviewDialog.vue";
 import ExplanationPanel from "./ExplanationPanel.vue";
 import MoveTree from "./MoveTree.vue";
 import NewStudyDialog from "./NewStudyDialog.vue";
@@ -209,6 +210,7 @@ onBeforeUnmount(stopResize);
     <NewStudyDialog />
     <CaptureDialog />
     <CoachBatchDialog />
+    <ReviewDialog />
     <SettingsDrawer />
   </div>
 </template>

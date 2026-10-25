@@ -3,7 +3,7 @@
 // （有 AI 讲解时用 AI 讲解，否则用规则讲解）→ 关键操作 → 详细分析（可折叠）→ 学习点与笔记。
 // 局面分析在起始局面上直接给出分析入口；笔记显示保存状态，并始终保存到编辑时对应的那一着。
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { NAlert, NButton, NCollapse, NCollapseItem, NInput, NScrollbar, NSpin, NSwitch, NTabPane, NTabs, NTag, NTooltip } from "naive-ui";
+import { NAlert, NButton, NCollapse, NCollapseItem, NInput, NScrollbar, NSpin, NSwitch, NTabPane, NTabs, NTag, NTooltip, useMessage } from "naive-ui";
 import AttemptCard from "./AttemptCard.vue";
 import BasisList from "./BasisList.vue";
 import Icon from "./Icon.vue";
@@ -39,6 +39,9 @@ import { coachLesson } from "../state/coachContent";
 import { cmp } from "../state/compare";
 import { coachDisplay } from "../state/coachDisplay";
 import { editNote, noteView, persistNote } from "../state/notes";
+import { addToReview, openReviews } from "../state/review";
+import { reviewCardId, STATUS_LABEL } from "../state/reviewList";
+import { errorMessage } from "../api/backend";
 import { sideLabel } from "../utils/board";
 
 const tab = ref<"move" | "position" | "notes" | "compare">("move");
@@ -170,6 +173,24 @@ function notationOfChoice(mv: string | null) {
   return child?.notation ?? mv;
 }
 const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分析");
+
+// ---------- 复习 ----------
+const message = useMessage();
+/** 这一着在复习中时的状态（来自节点详情） */
+const reviewStatus = computed(() => (wb.detail?.node.id === wb.selected ? wb.detail.review : null));
+async function addReview() {
+  const s = study.value;
+  if (!s) return;
+  try {
+    await addToReview(s.id, wb.selected);
+    message.success("已加入复习：在顶部的“复习”中先看局面重新选择，再对照这次的思考与讲解");
+  } catch (e) {
+    message.error(errorMessage(e));
+  }
+}
+function openThisReview() {
+  if (study.value) openReviews(reviewCardId(study.value.id, wb.selected));
+}
 </script>
 
 <template>
@@ -222,7 +243,12 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
               <p class="muted note">提示只根据当前局面的事实与候选生成，不会直接告诉你棋谱中的着法。</p>
             </div>
             <template v-else-if="isMove">
-              <p v-if="practiceText" class="practice" data-testid="practice">{{ practiceText }}</p>
+              <!-- 先想后讲揭示之后：练习记录旁就是“加入复习”，保留这次的思考 -->
+              <div v-if="practiceText" class="practice">
+                <span data-testid="practice">{{ practiceText }}</span>
+                <n-button v-if="!reviewStatus" size="tiny" secondary data-testid="add-review" @click="addReview">加入复习</n-button>
+                <n-button v-else size="tiny" quaternary data-testid="in-review" @click="openThisReview">复习中 · {{ STATUS_LABEL[reviewStatus] }}</n-button>
+              </div>
               <AttemptCard v-if="attempt !== undefined" :node-id="attempt" />
               <div v-if="wb.detailError" class="error">{{ wb.detailError }}</div>
               <template v-if="expl">
@@ -320,9 +346,19 @@ const budgetLabel = (b: string) => (b === "deep" ? "深入分析" : "快速分�
                   </template>
                   <p v-else>{{ expl.lesson }}</p>
                 </div>
-                <n-button text size="small" class="note-link" @click="tab = 'notes'">
-                  <template #icon><Icon name="pen" :size="14" /></template>{{ node?.note ? "查看这一步的笔记" : "为这一步写笔记" }}
-                </n-button>
+                <div class="record-actions">
+                  <n-button text size="small" @click="tab = 'notes'">
+                    <template #icon><Icon name="pen" :size="14" /></template>{{ node?.note ? "查看这一步的笔记" : "为这一步写笔记" }}
+                  </n-button>
+                  <template v-if="!practiceText">
+                    <n-button v-if="!reviewStatus" text size="small" data-testid="add-review" @click="addReview">
+                      <template #icon><Icon name="book" :size="14" /></template>加入复习
+                    </n-button>
+                    <n-button v-else text size="small" data-testid="in-review" @click="openThisReview">
+                      <template #icon><Icon name="book" :size="14" /></template>复习中 · {{ STATUS_LABEL[reviewStatus] }}
+                    </n-button>
+                  </template>
+                </div>
               </template>
               <div v-else-if="!wb.detailError" class="loading"><n-spin size="small" /> 正在生成讲解…</div>
             </template>
@@ -613,7 +649,10 @@ h4 {
   margin: 4px 0 0;
   font-family: var(--font-serif);
 }
-.note-link {
+.record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
   margin-top: var(--sp-2);
 }
 .conditions {
@@ -698,6 +737,11 @@ h4 {
   margin: var(--sp-2) 0 0;
 }
 .practice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px var(--sp-2);
   margin: 0 0 var(--sp-3);
   padding: 6px var(--sp-3);
   border-radius: var(--radius);
