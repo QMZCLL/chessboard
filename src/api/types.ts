@@ -588,6 +588,58 @@ export interface CoachView {
   result_current: boolean;
 }
 
+/** 教练追问的问题类型：我的这一步的作用、两步的差别、走这一步之后对方的回应 */
+export type QuestionKind = "my_move" | "difference" | "reply";
+
+export interface Question {
+  study_id: string;
+  /** 比较起点 */
+  node_id: number;
+  mine: Move;
+  reference: Move;
+  kind: QuestionKind;
+}
+
+/** 回答下方的演示：从比较起点开始的一段变化（由程序按问题选择） */
+export interface AnswerDemo {
+  label: string;
+  moves: Move[];
+  notation: string[];
+}
+
+export interface AnswerResult {
+  output: { answer: CoachText; points: CoachText[]; check: string };
+  claims: AllowedClaim[];
+  evidence: Evidence[];
+  demos: AnswerDemo[];
+  evidence_revision: string;
+  cache_key: string;
+  model_label: string;
+  audience: Audience;
+  conditions: string | null;
+  created_at: number;
+}
+
+export interface AnswerRecord {
+  question: Question;
+  state: CoachRecord["state"];
+  generation: number;
+  result: AnswerResult | null;
+  error: string | null;
+  updated_at: number;
+}
+
+export interface AnswerView {
+  /** 状态版本：回答每次变化都会递增，按它判断新旧 */
+  seq: number;
+  question: Question;
+  status: CoachStatus;
+  reason: string | null;
+  record: AnswerRecord | null;
+  /** 记录中的回答是否对应当前的对比依据与设置 */
+  result_current: boolean;
+}
+
 export interface AppStatus {
   version: string;
   engine: EngineState;

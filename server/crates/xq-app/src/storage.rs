@@ -1,4 +1,4 @@
-//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存、复习卡片。
+//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存、教练追问、复习卡片。
 //! 使用嵌入式数据库 redb，值以 JSON 保存，并带有数据版本，便于后续迁移。
 
 use std::path::Path;
@@ -14,6 +14,7 @@ use xq_core::study::Study;
 use crate::llm::CoachRecord;
 use crate::llm::CoachResult;
 use crate::llm::CoachState;
+use crate::llm::ask::AnswerRecord;
 use crate::records::AnalysisRecord;
 use crate::records::CloudRecord;
 use crate::records::ExplanationRecord;
@@ -28,6 +29,8 @@ const COACH: TableDefinition<&str, &str> = TableDefinition::new("coach");
 /// 通过检查的 AI 讲解，键为“会话/节点/缓存键”；证据、模型或讲解设置相同时直接复用。
 const COACH_CACHE: TableDefinition<&str, &str> = TableDefinition::new("coach_cache");
 const COACH_USAGE: &str = "coach_usage";
+/// 教练追问的状态与最近一次回答，键为“会话/比较起点/两步着法/问题类型”（见 `Question::key`）。
+const COACH_ASK: TableDefinition<&str, &str> = TableDefinition::new("coach_ask");
 /// 复习卡片，键为“会话/节点”（与讲解记录相同）。卡片是独立的快照，删除会话时保留。
 const REVIEWS: TableDefinition<&str, &str> = TableDefinition::new("reviews");
 
@@ -101,6 +104,7 @@ impl Store {
             tx.open_table(EXPLANATIONS)?;
             tx.open_table(COACH)?;
             tx.open_table(COACH_CACHE)?;
+            tx.open_table(COACH_ASK)?;
             tx.open_table(REVIEWS)?;
         }
         tx.commit()?;
@@ -147,7 +151,7 @@ impl Store {
         {
             tx.open_table(STUDIES)?.remove(id)?;
             let prefix = format!("{id}/");
-            for table in [EXPLANATIONS, COACH, COACH_CACHE] {
+            for table in [EXPLANATIONS, COACH, COACH_CACHE, COACH_ASK] {
                 remove_prefix(&mut tx.open_table(table)?, &prefix)?;
             }
         }
@@ -190,18 +194,20 @@ impl Store {
         Ok(out)
     }
 
-    /// 删除这些节点的讲解、AI 讲解与缓存。
+    /// 删除这些节点的讲解、AI 讲解与缓存，以及以它们为比较起点的追问。
     pub fn delete_explanations(&self, study: &str, nodes: &[NodeId]) -> Result<(), StoreError> {
         let tx = self.db.begin_write()?;
         {
             let mut t = tx.open_table(EXPLANATIONS)?;
             let mut coach = tx.open_table(COACH)?;
             let mut cache = tx.open_table(COACH_CACHE)?;
+            let mut asks = tx.open_table(COACH_ASK)?;
             for node in nodes {
                 let key = explanation_key(study, *node);
                 t.remove(key.as_str())?;
                 coach.remove(key.as_str())?;
                 remove_prefix(&mut cache, &format!("{key}/"))?;
+                remove_prefix(&mut asks, &format!("{key}/"))?;
             }
         }
         tx.commit()?;
@@ -285,6 +291,38 @@ impl Store {
         tx.open_table(REVIEWS)?.remove(id)?;
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn save_answer(&self, record: &AnswerRecord) -> Result<(), StoreError> {
+        self.put(COACH_ASK, &record.question.key(), record)
+    }
+
+    pub fn load_answer(&self, key: &str) -> Result<Option<AnswerRecord>, StoreError> { self.get(COACH_ASK, key) }
+
+    /// 把上次运行遗留的排队中、生成中的追问标为中断（保留已有回答），返回处理的条数。
+    pub fn reset_interrupted_asks(&self, now: i64) -> Result<usize, StoreError> {
+        let tx = self.db.begin_write()?;
+        let mut count = 0;
+        {
+            let mut t = tx.open_table(COACH_ASK)?;
+            let mut updates = Vec::new();
+            for item in t.iter()? {
+                let (k, v) = item?;
+                let Ok(mut record) = serde_json::from_str::<AnswerRecord>(v.value()) else { continue };
+                if matches!(record.state, CoachState::Queued | CoachState::Running) {
+                    record.state = CoachState::Idle;
+                    record.error = Some("上次提问在应用退出前没有完成，可以重新提问".into());
+                    record.updated_at = now;
+                    updates.push((k.value().to_string(), serde_json::to_string(&record)?));
+                }
+            }
+            for (k, v) in updates {
+                t.insert(k.as_str(), v.as_str())?;
+                count += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(count)
     }
 
     /// 把上次运行遗留的排队中、生成中的 AI 讲解标为中断（保留已有结果），返回处理的条数。
@@ -402,4 +440,27 @@ mod tests {
         assert_eq!(again.note, "已有的笔记");
         assert!(store.update_review("s/2", |c| c.note = "x".into()).unwrap().is_none(), "不存在的卡片不会被建立");
     }
+
+    #[test]
+    fn interrupted_questions_are_reset_and_keep_their_answers() {
+        use crate::llm::CoachState;
+        use crate::llm::ask::AnswerRecord;
+        use crate::llm::ask::Question;
+        use crate::llm::ask::QuestionKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.redb")).unwrap();
+        let mv = |s: &str| xq_core::Move::parse_iccs(s).unwrap();
+        let question = Question { study_id: "s".into(), node_id: 0, mine: mv("h2e2"), reference: mv("h0g2"), kind: QuestionKind::MyMove };
+        let record = AnswerRecord { question: question.clone(), state: CoachState::Running, generation: 3, result: None, error: None, updated_at: 1 };
+        store.save_answer(&record).unwrap();
+        assert_eq!(store.reset_interrupted_asks(9).unwrap(), 1);
+        let reset = store.load_answer(&question.key()).unwrap().unwrap();
+        assert_eq!(reset.state, CoachState::Idle);
+        assert!(reset.error.unwrap().contains("没有完成"));
+        // 删除比较起点时一起删除
+        store.delete_explanations("s", &[0]).unwrap();
+        assert!(store.load_answer(&question.key()).unwrap().is_none());
+    }
+
 }

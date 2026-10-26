@@ -92,6 +92,8 @@ pub fn run() {
             commands::set_coach_credential,
             commands::analyze_position,
             commands::compare_moves,
+            commands::ask_coach,
+            commands::coach_answers,
             commands::add_review,
             commands::list_reviews,
             commands::review_detail,

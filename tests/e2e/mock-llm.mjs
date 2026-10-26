@@ -1,8 +1,8 @@
-// 模拟 DeepSeek 接口：根据请求中的证据包生成合格（或故意不合格）的讲解。
+// 模拟 DeepSeek 接口：根据请求中的证据包生成合格（或故意不合格）的讲解；证据包带有问题（教练追问）时生成回答。
 // POST /__mode {"mode":"valid"|"bad", "delay_ms": 0} 切换输出与回复前的延迟；
 // POST /__mode {"script": ["503", "bad", "valid", ...]} 之后的请求依次按脚本回复（503 为服务端错误），用完后按 mode；
 // POST /__reset 恢复默认并清空记录；
-// GET /__calls 返回收到的请求（含 Authorization 头、这一着的记法与收到的时间）。
+// GET /__calls 返回收到的请求（含 Authorization 头、这一着的记法、追问的问题类型与收到的时间）。
 import http from "node:http";
 
 const port = Number(process.env.MOCK_LLM_PORT ?? 1440);
@@ -36,6 +36,18 @@ function output(pack, how = mode) {
   };
 }
 
+/** 追问的回答：引用与问题相符的结论 */
+function answer(pack, how = mode) {
+  if (how === "bad") return { answer: { text: "这步更好，胜率很高。", claim_ids: ["c999"] }, points: [], check: "" };
+  const group = { my_move: ["mine"], difference: ["difference"], reply: ["mine_reply"] }[pack.question.kind];
+  const main = pick(pack.claims, group);
+  return {
+    answer: { text: `${pack.mine.notation}改变了这一侧的子力关系，接下来要留意对方怎样出子。`, claim_ids: [main] },
+    points: [{ text: "对照选择改变了什么，可以对照下方程序给出的依据。", claim_ids: [pick(pack.claims, ["reference"]) ?? main] }],
+    check: "现在哪些棋子在保护中路？",
+  };
+}
+
 http
   .createServer((req, res) => {
     let body = "";
@@ -64,10 +76,18 @@ http
       }
       const request = JSON.parse(body || "{}");
       const pack = JSON.parse(request.messages[1].content).evidence;
-      calls.push({ url: req.url, authorization: req.headers.authorization ?? null, notation: pack.move_notation, at: Date.now(), body: request });
+      const asking = !!pack.question;
+      calls.push({
+        url: req.url,
+        authorization: req.headers.authorization ?? null,
+        notation: asking ? pack.mine.notation : pack.move_notation,
+        question: asking ? pack.question.kind : null,
+        at: Date.now(),
+        body: request,
+      });
       // 按收到请求时的设置回复
       const how = script.length ? script.shift() : mode;
-      const content = how === "503" ? null : JSON.stringify(output(pack, how));
+      const content = how === "503" ? null : JSON.stringify(asking ? answer(pack, how) : output(pack, how));
       setTimeout(() => {
         res.setHeader("Content-Type", "application/json");
         if (content === null) {

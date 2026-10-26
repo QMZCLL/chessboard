@@ -47,6 +47,7 @@ const EVENTS = [
   "cloud_result",
   "coach_updated",
   "comparison_updated",
+  "coach_answer_updated",
 ] as const;
 export type EventName = (typeof EVENTS)[number];
 
@@ -141,6 +142,11 @@ export const api = {
   /** 对比同一局面下的两种走法；reference 为空时由后台选择对照（实际着法、引擎首选或其他分支） */
   compareMoves: (study_id: string, node_id: number, mine: T.Move, reference: T.Move | null) =>
     call<T.CompareView>("compare_moves", { req: { study_id, node_id, mine, reference } }),
+  /** 就一组已经完成的对比向教练提问；回答通过 coach_answer_updated 推送 */
+  askCoach: (q: T.Question) => call<T.AnswerView>("ask_coach", { req: q }),
+  /** 一组对比已经提过的问题与回答 */
+  coachAnswers: (study_id: string, node_id: number, mine: T.Move, reference: T.Move) =>
+    call<T.AnswerView[]>("coach_answers", { req: { study_id, node_id, mine, reference } }),
   /** 把一着加入复习；已经在复习中时返回原来的卡片 */
   addReview: (study_id: string, node_id: number) => call<T.ReviewItem>("add_review", { req: { study_id, node_id } }),
   listReviews: () => call<T.ReviewItem[]>("list_reviews"),

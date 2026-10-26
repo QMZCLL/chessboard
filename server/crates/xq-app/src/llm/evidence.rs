@@ -139,7 +139,8 @@ fn strength(c: Certainty) -> u8 {
     }
 }
 
-fn weakest(evidence: &[Evidence], ids: &[String]) -> Certainty {
+/// 一组证据中最弱的确定程度；没有证据时为 tentative。
+pub(crate) fn weakest(evidence: &[Evidence], ids: &[String]) -> Certainty {
     ids.iter()
         .filter_map(|id| evidence.iter().find(|e| &e.id == id))
         .map(|e| e.certainty)
@@ -319,7 +320,8 @@ pub fn build(study: &Study, node_id: NodeId, record: &ExplanationRecord) -> Resu
     Ok(EvidenceBundle { study_id: study.id.clone(), node_id, pack, revision, evidence })
 }
 
-fn fingerprint(pack: &CoachEvidencePack) -> String {
+/// 证据包的指纹（版本）：内容的 SHA-256。
+pub(crate) fn fingerprint(pack: &impl Serialize) -> String {
     let canonical = serde_json::to_vec(pack).unwrap_or_default();
     Sha256::digest(&canonical).iter().map(|b| format!("{b:02x}")).collect()
 }

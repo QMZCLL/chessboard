@@ -15,6 +15,9 @@ use xq_app::capture::Snapshot;
 use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
 use xq_app::llm::CoachView;
+use xq_app::llm::ask::AnswerView;
+use xq_app::llm::ask::AnswersRequest;
+use xq_app::llm::ask::Question;
 use xq_app::records::ExplanationRecord;
 use xq_app::review::ReviewAttemptRequest;
 use xq_app::review::ReviewDetail;
@@ -186,6 +189,18 @@ pub async fn analyze_position(state: State<'_, AppService>, req: AnalyzeRequest)
 pub async fn compare_moves(state: State<'_, AppService>, req: CompareRequest) -> ApiResult<CompareView> {
     let s = service(&state);
     blocking(move || s.compare_moves(req)).await
+}
+
+#[tauri::command]
+pub async fn ask_coach(state: State<'_, AppService>, req: Question) -> ApiResult<AnswerView> {
+    let s = service(&state);
+    blocking(move || s.ask_coach(req)).await
+}
+
+#[tauri::command]
+pub async fn coach_answers(state: State<'_, AppService>, req: AnswersRequest) -> ApiResult<Vec<AnswerView>> {
+    let s = service(&state);
+    blocking(move || s.coach_answers(req)).await
 }
 
 #[tauri::command]

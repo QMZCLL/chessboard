@@ -16,10 +16,15 @@ use xq_app::AppPaths;
 use xq_app::AppService;
 use xq_app::api::*;
 use xq_app::capture::SimBackend;
+use xq_app::compare::CompareRequest;
+use xq_app::config::Audience;
 use xq_app::config::CoachProvider;
 use xq_app::engine::EngineState;
 use xq_app::events::EventSink;
 use xq_app::llm::CoachStatus;
+use xq_app::llm::ask::AnswersRequest;
+use xq_app::llm::ask::Question;
+use xq_app::llm::ask::QuestionKind;
 use xq_app::records::Budget;
 use xq_core::Move;
 use xq_core::study::NodeId;
@@ -176,6 +181,26 @@ fn valid_output(body: &Value) -> String {
         "followups": [{ "action": "compare_alternative", "label": "看另一个候选" }],
     })
     .to_string()
+}
+
+/// 回答追问：引用与问题相符的结论，不含着法以外的数字与硬结论。
+fn valid_answer(body: &Value) -> String {
+    let p = pack(body);
+    let group = match p["question"]["kind"].as_str().unwrap() {
+        "my_move" => "mine",
+        "difference" => "difference",
+        _ => "mine_reply",
+    };
+    json!({
+        "answer": { "text": "这步让炮来到中路，接下来要留意对方出马保护中卒。", "claim_ids": [claim(&p, &[group])] },
+        "points": [],
+        "check": "中卒现在由哪些棋子保护？",
+    })
+    .to_string()
+}
+
+fn bad_answer(_: &Value) -> String {
+    json!({ "answer": { "text": "这步更好。", "claim_ids": [] }, "points": [], "check": "" }).to_string()
 }
 
 fn unknown_claim(_: &Value) -> String {
@@ -755,3 +780,72 @@ fn a_cancelled_request_that_returns_is_cached_for_the_next_view() {
     assert_eq!(llm.count(), calls, "再次请求第 1 着时直接使用缓存，不再调用模型");
     service.shutdown();
 }
+
+#[test]
+fn asking_about_a_comparison_answers_from_its_evidence_and_keeps_the_answer() {
+    // 第 2 次请求（“对方的回应”）的输出不合格，修正后合格
+    let llm = mock_llm(|i| (Reply::Content(if i == 1 { bad_answer } else { valid_answer }), 0));
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start(dir.path(), &format!("@go\n{ROUND}"), &llm, rec.clone());
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk-secret".into()) }).unwrap();
+    let sid = standard_study(&service);
+    let q = |kind| Question { study_id: sid.clone(), node_id: ROOT, mine: mv("h2e2"), reference: mv("h0g2"), kind };
+
+    // 对比搜索还没有完成时不能提问，也不调用模型
+    let early = service.ask_coach(q(QuestionKind::MyMove)).unwrap_err();
+    assert!(early.message.contains("还没有完成"), "{}", early.message);
+    let first = service.compare_moves(CompareRequest { study_id: sid.clone(), node_id: ROOT, mine: mv("h2e2"), reference: Some(mv("h0g2")) }).unwrap();
+    if first.pending {
+        rec.wait("对比完成", |e, v| e == "comparison_updated" && v["pending"] == false);
+    }
+
+    let asked = service.ask_coach(q(QuestionKind::MyMove)).unwrap();
+    assert_eq!(asked.status, CoachStatus::Queued);
+    let ready = rec.wait("回答", |e, v| e == "coach_answer_updated" && v["question"]["kind"] == "my_move" && v["status"] == "ready");
+    let result = &ready["record"]["result"];
+    assert_eq!(result["output"]["check"], "中卒现在由哪些棋子保护？");
+    assert!(result["claims"].as_array().unwrap().iter().all(|c| c["group"] == "mine"), "保存引用到的结论原文：{result}");
+    assert_eq!(result["demos"][0]["moves"], json!(["h2e2", "h9g7"]), "演示由程序按问题选择：{result}");
+    // 请求只包含这组对比的证据；密钥只在请求头中
+    let (auth, body) = llm.call(0);
+    assert_eq!(auth.as_deref(), Some("Bearer sk-secret"));
+    assert!(!body.to_string().contains("sk-secret"));
+    let p = pack(&body);
+    assert_eq!(p["question"]["text"], "我的选择炮二平五起了什么作用？");
+    assert_eq!(p["mine"]["line"], json!(["炮二平五", "马8进7"]));
+    assert!(p["claims"].as_array().unwrap().iter().any(|c| c["group"] == "difference"));
+
+    // 同一个问题、同样的依据与设置：直接返回，不再调用模型
+    let again = service.ask_coach(q(QuestionKind::MyMove)).unwrap();
+    assert_eq!((again.status, again.result_current), (CoachStatus::Ready, true));
+    assert_eq!(llm.count(), 1);
+
+    // 输出不合格时按检查结果修正一次；每次调用都计入每日次数
+    service.ask_coach(q(QuestionKind::Reply)).unwrap();
+    rec.wait("修正后的回答", |e, v| e == "coach_answer_updated" && v["question"]["kind"] == "reply" && v["status"] == "ready");
+    assert_eq!(llm.count(), 3);
+    let repair = llm.call(2).1;
+    assert!(repair["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().contains("没有通过检查"));
+    assert_eq!(service.status().coach.used_today, 3);
+
+    // 回答归属于这组对比：再次打开时列出；换一个对照时没有
+    let pair = |reference: &str| AnswersRequest { study_id: sid.clone(), node_id: ROOT, mine: mv("h2e2"), reference: mv(reference) };
+    let listed = service.coach_answers(pair("h0g2")).unwrap();
+    assert_eq!(listed.iter().map(|a| (a.question.kind, a.status)).collect::<Vec<_>>(), [
+        (QuestionKind::MyMove, CoachStatus::Ready),
+        (QuestionKind::Reply, CoachStatus::Ready)
+    ]);
+    assert!(service.coach_answers(pair("b0c2")).unwrap().is_empty());
+
+    // 讲解设置改变后标为过期，可以重新回答
+    let mut cfg = service.status().config;
+    cfg.coach.audience = Audience::Advanced;
+    service.update_config(cfg).unwrap();
+    let stale = service.coach_answers(pair("h0g2")).unwrap();
+    assert!(stale.iter().all(|a| a.status == CoachStatus::Stale && !a.result_current), "{:?}", stale.iter().map(|a| &a.reason).collect::<Vec<_>>());
+    assert!(stale[0].reason.as_deref().unwrap().contains("设置已改变"));
+    assert!(stale[0].record.as_ref().unwrap().result.is_some(), "过期的回答仍然保留");
+    service.shutdown();
+}
+

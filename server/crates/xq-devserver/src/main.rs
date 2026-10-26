@@ -102,6 +102,8 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         "set_coach_credential" => to_value(service.set_coach_credential(arg(args, "req")?)?),
         "analyze_position" => to_value(service.analyze_position(arg(args, "req")?)?),
         "compare_moves" => to_value(service.compare_moves(arg(args, "req")?)?),
+        "ask_coach" => to_value(service.ask_coach(arg(args, "req")?)?),
+        "coach_answers" => to_value(service.coach_answers(arg(args, "req")?)?),
         "add_review" => to_value(service.add_review(arg(args, "req")?)?),
         "list_reviews" => to_value(service.list_reviews()?),
         "review_detail" => to_value(service.review_detail(arg(args, "req")?)?),

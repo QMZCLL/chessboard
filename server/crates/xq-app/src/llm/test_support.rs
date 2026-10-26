@@ -101,3 +101,29 @@ pub fn mate_bundle(complete: bool) -> EvidenceBundle {
     };
     build(&study, 1, &record(&study, 1, Some(&engine))).unwrap()
 }
+
+/// 起始局面比较炮二平五（我的选择）与马二进三（对照选择）；`searched` 为否时只有规则事实。
+pub fn ask_bundle(kind: super::ask::QuestionKind, searched: bool, complete: bool) -> super::ask::AskBundle {
+    use xq_core::explain::compare::CompareEvidence;
+    use xq_core::explain::compare::compare_moves;
+
+    let study = study_with(&[]);
+    let before = Position::startpos();
+    let ctx = ExplainContext { history_complete: true, repetition_count: 1 };
+    let engine = CompareEvidence {
+        lines: vec![line("h2e2", 30, &["h2e2", "h9g7"]), line("h0g2", 20, &["h0g2", "b9c7"])],
+        conditions: "测试引擎 · 快速分析".into(),
+        complete,
+        notes: if complete { vec![] } else { vec!["最后一轮搜索没有完成".into()] },
+    };
+    let comparison = compare_moves(&before, mv("h2e2"), mv("h0g2"), &ctx, searched.then_some(&engine)).unwrap();
+    let cached = crate::compare::CachedComparison {
+        study,
+        comparison,
+        reference_kind: crate::compare::ReferenceKind::Candidate,
+        searched,
+        complete: searched && complete,
+    };
+    let q = super::ask::Question { study_id: "s".into(), node_id: ROOT, mine: mv("h2e2"), reference: mv("h0g2"), kind };
+    super::ask::build(&q, &cached).unwrap()
+}

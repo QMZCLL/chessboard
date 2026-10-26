@@ -7,6 +7,7 @@ import type { CompareOption, CompareOutcome, CompareSide } from "../api/types";
 import { closeComparison, cmp, demoSide, setReference } from "../state/compare";
 import { nodeOf, roundAfter, wb } from "../state/workbench";
 import { sideLabel } from "../utils/board";
+import CoachAsk from "./CoachAsk.vue";
 import Icon from "./Icon.vue";
 
 const view = computed(() => cmp.view);
@@ -148,6 +149,9 @@ function replyText(s: CompareSide): string {
         <h4 class="section-title">对方最值得关注的回应</h4>
         <p class="reply" :class="{ muted: !s.side.reply }">{{ replyText(s.side) }}</p>
       </section>
+
+      <!-- 教练追问：就这组对比提问，回答依据上面的程序结论 -->
+      <CoachAsk />
 
       <p v-if="comparison.conditions" class="meta">分析条件：{{ comparison.conditions }}（两步在同一次搜索中比较，评分为{{ sideLabel(comparison.mover) }}视角）</p>
       <p v-for="w in comparison.warnings" :key="w" class="meta warn">{{ w }}</p>

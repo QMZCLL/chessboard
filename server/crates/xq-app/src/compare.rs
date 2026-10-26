@@ -84,6 +84,17 @@ pub struct CompareView {
     pub options: Vec<CompareOption>,
 }
 
+/// 已经得到的一组对比，见 `Inner::cached_comparison`。
+pub(crate) struct CachedComparison {
+    pub study: Study,
+    pub comparison: MoveComparison,
+    pub reference_kind: ReferenceKind,
+    /// 包含两步棋的同一次搜索；为否时引擎不可用，只有规则事实。
+    pub searched: bool,
+    /// 这次搜索完成了整轮（两条变化来自同一深度）。
+    pub complete: bool,
+}
+
 impl Inner {
     pub(crate) fn compare_moves(&self, req: CompareRequest) -> ApiResult<CompareView> {
         let study = self.with_study(&req.study_id, |s| Ok(s.clone()))?;
@@ -101,10 +112,7 @@ impl Inner {
             .find(|o| o.mv == reference)
             .map(|o| (o.kind, o.rank))
             .unwrap_or((ReferenceKind::Other, None));
-        // 搜索两步棋时不分先后，条件相同即可复用
-        let mut searchmoves = vec![req.mine, reference];
-        searchmoves.sort_by_key(|m| m.iccs());
-        let cond = self.conditions(&study, req.node_id, Budget::Quick, searchmoves);
+        let cond = self.compare_conditions(&study, req.node_id, req.mine, reference);
         let base = CompareView {
             seq: self.compare_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1,
             conditions_key: cond.as_ref().ok().map(|c| c.key()),
@@ -177,6 +185,47 @@ impl Inner {
             events::emit(sink.as_ref(), events::COMPARISON_UPDATED, &done);
         });
         Ok(pending)
+    }
+
+    /// 对比搜索的条件：两步棋不分先后，条件相同即可复用。
+    fn compare_conditions(&self, study: &Study, node: NodeId, mine: Move, reference: Move) -> ApiResult<AnalysisConditions> {
+        let mut searchmoves = vec![mine, reference];
+        searchmoves.sort_by_key(|m| m.iccs());
+        self.conditions(study, node, Budget::Quick, searchmoves)
+    }
+
+    /// 已经得到的对比（教练追问的证据）：只读取已保存的搜索结果，不发起新的搜索。
+    /// 引擎不可用时只有规则事实；引擎可用而这组对比还没有搜索结果时返回错误，等对比完成后再用。
+    pub(crate) fn cached_comparison(&self, study_id: &str, node: NodeId, mine: Move, reference: Move) -> ApiResult<CachedComparison> {
+        let study = self.with_study(study_id, |s| Ok(s.clone()))?;
+        let pos = study.position(node)?;
+        let ctx = self.context_at(&study, node)?;
+        let facts = compare::compare_moves(&pos, mine, reference, &ctx, None)
+            .ok_or_else(|| ApiError::from("对比的两步必须是这个局面中不同的合法着法".to_string()))?;
+        let reference_kind = self
+            .compare_options(&study, node, &pos, mine)
+            .iter()
+            .find(|o| o.mv == reference)
+            .map(|o| o.kind)
+            .unwrap_or(ReferenceKind::Other);
+        let (comparison, searched, complete) = match self.compare_conditions(&study, node, mine, reference) {
+            Err(_) => (facts, false, false),
+            Ok(cond) => match self.store.load_analysis(&cond.key())? {
+                // 与界面看到的对比一致：不完整的结果也采用，对比中已经注明暂不比较优劣
+                Some(record) if record.is_current_format() => match record.outcome {
+                    AnalysisOutcome::Completed { result } => {
+                        let complete = result.complete;
+                        let engine = compare_evidence(result, &cond);
+                        let full = compare::compare_moves(&pos, mine, reference, &ctx, Some(&engine))
+                            .ok_or_else(|| ApiError::from("对比失败".to_string()))?;
+                        (full, true, complete)
+                    }
+                    AnalysisOutcome::Terminal { .. } => return Err("这个局面已经结束，不能比较".into()),
+                },
+                _ => return Err("对比搜索还没有完成，完成后再提问".into()),
+            },
+        };
+        Ok(CachedComparison { study, comparison, reference_kind, searched, complete })
     }
 
     /// 可以选作对照的着法：棋谱中的后续着法与已缓存局面分析中的候选。

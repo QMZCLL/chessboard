@@ -208,6 +208,11 @@ impl AppService {
             Ok(n) => tracing::info!("{n} 条 AI 讲解请求在上次退出时中断，已标为可重新生成"),
             Err(e) => warn!("整理中断的 AI 讲解请求失败：{e}"),
         }
+        match store.reset_interrupted_asks(now_ms()) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} 个追问在上次退出时中断，已标为可重新提问"),
+            Err(e) => warn!("整理中断的追问失败：{e}"),
+        }
         let engine_events = events.clone();
         let engine = EngineService::start(
             engine_spec(&paths, &loaded.config),
@@ -586,6 +591,15 @@ impl AppService {
     /// 对比同一局面下的两种走法；需要搜索时先返回规则事实，完成后推送 `comparison_updated`。
     pub fn compare_moves(&self, req: crate::compare::CompareRequest) -> ApiResult<crate::compare::CompareView> {
         self.inner.compare_moves(req)
+    }
+
+    /// 教练追问：就一组已经完成的对比提出一个问题（见 `llm::ask`）。已有对应当前依据与设置的回答时
+    /// 直接返回，不再调用模型；回答通过 `coach_answer_updated` 推送。
+    pub fn ask_coach(&self, q: crate::llm::ask::Question) -> ApiResult<crate::llm::ask::AnswerView> { self.inner.ask_request(q) }
+
+    /// 一组对比已经提过的问题与回答。
+    pub fn coach_answers(&self, req: crate::llm::ask::AnswersRequest) -> ApiResult<Vec<crate::llm::ask::AnswerView>> {
+        self.inner.answers_for(&req)
     }
 
     /// 把一着加入复习（见 `review`）。已经在复习中时返回原来的卡片。

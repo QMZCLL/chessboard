@@ -8,6 +8,7 @@
 //! - 网络请求在独立的工作线程中进行；结果回到讲解线程，按代次、证据版本与模型设置检查后写入；
 //! - 模型服务不可用或结果未通过检查时，模板讲解照常可用。
 
+pub mod ask;
 pub mod credentials;
 pub mod evidence;
 pub mod prompt;

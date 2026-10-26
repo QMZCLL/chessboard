@@ -5,6 +5,7 @@
 //! - 登记请求、等待引擎分析、提交结果都在讲解线程上执行，与逐着讲解的写入依次进行。
 //!   提交前确认任务仍是该节点最新的请求、证据版本与模型设置都没有改变，旧结果不会覆盖新结果。
 //! - 引擎分析尚未完成时先等待，讲解记录写入后再生成，避免用很快就会过期的证据调用模型。
+//! - 教练追问（见 `ask`）与 AI 讲解共用工作线程、并发名额、调用次数与重试策略。
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -35,6 +36,7 @@ use super::CoachState;
 use super::CoachTestHook;
 use super::CoachStatus;
 use super::CoachView;
+use super::ask::AskJob;
 use super::credentials;
 use super::evidence;
 use super::evidence::EvidenceBundle;
@@ -88,25 +90,37 @@ pub(crate) struct CoachJob {
     settings: ProviderSettings,
 }
 
+/// 工作线程处理的任务：一着的 AI 讲解，或一个追问。
+pub(crate) enum CoachTask {
+    Explain(CoachJob),
+    Ask(AskJob),
+}
+
 /// 讲解线程与工作线程共用的运行状态。
 pub(crate) struct CoachRuntime {
-    jobs: Mutex<Sender<CoachJob>>,
+    jobs: Mutex<Sender<CoachTask>>,
     /// 进行中的请求：(会话, 节点) → (代次, 缓存键)。
     inflight: Mutex<HashMap<(String, NodeId), (u64, String)>>,
     /// 等待引擎分析完成的请求。
     waiting: Mutex<HashMap<(String, NodeId), CoachRequest>>,
-    generation: AtomicU64,
+    pub(super) generation: AtomicU64,
     /// 模型服务设置（启用、接口、模型、凭据）的版本。
-    config_rev: AtomicU64,
+    pub(super) config_rev: AtomicU64,
     /// 界面状态版本，见 `CoachView::seq`。
     seq: AtomicU64,
+    /// 进行中的追问：问题的键 → (代次, 缓存键)。
+    pub(super) asks: Mutex<HashMap<String, (u64, String)>>,
+    /// 追问的状态版本，见 `AnswerView::seq`。
+    pub(super) ask_seq: AtomicU64,
+    /// 追问记录的读取、修改与写入依次进行。
+    pub(super) ask_lock: Mutex<()>,
     test_hook: Mutex<Option<CoachTestHook>>,
     active: Mutex<usize>,
     slot_free: Condvar,
 }
 
 impl CoachRuntime {
-    pub(crate) fn new(jobs: Sender<CoachJob>) -> Self {
+    pub(crate) fn new(jobs: Sender<CoachTask>) -> Self {
         Self {
             jobs: Mutex::new(jobs),
             inflight: Mutex::new(HashMap::new()),
@@ -114,6 +128,9 @@ impl CoachRuntime {
             generation: AtomicU64::new(0),
             config_rev: AtomicU64::new(0),
             seq: AtomicU64::new(0),
+            asks: Mutex::new(HashMap::new()),
+            ask_seq: AtomicU64::new(0),
+            ask_lock: Mutex::new(()),
             test_hook: Mutex::new(None),
             active: Mutex::new(0),
             slot_free: Condvar::new(),
@@ -134,7 +151,7 @@ pub(crate) fn cache_key(bundle: &EvidenceBundle, settings: &ProviderSettings, au
     Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-pub(crate) fn spawn_workers(weak: Weak<Inner>, rx: Receiver<CoachJob>) -> Result<(), String> {
+pub(crate) fn spawn_workers(weak: Weak<Inner>, rx: Receiver<CoachTask>) -> Result<(), String> {
     let rx = Arc::new(Mutex::new(rx));
     for i in 0..WORKERS {
         let (weak, rx) = (weak.clone(), rx.clone());
@@ -146,13 +163,20 @@ pub(crate) fn spawn_workers(weak: Weak<Inner>, rx: Receiver<CoachJob>) -> Result
     Ok(())
 }
 
-fn worker(weak: Weak<Inner>, rx: Arc<Mutex<Receiver<CoachJob>>>) {
+fn worker(weak: Weak<Inner>, rx: Arc<Mutex<Receiver<CoachTask>>>) {
     loop {
-        let job = match lock(&rx).recv() {
-            Ok(job) => job,
+        let task = match lock(&rx).recv() {
+            Ok(task) => task,
             Err(_) => return,
         };
         let Some(inner) = weak.upgrade() else { return };
+        let job = match task {
+            CoachTask::Explain(job) => job,
+            CoachTask::Ask(job) => {
+                inner.ask_run(job);
+                continue;
+            }
+        };
         if !inner.coach_current(&job) {
             continue;
         }
@@ -184,9 +208,10 @@ fn run_job(inner: &Inner, job: &CoachJob) -> Result<CoachExplanation, String> {
         Message::system(prompt::system_prompt()),
         Message::user(prompt::user_message(&job.bundle.pack, job.request.audience, job.request.detail)),
     ];
+    let current = || inner.coach_current(job);
     let mut errors = Vec::new();
     for attempt in 0..OUTPUT_ATTEMPTS {
-        let content = inner.coach_call(job, &messages, &schema)?;
+        let content = inner.coach_call(&job.settings, &current, &messages, &schema)?;
         match validate::validate(&content, &job.bundle, job.request.detail) {
             Ok(out) => return Ok(out),
             Err(found) => {
@@ -322,7 +347,7 @@ impl Inner {
     /// 修改设置的一方总是先写入新设置（配置与凭据文件）、再递增版本，所以先读版本可以保证：
     /// 读到的设置不会比版本旧——旧设置绝不会带着新版本号发出。若读取期间设置改变，
     /// 拿到的是“新设置＋旧版本”，发送前的版本检查会拦下，随后按新设置重新安排。
-    fn coach_snapshot(&self) -> (u64, Result<ProviderSettings, String>) {
+    pub(super) fn coach_snapshot(&self) -> (u64, Result<ProviderSettings, String>) {
         let config_rev = self.coach.config_rev.load(Ordering::SeqCst);
         (config_rev, self.coach_settings())
     }
@@ -370,7 +395,7 @@ impl Inner {
         }
     }
 
-    fn coach_acquire(&self) {
+    pub(super) fn coach_acquire(&self) {
         let mut active = lock(&self.coach.active);
         while *active >= self.config_snapshot().coach.max_parallel_requests.max(1) as usize {
             active = self.coach.slot_free.wait(active).unwrap_or_else(|p| p.into_inner());
@@ -378,17 +403,23 @@ impl Inner {
         *active += 1;
     }
 
-    fn coach_release(&self) {
+    pub(super) fn coach_release(&self) {
         *lock(&self.coach.active) -= 1;
         self.coach.slot_free.notify_all();
     }
 
+    /// 交给工作线程。
+    pub(super) fn coach_send(&self, task: CoachTask) -> Result<(), ()> { lock(&self.coach.jobs).send(task).map_err(|_| ()) }
+
     /// 发出一次请求（每次发送都计入每日调用次数）；网络错误与限流稍后重试（见 `NETWORK_ATTEMPTS`）。
-    fn coach_call(&self, job: &CoachJob, messages: &[Message], schema: &Value) -> Result<String, String> {
+    /// `current` 在每次发送前确认请求仍然有效（没有被取消、取代，模型服务设置也没有改变）。
+    pub(super) fn coach_call(
+        &self, settings: &ProviderSettings, current: &dyn Fn() -> bool, messages: &[Message], schema: &Value,
+    ) -> Result<String, String> {
         let budget = self.config_snapshot().coach.daily_request_budget;
         let mut last = String::new();
         for attempt in 0..NETWORK_ATTEMPTS {
-            if !self.coach_current(job) {
+            if !current() {
                 return Err("请求已取消、已被更新的请求取代，或模型服务设置已改变".into());
             }
             // 取得并发名额后、扣减调用次数与发送前再确认一次：关闭功能、清除密钥或更换服务后不再发送
@@ -397,7 +428,7 @@ impl Inner {
                 Ok(false) => return Err(format!("今天的 AI 讲解调用次数已达上限（{budget} 次），可在设置中调整")),
                 Err(e) => return Err(e.to_string()),
             }
-            match provider::complete(&job.settings, messages, schema) {
+            match provider::complete(settings, messages, schema) {
                 Ok(text) => return Ok(text),
                 Err(e) if e.retryable() && attempt + 1 < NETWORK_ATTEMPTS => {
                     warn!("AI 讲解请求失败，稍后重试：{e}");
@@ -514,7 +545,7 @@ impl Inner {
             c.error = None;
         });
         let job = CoachJob { request: req, generation, config_rev, bundle, cache_key, settings };
-        if lock(&self.coach.jobs).send(job).is_err() {
+        if self.coach_send(CoachTask::Explain(job)).is_err() {
             lock(&self.coach.inflight).remove(&key);
             self.update_coach(&sid, nid, |c| {
                 c.state = CoachState::Failed;
@@ -657,6 +688,7 @@ impl Inner {
         let hit = |k: &(String, NodeId)| k.0 == study_id && nodes.is_none_or(|n| n.contains(&k.1));
         lock(&self.coach.waiting).retain(|k, _| !hit(k));
         lock(&self.coach.inflight).retain(|k, _| !hit(k));
+        self.ask_forget(study_id, nodes);
     }
 }
 

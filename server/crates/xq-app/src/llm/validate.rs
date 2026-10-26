@@ -16,6 +16,9 @@ use std::collections::HashSet;
 use super::CoachExplanation;
 use super::FollowupAction;
 use super::SectionKind;
+use super::ask::AskBundle;
+use super::ask::CoachAnswer;
+use super::evidence::AllowedClaim;
 use super::evidence::EvidenceBundle;
 use super::prompt::length_rule;
 use crate::config::Detail;
@@ -243,19 +246,26 @@ pub fn validate(raw: &str, bundle: &EvidenceBundle, detail: Detail) -> Result<Co
     }
     out.followups.retain(|f| f.evidence_id.is_some());
 
-    // 硬结论
-    let source = source_text(bundle);
-    let known_moves: HashSet<String> = notations(&source).into_iter().map(|(_, m)| m).collect();
-    let claimed = |w: &str| pack.claims.iter().any(|c| c.statement.contains(w));
     let mut texts: Vec<&str> = vec![&out.summary.text, &out.lesson.text];
     texts.extend(out.sections.iter().map(|s| s.text.as_str()));
+    errors.extend(text_problems(&texts, &source_text(bundle), &pack.claims));
+
+    if errors.is_empty() { Ok(out) } else { Err(errors) }
+}
+
+/// 模型文字中的硬结论与新增着法（AI 讲解与追问共用）。`source` 是证据中允许出现的着法来源；
+/// 绝对化说法只有在程序给出的结论里本来就有时才允许。
+fn text_problems(texts: &[&str], source: &str, claims: &[AllowedClaim]) -> Vec<String> {
+    let known_moves: HashSet<String> = notations(source).into_iter().map(|(_, m)| m).collect();
+    let claimed = |w: &str| claims.iter().any(|c| c.statement.contains(w));
+    let mut errors = Vec::new();
     let mut seen = HashSet::new();
     let mut flag = |msg: String| {
         if seen.insert(msg.clone()) {
             errors.push(msg);
         }
     };
-    for text in texts {
+    for &text in texts {
         for (_, m) in notations(text) {
             if !known_moves.contains(&m) {
                 flag(format!("出现了证据中没有的着法“{m}”"));
@@ -281,6 +291,82 @@ pub fn validate(raw: &str, bundle: &EvidenceBundle, detail: Detail) -> Result<Co
             flag(format!("不要把讲解写成棋手的真实想法（出现“{w}”）"));
         }
     }
+    errors
+}
+
+const ANSWER_MAX: usize = 160;
+const POINT_MAX: usize = 120;
+const POINTS_MAX: usize = 3;
+const CHECK_MAX: usize = 60;
+const ANSWER_TOTAL: usize = 480;
+
+/// 追问中可以出现在回答里的着法来源（两步着法、各自的变化、结论与此前的着法）。
+fn ask_source(bundle: &AskBundle) -> String {
+    let p = &bundle.pack;
+    let mut parts: Vec<String> = vec![p.mine.notation.clone(), p.reference.notation.clone()];
+    parts.extend(p.mine.line.iter().chain(p.reference.line.iter()).cloned());
+    parts.extend(p.claims.iter().map(|c| c.statement.clone()));
+    parts.extend(p.warnings.iter().cloned());
+    parts.extend(p.history.iter().cloned());
+    parts.join("\n")
+}
+
+/// 检查追问的回答：结构与篇幅、引用（回答必须引用与问题相符的结论）、硬结论与新增着法。
+pub fn validate_answer(raw: &str, bundle: &AskBundle) -> Result<CoachAnswer, Vec<String>> {
+    let out: CoachAnswer =
+        serde_json::from_str(strip_fence(raw)).map_err(|e| vec![format!("输出不是符合结构的 JSON（{e}）")])?;
+    let mut errors = Vec::new();
+    let len = |t: &str| t.chars().count();
+    if out.answer.text.trim().is_empty() {
+        errors.push("回答为空".into());
+    } else if len(&out.answer.text) > ANSWER_MAX {
+        errors.push(format!("回答超过 {ANSWER_MAX} 字"));
+    }
+    if out.points.len() > POINTS_MAX {
+        errors.push(format!("要点最多 {POINTS_MAX} 条，实际 {} 条", out.points.len()));
+    }
+    for (i, p) in out.points.iter().enumerate() {
+        if p.text.trim().is_empty() || len(&p.text) > POINT_MAX {
+            errors.push(format!("第 {} 条要点应为 1～{POINT_MAX} 字", i + 1));
+        }
+    }
+    if out.check.trim().is_empty() || len(&out.check) > CHECK_MAX {
+        errors.push(format!("留给学习者验证的问题应为 1～{CHECK_MAX} 字"));
+    }
+    let total = len(&out.answer.text) + len(&out.check) + out.points.iter().map(|p| len(&p.text)).sum::<usize>();
+    if total > ANSWER_TOTAL {
+        errors.push(format!("全文 {total} 字，超过 {ANSWER_TOTAL} 字的篇幅"));
+    }
+
+    let mut check_refs = |label: &str, ids: &[String]| {
+        if ids.is_empty() {
+            errors.push(format!("{label}没有引用任何结论编号"));
+        }
+        for id in ids {
+            if bundle.claim(id).is_none() {
+                errors.push(format!("{label}引用了不存在的结论编号 {id}"));
+            }
+        }
+    };
+    check_refs("回答", &out.answer.claim_ids);
+    for (i, p) in out.points.iter().enumerate() {
+        check_refs(&format!("第 {} 条要点", i + 1), &p.claim_ids);
+    }
+    let groups = bundle.question.kind.required_groups();
+    let fits = out
+        .answer
+        .claim_ids
+        .iter()
+        .chain(out.points.iter().flat_map(|p| p.claim_ids.iter()))
+        .filter_map(|id| bundle.claim(id))
+        .any(|c| groups.contains(&c.group.as_str()));
+    if !fits {
+        errors.push(format!("回答没有引用与问题相符的依据（{}）", groups.join("、")));
+    }
+
+    let mut texts: Vec<&str> = vec![&out.answer.text, &out.check];
+    texts.extend(out.points.iter().map(|p| p.text.as_str()));
+    errors.extend(text_problems(&texts, &ask_source(bundle), &bundle.pack.claims));
 
     if errors.is_empty() { Ok(out) } else { Err(errors) }
 }
@@ -457,4 +543,41 @@ mod tests {
         let out = validate(&output("出动右马。", sections), &b, Detail::Normal).unwrap();
         assert!(out.followups.iter().all(|f| f.action != FollowupAction::ShowBest), "{:?}", out.followups);
     }
+
+    fn answer(text: &str, ids: &[&str], check: &str) -> String {
+        json!({ "answer": { "text": text, "claim_ids": ids }, "points": [], "check": check }).to_string()
+    }
+
+    #[test]
+    fn answers_must_cite_fitting_claims_and_keep_hard_conclusions_to_the_program() {
+        use crate::llm::ask::QuestionKind;
+        let b = ask_bundle(QuestionKind::Reply, true, true);
+        let id = |group: &str| b.pack.claims.iter().find(|c| c.group == group).unwrap().id.clone();
+        let (reply, mine) = (id("mine_reply"), id("mine"));
+        let ok = answer("炮二平五之后，对方可以马8进7保护中卒，需要先看中路的保护关系。", &[&reply], "中卒现在有几个棋子保护？");
+        assert!(validate_answer(&ok, &b).is_ok(), "{:?}", validate_answer(&ok, &b));
+        // 回答没有引用与问题相符的依据
+        let off = answer("炮二平五让炮来到中路。", &[&mine], "中路现在由哪些棋子控制？");
+        assert!(validate_answer(&off, &b).unwrap_err().iter().any(|e| e.contains("与问题相符")));
+        // 留给学习者的问题同样不能写硬结论、新增着法或数字
+        for (check, word) in [("对方还能更好地应对吗？", "更好"), ("能否走车九平八？", "车九平八"), ("这一步的评分有三十分吗？", "三十")] {
+            let errors = validate_answer(&answer("对方可以马8进7保护中卒。", &[&reply], check), &b).unwrap_err();
+            assert!(errors.iter().any(|e| e.contains(word) || e.contains("数")), "{check}：{errors:?}");
+        }
+        // 不存在的编号、空的验证问题、过多的要点
+        let errors = validate_answer(
+            &json!({
+                "answer": { "text": "对方可以马8进7。", "claim_ids": ["c999"] },
+                "points": [{ "text": "一", "claim_ids": [&reply] }, { "text": "二", "claim_ids": [&reply] }, { "text": "三", "claim_ids": [&reply] }, { "text": "四", "claim_ids": [&reply] }],
+                "check": "",
+            })
+            .to_string(),
+            &b,
+        )
+        .unwrap_err();
+        for want in ["不存在的结论编号 c999", "要点最多", "验证的问题"] {
+            assert!(errors.iter().any(|e| e.contains(want)), "缺少“{want}”：{errors:?}");
+        }
+    }
+
 }
