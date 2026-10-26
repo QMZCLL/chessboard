@@ -23,6 +23,7 @@ import {
   explainDeeper,
   newestRecord,
   nodeOf,
+  practiceSession,
   previewBackLabel,
   retryExplanation,
   reveal,
@@ -155,7 +156,7 @@ const isRoot = computed(() => node.value?.id === 0);
 // ---------- 先想后讲 ----------
 /** 正在思考的这一着尚未揭示：隐藏会透露答案的标签 */
 const hiding = computed(() => concealed.value.has(wb.selected));
-const hintLevel = computed(() => (wb.thinkSession?.nodeId === wb.selected ? wb.thinkSession.hints : 0));
+const hintLevel = computed(() => practiceSession.value?.hints ?? 0);
 /** 这一着最近一次练习的记录 */
 const practiceText = computed(() => {
   const p = node.value?.practice;
@@ -223,8 +224,8 @@ function openThisReview() {
                       :key="m.mv"
                       type="button"
                       class="hint-move focusable"
-                      :class="{ on: wb.thinkSession?.arrow === m.mv }"
-                      :aria-pressed="wb.thinkSession?.arrow === m.mv"
+                      :class="{ on: practiceSession?.arrow === m.mv }"
+                      :aria-pressed="practiceSession?.arrow === m.mv"
                       @click="toggleHintMove(m.mv)"
                     >
                       {{ m.notation }}

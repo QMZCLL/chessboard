@@ -1,8 +1,9 @@
 // 场景 13：先想后讲的分级提示与训练状态。
 // A. 训练状态：正在思考的这一着及其后续着法在整个界面上都不透露，局面分析与笔记暂不可用；
 // B. 分级提示：一级只说局面需求，二级在棋盘上标出相关棋子，三级给出不分先后的着法，点一步可查看箭头；
-// C. 练习记录：用了几级提示、是否直接看讲解、第一步是否与棋谱相同，随会话保存。
-import { BASE, bridge, check, launch, move, snap } from "../lib.mjs";
+// C. 练习记录：用了几级提示、是否直接看讲解、第一步是否与棋谱相同，随会话保存；
+// D. 提示属于哪盘棋的哪个局面：换到另一盘棋的同一编号、起点还在加载时，都不沿用之前的提示。
+import { BASE, bridge, check, hold, launch, move, snap } from "../lib.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -155,6 +156,69 @@ check((await practiceOf(4))?.matched === true, "保存为与棋谱相同");
 // 回到看谱学习：全部着法照常显示
 await page.getByText("看谱学习", { exact: true }).click();
 check((await notationOf(3)) === "马二进三" && (await notationOf(4)) === "车9平8", "回到看谱学习后棋谱照常显示");
+
+// ---------- D. 提示属于哪盘棋的哪个局面 ----------
+// 两盘不同的棋，都打开在第 2 着（节点编号相同）。第一盘的第 2 着前对方的炮可以被吃，第二盘没有直接的威胁或机会，
+// 两处的提示不同
+const tag = Date.now() % 100000;
+async function newStudy(name, record) {
+  const resp = await bridge("create_study", { req: { name, kind: { type: "record", text: record }, orientation: null, user_side: null } });
+  const id = resp.study.study.id;
+  for (let i = 0; i < 120; i++) {
+    if ((await bridge("study_view", { id })).stats.detailed >= 2) break;
+    await sleep(500);
+  }
+  return id;
+}
+/** 在界面中打开保存的会话（打开后停在最后一着），等这个局面的提示准备好 */
+async function openSaved(name, firstMove) {
+  await page.getByRole("button", { name: "新建 / 打开" }).click();
+  await page.locator(".n-tabs-tab", { hasText: "已保存" }).click();
+  await page.locator(".saved-row", { hasText: name }).locator(".saved-main").click();
+  await page.locator('[data-node="1"] .notation', { hasText: firstMove }).waitFor();
+  await page.locator('[data-node="2"].active').waitFor();
+  await page.getByTestId("hint-count").waitFor();
+}
+const hintsOf = async (id, node) => (await bridge("node_detail", { req: { study_id: id, node_id: node } })).hints;
+const firstHint = async () => (await page.getByTestId("hints").locator("li").first().locator("p").first().innerText()).trim();
+const nameP = `提示归属甲 ${tag}`;
+const nameQ = `提示归属乙 ${tag}`;
+const pid = await newStudy(nameP, "1. 炮二进七 车9平8");
+const qid = await newStudy(nameQ, "1. 兵七进一 卒7进1");
+await page.getByText("先想后讲", { exact: true }).click();
+await openSaved(nameP, "炮二进七");
+// 换到第 1 着时，它的起点（开局局面）的详情晚到：期间不能把第 2 着起点的提示当作这一着的提示
+const start = await hold(page, "node_detail", { match: (body) => body.req.study_id === pid && body.req.node_id === 0 });
+await page.locator('[data-node="1"]').click();
+await start.arrived;
+await page.locator('[data-node="1"].active').waitFor();
+check(
+  (await page.getByTestId("hint-next").count()) === 0 && (await page.getByTestId("hints").count()) === 0,
+  "起点详情还没有加载时等它加载，不提供上一个局面的提示",
+);
+await start.release();
+await page.getByTestId("hint-next").click();
+const observeStart = await firstHint();
+const [startHints, beforeP] = [await hintsOf(pid, 0), await hintsOf(pid, 1)];
+check(observeStart === startHints.observe && observeStart !== beforeP.observe, `起点加载后显示这个局面的提示：${observeStart}`);
+// 回到第 2 着看一级提示，再打开另一盘棋：同样停在第 2 着
+await page.locator('[data-node="2"]').click();
+await page.getByTestId("hint-count").filter({ hasText: "0 / 3" }).waitFor();
+await page.getByTestId("hint-next").click();
+const observeP = await firstHint();
+check(observeP === beforeP.observe, `第一盘棋第 2 着的一级提示：${observeP}`);
+await openSaved(nameQ, "兵七进一");
+check(
+  (await page.getByTestId("hint-count").innerText()).includes("0 / 3") && (await page.getByTestId("hints").count()) === 0,
+  "换到另一盘棋的同一编号，提示次数从零开始，不显示之前的提示",
+);
+await page.getByTestId("hint-next").click();
+const observeQ = await firstHint();
+check(observeQ === (await hintsOf(qid, 1)).observe && observeQ !== observeP, `显示的是这盘棋这个局面的提示：${observeQ}`);
+await page.getByTestId("reveal").click();
+await page.getByTestId("practice").waitFor();
+const recQ = (await bridge("study_view", { id: qid })).study.nodes["2"].practice;
+check(recQ?.hints_used === 1 && recQ.hints?.observe === observeQ, "这盘棋的练习记录保存的是它自己看到的提示");
 
 await bridge("update_config", { config: { ...(await bridge("app_status")).config, coach: original } });
 

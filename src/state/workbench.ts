@@ -58,10 +58,10 @@ export const wb = reactive({
   selected: 0,
   detail: null as T.NodeDetail | null,
   detailError: null as string | null,
-  /** 先想后讲模式下作为试走起点的局面 */
+  /** 先想后讲模式下作为试走起点的局面（可能还是上一着或上一个会话的，使用前见 thinkStart） */
   thinkBase: null as T.NodeDetail | null,
-  /** 先想后讲中正在思考的这一着：已经看了几级提示、三级提示中选看的着法 */
-  thinkSession: null as { nodeId: number; hints: number; arrow: T.Move | null; shown: T.ThinkHints | null } | null,
+  /** 先想后讲中正在思考的这一着（哪个会话的哪一着）：已经看了几级提示、三级提示中选看的着法、看到的提示 */
+  thinkSession: null as { studyId: string; nodeId: number; hints: number; arrow: T.Move | null; shown: T.ThinkHints | null } | null,
   analysis: null as AnalysisState | null,
   preview: null as Preview | null,
   highlight: null as Highlight | null,
@@ -144,53 +144,73 @@ export function shownNotation(id: number, hidden = "？？？"): string {
   return concealed.value.has(id) ? hidden : (nodeOf(id)?.notation ?? "");
 }
 
+/** 正在练习的这一着：属于当前会话、正是选中的着法时才有效（节点编号只在同一个会话内有意义）。 */
+export const practiceSession = computed(() => {
+  const session = wb.thinkSession;
+  return session && session.studyId === study.value?.id && session.nodeId === wb.selected ? session : null;
+});
+
+/**
+ * 选中这一着的落子前局面详情：属于当前会话、正是这一着的起点时才采用。
+ * 切换会话或着法之后，新的起点加载完成之前为空，提示与可走的着法都等它加载。
+ */
+const thinkStart = computed(() => {
+  const base = wb.thinkBase;
+  const node = selectedNode.value;
+  return base && node && base.study_id === study.value?.id && base.node.id === node.parent ? base : null;
+});
+
 /**
  * 当前局面的分级提示：打开第一级之后显示当时记下的快照（见 hintSnapshot.ts），
  * 之前显示落子前局面详情中的提示（只用来判断有没有提示）。
  */
 export const thinkHints = computed(() => {
   if (!thinking.value) return null;
-  const session = wb.thinkSession;
-  if (session?.nodeId === wb.selected && session.shown) return session.shown;
-  return wb.thinkBase?.hints ?? null;
+  return practiceSession.value?.shown ?? thinkStart.value?.hints ?? null;
 });
 
 /** 二级提示在棋盘上标出的棋子与关系，三级提示中选看的着法。 */
 export const thinkMarks = computed(() => {
   const h = thinkHints.value;
-  const session = wb.thinkSession;
-  if (!h || !session || session.nodeId !== wb.selected || session.hints < 2) return null;
+  const session = practiceSession.value;
+  if (!h || !session || session.hints < 2) return null;
   return { squares: h.focus.squares, arrows: h.focus.arrows, next: session.arrow };
 });
 
-// 换到另一着思考时开始新的一次练习
+// 换到另一着（或另一个会话中的同一编号）思考时开始新的一次练习
 watch(
-  () => (thinking.value ? wb.selected : null),
-  (id) => {
-    if (id !== null && wb.thinkSession?.nodeId !== id) wb.thinkSession = { nodeId: id, hints: 0, arrow: null, shown: null };
+  () => (thinking.value && study.value ? `${study.value.id}/${wb.selected}` : null),
+  (key) => {
+    const s = study.value;
+    if (key && s && !practiceSession.value) wb.thinkSession = { studyId: s.id, nodeId: wb.selected, hints: 0, arrow: null, shown: null };
   },
 );
 
 /** 再给一级提示（最多三级）。 */
 export function showHint() {
-  const session = wb.thinkSession;
-  if (!session || session.nodeId !== wb.selected) return;
-  // 第一次打开提示时记下显示的内容，之后的各级提示与练习记录都用这份内容
-  if (!session.shown) session.shown = snapshotHints(wb.thinkBase?.hints);
+  const session = practiceSession.value;
+  if (!session) return;
+  // 第一次打开提示时记下显示的内容，之后的各级提示与练习记录都用这份内容。
+  // 起点详情还没有加载（或仍是上一个局面的）时不记，提示按钮也要等它加载完成才出现
+  if (!session.shown) {
+    const start = thinkStart.value;
+    if (!start) return;
+    session.shown = snapshotHints(start.hints);
+  }
   if (session.shown) session.hints = Math.min(3, session.hints + 1);
 }
 
 /** 三级提示：在棋盘上标出（或取消标出）一步可以考虑的着法，由用户自己走出来。 */
 export function toggleHintMove(mv: T.Move) {
-  const session = wb.thinkSession;
-  if (session && session.nodeId === wb.selected) session.arrow = session.arrow === mv ? null : mv;
+  const session = practiceSession.value;
+  if (session) session.arrow = session.arrow === mv ? null : mv;
 }
 
 /** 记录这一着的练习：没有走子就看讲解时 firstChoice 为空。只在这一着正在练习时记录。 */
 async function recordPractice(nodeId: number, firstChoice: T.Move | null) {
   const s = study.value;
   const session = wb.thinkSession;
-  if (!s || !session || session.nodeId !== nodeId) return;
+  if (!s || !session || session.studyId !== s.id || session.nodeId !== nodeId) return;
   wb.thinkSession = null;
   try {
     const shown = usedHints(session.shown, session.hints);
@@ -226,7 +246,7 @@ export const displayLastMove = computed<T.Move | null>(() => {
 
 export const displayLegal = computed<T.Move[]>(() => {
   if (wb.preview) return [];
-  if (thinking.value) return wb.thinkBase?.legal_moves ?? [];
+  if (thinking.value) return thinkStart.value?.legal_moves ?? [];
   return wb.detail?.node.id === wb.selected ? wb.detail.legal_moves : [];
 });
 
@@ -521,6 +541,8 @@ function setView(view: T.StudyView) {
     // 节点编号只在同一个会话内有意义
     wb.trial = null;
     wb.collapsed = {};
+    wb.thinkSession = null;
+    wb.thinkBase = null;
   }
   wb.view = view;
   if (view.explain_seq < wb.explainSeq) void refreshView(view.study.id);
