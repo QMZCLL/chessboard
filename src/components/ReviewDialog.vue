@@ -69,9 +69,17 @@ async function open() {
 }
 
 async function mark(status: ReviewStatus) {
-  await saveNote();
-  await setStatus(status);
-  message.success(`已标为“${STATUS_LABEL[status]}”`);
+  // 点击时就确定是哪张卡片：保存笔记期间换了卡片，笔记与状态仍记在原来的这张上
+  const id = card.value?.id;
+  if (!id) return;
+  await saveNote(id);
+  try {
+    await setStatus(id, status);
+    const label = STATUS_LABEL[status];
+    message.success(review.current?.card.id === id ? `已标为“${label}”` : `已把之前复习的卡片标为“${label}”`);
+  } catch (e) {
+    message.error(errorMessage(e));
+  }
 }
 
 onMounted(loadReviews);

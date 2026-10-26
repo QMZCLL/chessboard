@@ -105,6 +105,10 @@ pub struct ReviewCard {
     pub study_name: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 修改次数：每次修改加一（见 `Store::update_review`）。界面据此判断同一张卡片的两份数据哪份较新；
+    /// 更新时间分不出同一毫秒内的两次修改，补上讲解也不改更新时间。早期的卡片没有这一项，从 0 算起。
+    #[serde(default)]
+    pub revision: u64,
     pub status: ReviewStatus,
     /// 落子前局面（含行棋方），复习时先显示它。
     pub fen: String,
@@ -234,6 +238,7 @@ impl Inner {
             study_name: study.name.clone(),
             created_at: now,
             updated_at: now,
+            revision: 0,
             status: ReviewStatus::Due,
             fen: fen::position_fen(&pos),
             side: before.side_to_move,

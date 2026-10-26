@@ -69,3 +69,41 @@ export async function move(page, mv) {
 export async function waitText(page, text, timeout = 30000) {
   await page.getByText(text, { exact: false }).first().waitFor({ timeout });
 }
+
+/**
+ * 拦住页面发给后台的某个命令，用来安排请求与响应的先后；match 选出要拦的请求，其余照常发送。
+ * 默认请求照常到达后台、只拦住响应；holdRequest 为 true 时连请求一起拦住，放行后才发给后台。
+ * 返回 { arrived, release }：arrived 在请求拦住时完成（只拦响应时，后台已经处理完这个请求）；
+ * release 放行，并等响应交给页面、界面处理完。
+ */
+export async function hold(page, cmd, { match = () => true, holdRequest = false } = {}) {
+  const url = `**/__bridge/invoke/${cmd}`;
+  let release;
+  let arrive;
+  let deliver;
+  const released = new Promise((r) => (release = r));
+  const arrived = new Promise((r) => (arrive = r));
+  const delivered = new Promise((r) => (deliver = r));
+  const handler = async (route) => {
+    if (!match(route.request().postDataJSON())) return route.fallback();
+    if (holdRequest) {
+      arrive();
+      await released;
+    }
+    const response = await route.fetch();
+    arrive();
+    await released;
+    await route.fulfill({ response });
+    deliver();
+  };
+  await page.route(url, handler);
+  return {
+    arrived,
+    release: async () => {
+      release();
+      await delivered;
+      await new Promise((r) => setTimeout(r, 300));
+      await page.unroute(url, handler);
+    },
+  };
+}

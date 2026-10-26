@@ -242,8 +242,8 @@ impl Store {
         Ok(stored)
     }
 
-    /// 修改一张卡片：在同一写事务中读取最新的卡片、修改并写回。写事务一次只有一个，
-    /// 并发的修改（笔记、状态、追加复习记录、补充讲解）依次进行，不会用旧快照覆盖彼此。
+    /// 修改一张卡片：在同一写事务中读取最新的卡片、修改并写回，同时把修改次数加一。写事务一次只有一个，
+    /// 并发的修改（笔记、状态、追加复习记录、补充讲解）依次进行，不会用旧快照覆盖彼此；修改次数也就随写入顺序递增。
     /// 卡片不存在时返回 `None`。
     pub fn update_review(&self, id: &str, f: impl FnOnce(&mut ReviewCard)) -> Result<Option<ReviewCard>, StoreError> {
         let tx = self.db.begin_write()?;
@@ -253,6 +253,7 @@ impl Store {
             match current {
                 Some(mut card) => {
                     f(&mut card);
+                    card.revision += 1;
                     t.insert(id, serde_json::to_string(&card)?.as_str())?;
                     Some(card)
                 }
@@ -387,6 +388,8 @@ mod tests {
         notes.join().unwrap();
         let saved = store.load_review("s/1").unwrap().unwrap();
         assert_eq!((saved.note.as_str(), saved.status), ("新的理解", ReviewStatus::Understood));
+        // 早期没有修改次数的卡片从 0 算起，两次修改之后为 2
+        assert_eq!(saved.revision, 2);
     }
 
     #[test]

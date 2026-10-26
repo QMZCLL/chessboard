@@ -7,6 +7,7 @@ import {
   counts,
   filterItems,
   historyText,
+  newerItem,
   nextTodoId,
   positionLabel,
   reviewCardId,
@@ -80,4 +81,21 @@ test("复习时间与卡片编号", () => {
   assert.equal(whenText(new Date(2026, 9, 25, 9, 5).getTime(), now), "今天 09:05 复习过");
   assert.equal(whenText(new Date(2026, 9, 20, 9, 5).getTime(), now), "10 月 20 日复习过");
   assert.equal(reviewCardId("s1", 12), "s1/0000000012");
+});
+
+test("同一张卡片的两份数据：修改次数多的较新，较早读取的数据不覆盖它", () => {
+  const at = (revision: number, note: string, updated_at = 100): ReviewItem => {
+    const base = item("a", "due");
+    return { ...base, card: { ...base.card, revision, note, updated_at } };
+  };
+  const saved = at(3, "刚保存的理解");
+  const stale = at(2, "保存之前的理解");
+  assert.equal(newerItem(saved, stale), saved);
+  assert.equal(newerItem(stale, saved), saved);
+  assert.equal(newerItem(undefined, stale), stale);
+  // 同一毫秒内的两次修改：更新时间相同，仍按修改次数区分
+  assert.equal(newerItem(at(5, "状态", 200), at(4, "笔记", 200)).card.note, "状态");
+  // 次数相同时内容相同，采用后到的（原会话的名称等可能已经改变）
+  const renamed = { ...saved, study_name: "改名后的会话" };
+  assert.equal(newerItem(saved, renamed), renamed);
 });

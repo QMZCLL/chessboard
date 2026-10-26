@@ -71,3 +71,11 @@ export function nextTodoId(items: ReviewItem[], currentId: string | null): strin
   const after = todo.find((i) => items.indexOf(i) > at);
   return (after ?? todo[0]).card.id;
 }
+
+/**
+ * 同一张卡片的两份数据中应采用的一份：修改次数多的较新，较早读取的数据不覆盖较新的。
+ * 次数相同时卡片内容相同，采用后到的（原会话是否还在、当前名称可能已经改变）。
+ */
+export function newerItem(existing: ReviewItem | undefined, incoming: ReviewItem): ReviewItem {
+  return existing && existing.card.revision > incoming.card.revision ? existing : incoming;
+}

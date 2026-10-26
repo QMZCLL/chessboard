@@ -3,7 +3,7 @@
 import { computed, reactive } from "vue";
 import { api, errorMessage } from "../api/backend";
 import type * as T from "../api/types";
-import { counts, filterItems, nextTodoId, type ReviewFilter } from "./reviewList";
+import { counts, filterItems, newerItem, nextTodoId, type ReviewFilter } from "./reviewList";
 import { nodeOf, openStudy, selectNode, setMode, study, wb } from "./workbench";
 
 type NoteDraft = { text: string; state: "idle" | "editing" | "saving" | "saved" | "failed"; error: string | null };
@@ -59,20 +59,28 @@ export const starredNotInReview = computed(() => {
     .sort((a, b) => (nodeOf(a)?.ply ?? 0) - (nodeOf(b)?.ply ?? 0) || a - b);
 });
 
-/** 采用后台返回的卡片；较早读取的卡片（更新时间更早）不覆盖较新的。 */
-function upsert(item: T.ReviewItem) {
+/**
+ * 采用后台返回的卡片，返回合并之后应显示的卡片：较早读取的卡片（修改次数更少）不覆盖列表与当前卡片中较新的。
+ * 调用方接着显示这张卡片、初始化笔记时都用返回值，不直接用响应中的数据。
+ */
+function upsert(item: T.ReviewItem): T.ReviewItem {
   const i = review.items.findIndex((x) => x.card.id === item.card.id);
-  if (i >= 0 && review.items[i].card.updated_at > item.card.updated_at) return;
+  const kept = newerItem(i >= 0 ? review.items[i] : undefined, item);
+  if (kept !== item) return kept;
   if (i >= 0) review.items[i] = item;
   else review.items.push(item);
   if (review.current?.card.id === item.card.id) Object.assign(review.current, item);
   // 讲解面板显示这一着的复习状态
   if (wb.detail && wb.detail.study_id === item.card.study_id && wb.detail.node.id === item.card.node_id) wb.detail.review = item.card.status;
+  return item;
 }
 
 export async function loadReviews() {
   try {
-    review.items = await api.listReviews();
+    const fresh = await api.listReviews();
+    // 读取列表期间完成的修改不被较早读到的列表覆盖
+    const known = new Map(review.items.map((i) => [i.card.id, i]));
+    review.items = fresh.map((i) => newerItem(known.get(i.card.id), i));
     review.loaded = true;
     review.error = null;
   } catch (e) {
@@ -114,15 +122,17 @@ export async function showCard(id: string) {
   review.busy = true;
   try {
     const detail = await api.reviewDetail(id);
-    upsert(detail);
+    // 视图代次只说明这是不是最后一次打开的卡片；详情还可能早于刚完成的修改读取，
+    // 卡片与笔记都用合并之后较新的那份
+    const latest = upsert(detail);
     if (v !== view) return;
-    review.current = detail;
+    review.current = { ...detail, ...latest };
     review.phase = "choose";
     review.attempt = null;
     review.error = null;
     // 正在编辑或保存失败的草稿保留，其余按卡片中保存的内容显示
     const draft = review.notes[id];
-    if (!draft || draft.state === "idle" || draft.state === "saved") review.notes[id] = { text: detail.card.note, state: "idle", error: null };
+    if (!draft || draft.state === "idle" || draft.state === "saved") review.notes[id] = { text: latest.card.note, state: "idle", error: null };
   } catch (e) {
     if (v === view) review.error = errorMessage(e);
   } finally {
@@ -160,15 +170,12 @@ export function retryCard() {
   review.busy = false;
 }
 
-export async function setStatus(status: T.ReviewStatus) {
-  const current = review.current;
-  if (!current) return;
-  const id = current.card.id;
-  try {
-    upsert(await queued(id, () => api.updateReview(id, { status })));
-  } catch (e) {
-    if (review.current?.card.id === id) review.error = errorMessage(e);
-  }
+/**
+ * 标记一张卡片的状态。卡片由调用方在操作开始时确定：先保存笔记再标记时，等待期间换了卡片，
+ * 仍然标记原来的那张。失败时抛出，由调用方提示。
+ */
+export async function setStatus(id: string, status: T.ReviewStatus) {
+  upsert(await queued(id, () => api.updateReview(id, { status })));
 }
 
 export function editNote(text: string) {

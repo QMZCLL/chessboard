@@ -4,8 +4,9 @@
 //    记下自己的理解，标为已理解；
 // C. 把收藏的着法加入复习，直接看答案、标为需要再练、再试一次；
 // D. 重新打开后卡片仍在，讲解面板显示复习状态，从卡片打开原局面；
-// E. 原会话删除后卡片仍可复习，不能打开原局面；删除卡片。
-import { BASE, bridge, check, launch, move, snap } from "../lib.mjs";
+// E. 原会话删除后卡片仍可复习，不能打开原局面；删除卡片；
+// F. 迟到的响应与并发保存：作答、详情倒序返回，保存理解期间换卡片，详情早于保存读取却晚于它返回。
+import { BASE, bridge, check, hold, launch, move, snap } from "../lib.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const created = await bridge("create_study", {
@@ -172,47 +173,28 @@ await snap(page, "review-list");
 // ---------- F. 迟到的响应与并发保存 ----------
 const A = `${sid}/0000000002`;
 const B = `${sid}/0000000004`;
-/** 拦住某个命令的响应，直到调用返回的函数才交给页面（请求本身照常到达后台） */
-async function holdResponse(cmd, match = () => true) {
-  let release;
-  let delivered;
-  const released = new Promise((r) => (release = r));
-  const done = new Promise((r) => (delivered = r));
-  await page.route(`**/__bridge/invoke/${cmd}`, async (route) => {
-    if (!match(route.request().postDataJSON())) return route.continue();
-    const response = await route.fetch();
-    await released;
-    await route.fulfill({ response });
-    delivered();
-  });
-  // 放行后等响应确实交给页面、界面处理完，再检查
-  return async () => {
-    release();
-    await done;
-    await sleep(300);
-    await page.unroute(`**/__bridge/invoke/${cmd}`);
-  };
-}
+const cardOf = async (id) => (await cards()).find((i) => i.card.id === id).card;
+const noteBox = dialog.getByTestId("review-note").locator("textarea");
 // 卡片 A 的作答响应迟到：期间换到卡片 B，B 仍在等待选择，不显示 A 的结果
 await pick(A);
-let release = await holdResponse("review_attempt");
+let held = await hold(page, "review_attempt");
 await reviewMove("h9g7");
 await pick(B);
-await release();
+await held.release();
 check(
   (await dialog.getByTestId("review-prompt").isVisible()) && (await dialog.getByTestId("review-result").count()) === 0,
   "换到另一张卡片后，迟到的作答结果不会揭示这张卡片",
 );
 check((await dialog.locator(`[data-review="${B}"].active`).count()) === 1, "当前仍是后打开的卡片");
-check((await cards()).find((i) => i.card.id === A).card.attempts.length === 2, "迟到的作答仍记在原来的卡片上");
+check((await cardOf(A)).attempts.length === 2, "迟到的作答仍记在原来的卡片上");
 // 两张卡片的详情倒序返回：最后打开的卡片保持为当前卡片
-release = await holdResponse("review_detail", (body) => body.req.id === A);
+held = await hold(page, "review_detail", { match: (body) => body.req.id === A });
 await dialog.locator(`[data-review="${A}"]`).click();
 await sleep(200);
 await dialog.locator(`[data-review="${B}"]`).click();
 // 后打开的卡片先加载完成，再放行先打开的那张：两次详情的响应倒序到达
 await dialog.locator(`[data-review="${B}"].active`).waitFor();
-await release();
+await held.release();
 check(
   (await dialog.locator(`[data-review="${B}"].active`).count()) === 1 && (await dialog.getByTestId("review-history").innerText()) === "此前：炮二平五 马8进7 马二进三",
   "先打开的卡片详情较晚返回时，不会跳回那张卡片",
@@ -229,13 +211,55 @@ await page.route("**/__bridge/invoke/update_review", async (route) => {
 });
 await dialog.getByTestId("review-reveal").click();
 await dialog.getByTestId("review-result").waitFor();
-await dialog.getByTestId("review-note").locator("textarea").fill("车9平8 出车，准备过河");
+await noteBox.fill("车9平8 出车，准备过河");
 await dialog.getByTestId("review-mark-understood").click();
 await dialog.getByTestId("review-status").filter({ hasText: "已理解" }).waitFor();
 await page.unroute("**/__bridge/invoke/update_review");
 check(order.join() === "note:发出,note:完成,status:发出,status:完成", `同一张卡片的修改依次发送：${order.join("，")}`);
-const saved = (await cards()).find((i) => i.card.id === B).card;
+const saved = await cardOf(B);
 check(saved.note === "车9平8 出车，准备过河" && saved.status === "understood", "理解与状态都保存下来");
+// 保存理解期间换了卡片：理解与状态仍记在点击时的卡片上，后打开的卡片不受影响
+await pick(A);
+await dialog.getByTestId("review-reveal").click();
+await dialog.getByTestId("review-result").waitFor();
+held = await hold(page, "update_review", { match: (body) => body.req.note !== null });
+await noteBox.fill("马8进7 先保护中卒");
+await dialog.getByTestId("review-mark-again").click();
+await held.arrived;
+await pick(B);
+await held.release();
+const notice = page.locator(".n-message", { hasText: "需要再练" });
+await notice.waitFor();
+check((await notice.innerText()).includes("已把之前复习的卡片标为"), `提示说明标记的是之前复习的卡片：${await notice.innerText()}`);
+const a = await cardOf(A);
+const b = await cardOf(B);
+check(a.note === "马8进7 先保护中卒" && a.status === "again", `点击时的卡片保存了理解并标为需要再练（${a.status}）`);
+check(b.status === "understood" && b.note === "车9平8 出车，准备过河", `后打开的卡片状态不变（${b.status}）`);
+check(
+  (await dialog.locator(`[data-review="${B}"].active`).count()) === 1 &&
+    (await dialog.getByTestId("review-prompt").isVisible()) &&
+    (await dialog.getByTestId("review-result").count()) === 0,
+  "当前仍是后打开的卡片，仍在等待选择",
+);
+// 重新打开卡片时详情先于保存读取、却晚于保存返回：不用这份较早的详情替换刚保存的理解
+await pick(A);
+await dialog.getByTestId("review-reveal").click();
+await dialog.getByTestId("review-result").waitFor();
+await noteBox.fill("马8进7 先保护中卒，再出车");
+const save = await hold(page, "update_review", { match: (body) => body.req.note !== null, holdRequest: true });
+held = await hold(page, "review_detail", { match: (body) => body.req.id === A });
+// 点击列表中的这张卡片：输入框失去焦点而保存（拦在发往后台之前），同时重新打开卡片（后台读到保存之前的卡片）
+await dialog.locator(`[data-review="${A}"]`).click();
+await save.arrived;
+await held.arrived;
+await save.release();
+await held.release();
+check((await cardOf(A)).note === "马8进7 先保护中卒，再出车", "理解已经保存");
+check(await dialog.getByTestId("review-prompt").isVisible(), "重新打开后等待选择");
+await dialog.getByTestId("review-reveal").click();
+await dialog.getByTestId("review-result").waitFor();
+const shownNote = await noteBox.inputValue();
+check(shownNote === "马8进7 先保护中卒，再出车", `较早读取的详情晚到时，输入框仍是刚保存的理解：${shownNote}`);
 
 // ---------- 窄窗口 ----------
 await page.keyboard.press("Escape");

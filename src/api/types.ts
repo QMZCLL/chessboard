@@ -303,6 +303,8 @@ export interface ReviewCard {
   study_name: string;
   created_at: number;
   updated_at: number;
+  /** 修改次数：每次修改加一，用来判断同一张卡片的两份数据哪份较新 */
+  revision: number;
   status: ReviewStatus;
   /** 落子前局面（含行棋方） */
   fen: string;
