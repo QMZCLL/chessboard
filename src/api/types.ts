@@ -355,6 +355,10 @@ export interface ReviewCard {
   note: string;
   attempts: ReviewAttempt[];
   reviewed_at: number | null;
+  /** 下一次复习的时间（毫秒）；后台返回时总是有值（早期的卡片按规则推算） */
+  due_at: number | null;
+  /** 复习间隔的档位：独立选对后标为已理解时升一档 */
+  stage: number;
 }
 
 export interface ReviewItem {
@@ -511,6 +515,32 @@ export interface AppConfig {
   };
   cloud: { enabled: boolean; timeout_ms: number };
   coach: CoachConfig;
+  /** 复习间隔的档位（天）与自动备份保留的份数（0 表示不自动备份） */
+  review: { intervals_days: number[]; backup_keep: number };
+}
+
+/** 学习档案的来源：桌面应用传文件路径，浏览器中传文件内容 */
+export type ArchiveSource = { kind: "text"; text: string } | { kind: "file"; path: string };
+
+/** 导入学习档案的预览（导入后为实际处理的结果） */
+export interface ArchiveSummary {
+  exported_at: number;
+  app_version: string;
+  studies_new: number;
+  /** 本机已有同一编号的会话：保留本机的版本 */
+  studies_existing: number;
+  cards_new: number;
+  cards_same: number;
+  /** 与本机不同：历次复习合在一起，其他内容取较新的一份 */
+  cards_merge: number;
+  /** 原会话不在本机也不在档案中：照样导入，只是不能打开原局面 */
+  cards_orphan: number;
+}
+
+export interface BackupInfo {
+  dir: string;
+  keep: number;
+  files: { name: string; size: number; modified_at: number }[];
 }
 
 export type CoachProvider = "openai" | "deepseek" | "ollama";

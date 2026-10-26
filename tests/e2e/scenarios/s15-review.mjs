@@ -33,10 +33,10 @@ const reviewCard = dialog.getByTestId("review-card");
 async function reviewMove(mv) {
   for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await reviewCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
 }
-/** 顶部“复习”入口说明的待复习张数（数字角标的文字带有动画，读按钮的说明） */
+/** 顶部“复习”入口说明的今天到期张数（数字角标的文字带有动画，读按钮的说明） */
 const todoCount = async () => {
   const label = (await page.getByTestId("open-review").getAttribute("aria-label")) ?? "";
-  return Number(label.match(/(\d+) 张待复习/)?.[1] ?? 0);
+  return Number(label.match(/今天 (\d+) 张到期/)?.[1] ?? 0);
 };
 const cards = async () => bridge("list_reviews");
 /** 在列表中选择一张卡片，等它成为当前复习的卡片 */
@@ -58,7 +58,7 @@ check((await page.getByTestId("practice").innerText()).includes("用了 2 级提
 await page.getByTestId("add-review").click();
 await page.getByTestId("in-review").filter({ hasText: "复习中 · 待复习" }).waitFor();
 check(true, "加入复习后显示“复习中 · 待复习”");
-check((await todoCount()) === 1 && (await page.locator(".n-badge-sup").first().isVisible()), "顶部“复习”显示待复习的张数");
+check((await todoCount()) === 1 && (await page.locator(".n-badge-sup").first().isVisible()), "顶部“复习”显示今天到期的张数（新加入的卡片立即到期）");
 let list = await cards();
 const card = list[0]?.card;
 const before = (await bridge("node_detail", { req: { study_id: sid, node_id: 1 } })).node.fen.split(" ")[0];
@@ -104,12 +104,12 @@ await dialog.getByTestId("review-mark-understood").click();
 await dialog.getByTestId("review-status").filter({ hasText: "已理解" }).waitFor();
 list = await cards();
 check(list[0].card.status === "understood" && list[0].card.note === "马8进7 保护中卒，同时出动左马" && list[0].card.attempts.length === 1, "状态、理解与这次复习都已保存");
-check((await todoCount()) === 0, "没有待复习的卡片时不显示数字");
+check((await todoCount()) === 0, "走对并标为已理解后安排之后再看，今天没有到期的卡片时不显示数字");
 
 // ---------- C. 收藏的着法加入复习 ----------
 await dialog.getByTestId("review-add-starred").click();
 await dialog.locator("[data-review]").first().waitFor();
-check((await dialog.getByTestId("review-filter-todo").innerText()).includes("1"), "收藏的着法加入后有 1 张待复习");
+check((await dialog.getByTestId("review-filter-today").innerText()).includes("1"), "收藏的着法加入后有 1 张今天到期");
 await pick(`${sid}/0000000004`);
 check((await dialog.getByTestId("review-history").innerText()) === "此前：炮二平五 马8进7 马二进三", "第 4 着的此前着法");
 await dialog.getByTestId("review-reveal").click();
@@ -126,7 +126,10 @@ await reviewMove("b9c7");
 await dialog.getByTestId("review-result").filter({ hasText: "这次走了 马2进3，棋谱中是 车9平8" }).waitFor();
 check((await reviewCard.locator(".xq-board line.arrow").count()) === 2, "棋盘上同时标出棋谱着法与这次的选择");
 check((await dialog.getByTestId("review-attempts").innerText()).includes("✗✗"), "显示最近几次复习的结果");
-check((await todoCount()) === 1, "需要再练的卡片计入待复习");
+check(
+  (await todoCount()) === 0 && (await dialog.getByTestId("review-filter-again").innerText()).includes("1"),
+  "标为需要再练后安排明天再看，不计入今天到期；在“再练”分组中可以继续练",
+);
 await page.keyboard.press("Escape");
 await dialog.waitFor({ state: "hidden" });
 
@@ -139,7 +142,7 @@ check(true, "重新打开后讲解面板显示这一着的复习状态");
 await page.getByTestId("in-review").click();
 await dialog.locator(`[data-review="${sid}/0000000002"].active`).waitFor();
 check((await dialog.getByTestId("review-prompt").count()) === 1, "从讲解面板打开这一着的卡片（已理解的卡片也能再练）");
-await dialog.getByTestId("review-filter-todo").click();
+await dialog.getByTestId("review-filter-again").click();
 await pick(`${sid}/0000000004`);
 await dialog.getByTestId("review-open-source").click();
 await dialog.waitFor({ state: "hidden" });

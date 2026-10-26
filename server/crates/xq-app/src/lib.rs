@@ -4,6 +4,7 @@
 //! 屏幕捕获通过 `capture::CaptureBackend` 注入，具体实现位于 Tauri 程序中。
 
 pub mod api;
+pub mod archive;
 pub mod capture;
 mod capture_glue;
 pub mod compare;
@@ -15,6 +16,7 @@ pub mod llm;
 mod pipeline;
 pub mod records;
 pub mod review;
+pub mod schedule;
 mod service;
 pub mod storage;
 mod transfer;

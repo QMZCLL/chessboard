@@ -269,6 +269,8 @@ impl AppService {
             })
             .map_err(|e| format!("无法启动讲解线程：{e}"))?;
         crate::llm::service::spawn_workers(Arc::downgrade(&inner), coach_rx)?;
+        // 每天第一次启动时备份学习档案（当天已有备份时不再写入）
+        inner.auto_backup();
         Ok(Self { inner })
     }
 

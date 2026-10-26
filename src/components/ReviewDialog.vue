@@ -4,18 +4,21 @@
 // 列表与复习开始前都不显示棋谱中的着法和笔记，避免提前透露答案。
 // 练习目标：复现棋谱看是否与棋谱一致；局面决策把这次的选择与参考放在同一次搜索中比较。
 // 落子前可以选择意图，揭示后与这一步实际的规则事实对照。
-import { computed, onMounted } from "vue";
-import { NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NRadioButton, NRadioGroup, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
+import { onMounted } from "vue";
+import { computed, ref } from "vue";
+import { NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NRadioButton, NRadioGroup, NSelect, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
 import XiangqiBoard from "./XiangqiBoard.vue";
 import VerdictTag from "./VerdictTag.vue";
 import type { ReviewStatus } from "../api/types";
 import { errorMessage } from "../api/backend";
 import {
   addStarred,
+  closeSummary,
   currentAttempt,
   deleteCard,
   currentNote,
   editNote,
+  finishSession,
   loadReviews,
   nextCardId,
   openSource,
@@ -28,6 +31,7 @@ import {
   shownItems,
   showCard,
   showNext,
+  startSession,
   starredNotInReview,
   submitChoice,
 } from "../state/review";
@@ -35,6 +39,7 @@ import {
   attemptMark,
   attemptText,
   decisionTitle,
+  dueText,
   GOAL_LABEL,
   historyText,
   INTENT_LABEL,
@@ -42,6 +47,7 @@ import {
   positionLabel,
   STATUS_LABEL,
   suggestionFor,
+  summaryText,
   thinkingText,
   whenText,
 } from "../state/reviewList";
@@ -73,6 +79,19 @@ const decisionTone = computed(() => {
 const GOAL_HINT = { recall: "回忆这盘棋当时怎样走，看是否与棋谱一致", decision: "作出自己的选择，与棋谱着法、引擎参考在同一次搜索中比较" } as const;
 const toggleIntent = (i: (typeof INTENTS)[number]) => (review.intent = review.intent === i ? null : i);
 const hints = computed(() => card.value?.thinking?.hints ?? null);
+/** 一组练习的张数；0 表示今天到期的全部 */
+const sessionSize = ref(5);
+const SIZES = [
+  { label: "5 张", value: 5 },
+  { label: "10 张", value: 10 },
+  { label: "全部", value: 0 },
+];
+const session = computed(() => review.session);
+const nextLabel = computed(() => {
+  const s = session.value;
+  if (!s) return "下一张";
+  return s.index + 1 < s.ids.length ? `下一张（${s.index + 2} / ${s.ids.length}）` : "完成这组练习";
+});
 const recent = computed(() => (card.value?.attempts ?? []).slice(-8));
 
 async function addFromStarred() {
@@ -102,7 +121,9 @@ async function mark(status: ReviewStatus) {
   try {
     await setStatus(id, status);
     const label = STATUS_LABEL[status];
-    message.success(review.current?.card.id === id ? `已标为“${label}”` : `已把之前复习的卡片标为“${label}”`);
+    const marked = review.items.find((i) => i.card.id === id)?.card;
+    const when = marked ? `，${dueText(marked, Date.now())}` : "";
+    message.success(review.current?.card.id === id ? `已标为“${label}”${when}` : `已把之前复习的卡片标为“${label}”${when}`);
   } catch (e) {
     message.error(errorMessage(e));
   }
@@ -117,10 +138,25 @@ onMounted(loadReviews);
       <!-- 卡片列表 -->
       <aside class="list">
         <n-radio-group v-model:value="review.filter" size="small" class="filter">
-          <n-radio-button value="todo" data-testid="review-filter-todo">待复习 {{ reviewCounts.todo }}</n-radio-button>
+          <n-radio-button value="today" data-testid="review-filter-today">今天 {{ reviewCounts.today }}</n-radio-button>
+          <n-radio-button value="again" data-testid="review-filter-again">再练 {{ reviewCounts.again }}</n-radio-button>
           <n-radio-button value="understood" data-testid="review-filter-understood">已理解 {{ reviewCounts.understood }}</n-radio-button>
           <n-radio-button value="all" data-testid="review-filter-all">全部 {{ reviewCounts.all }}</n-radio-button>
         </n-radio-group>
+        <!-- 一组练习：按顺序复习，结束后给出小结 -->
+        <div v-if="session" class="session" data-testid="review-session">
+          <span data-testid="review-session-progress"><strong>{{ session.label }}</strong> · 第 {{ session.index + 1 }} / {{ session.ids.length }} 张</span>
+          <n-button text type="primary" size="small" data-testid="review-finish" @click="finishSession">结束并查看小结</n-button>
+        </div>
+        <div v-else class="session-start">
+          <n-button size="small" type="primary" :disabled="!reviewCounts.today" data-testid="review-start-today" @click="startSession('today', sessionSize || null)">
+            开始今天的练习
+          </n-button>
+          <n-select v-model:value="sessionSize" size="small" :options="SIZES" class="size" data-testid="review-session-size" />
+          <n-button size="small" quaternary :disabled="!reviewCounts.again" data-testid="review-start-again" @click="startSession('again', null)">
+            只练需要再练的 {{ reviewCounts.again }} 张
+          </n-button>
+        </div>
         <n-button v-if="starredNotInReview.length" size="small" quaternary class="add-starred" data-testid="review-add-starred" @click="addFromStarred">
           把这盘棋收藏的 {{ starredNotInReview.length }} 着加入复习
         </n-button>
@@ -137,7 +173,7 @@ onMounted(loadReviews);
                 <span class="item-name">{{ item.study_name }}</span>
                 <n-tag size="tiny" :type="STATUS_TYPE[item.card.status]" :bordered="false">{{ STATUS_LABEL[item.card.status] }}</n-tag>
               </span>
-              <span class="item-sub">{{ positionLabel(item.card) }} · {{ whenText(item.card.reviewed_at) }}</span>
+              <span class="item-sub" :title="whenText(item.card.reviewed_at)">{{ positionLabel(item.card) }} · {{ dueText(item.card, review.clock) }}</span>
             </button>
           </li>
         </ol>
@@ -148,8 +184,15 @@ onMounted(loadReviews);
         </n-empty>
       </aside>
 
+      <!-- 一组练习的小结：数字都来自这组练习的复习记录与卡片的安排 -->
+      <section v-if="review.summary" class="practice summary" data-testid="review-summary-panel">
+        <h3>这组练习的小结</h3>
+        <p data-testid="review-session-summary">{{ summaryText(review.summary) }}</p>
+        <n-button size="small" type="primary" data-testid="review-close-summary" @click="closeSummary">继续复习</n-button>
+      </section>
+
       <!-- 复习一张卡片 -->
-      <section v-if="card && current" class="practice" data-testid="review-card">
+      <section v-else-if="card && current" class="practice" data-testid="review-card">
         <header class="head">
           <div>
             <div class="title">{{ current.study_name }} · {{ positionLabel(card) }}</div>
@@ -157,6 +200,7 @@ onMounted(loadReviews);
           </div>
           <div class="head-actions">
             <n-tag size="small" :type="STATUS_TYPE[card.status]" :bordered="false" data-testid="review-status">{{ STATUS_LABEL[card.status] }}</n-tag>
+            <span class="muted due" data-testid="review-due">{{ dueText(card, review.clock) }}</span>
             <n-tooltip :disabled="current.source_available">
               <template #trigger>
                 <n-button size="small" quaternary :disabled="!current.source_available || review.busy" data-testid="review-open-source" @click="open">
@@ -324,7 +368,16 @@ onMounted(loadReviews);
                 <n-button size="small" :type="suggestion === 'again' ? 'primary' : 'default'" data-testid="review-mark-again" @click="mark('again')">需要再练</n-button>
                 <n-button size="small" :type="suggestion === 'understood' ? 'primary' : 'default'" data-testid="review-mark-understood" @click="mark('understood')">已理解</n-button>
                 <n-button size="small" quaternary @click="retryCard">再试一次</n-button>
-                <n-button size="small" quaternary :disabled="!nextCardId" data-testid="review-next" @click="showNext">下一张</n-button>
+                <n-button
+                  size="small"
+                  :type="session ? 'primary' : 'default'"
+                  :quaternary="!session"
+                  :disabled="!session && !nextCardId"
+                  data-testid="review-next"
+                  @click="showNext"
+                >
+                  {{ nextLabel }}
+                </n-button>
               </div>
             </template>
             <n-alert v-if="review.error" type="error" :show-icon="false" class="gap">{{ review.error }}</n-alert>
@@ -362,7 +415,21 @@ onMounted(loadReviews);
 .filter :deep(.n-radio-button) {
   flex: 1;
   text-align: center;
-  padding: 0 6px;
+  padding: 0 4px;
+}
+.session,
+.session-start {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+}
+.session-start .size {
+  width: 84px;
+}
+.summary h3 {
+  margin: 0 0 var(--sp-2);
 }
 .add-starred {
   align-self: flex-start;

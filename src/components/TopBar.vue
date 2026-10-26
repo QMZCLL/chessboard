@@ -109,12 +109,12 @@ function onMore(key: string) {
       <n-dropdown v-else trigger="click" :options="moreOptions" @select="onMore">
         <n-button size="small" quaternary>更多</n-button>
       </n-dropdown>
-      <n-badge :value="reviewCounts.todo" :show="reviewCounts.todo > 0" :max="99" type="info">
+      <n-badge :value="reviewCounts.today" :show="reviewCounts.today > 0" :max="99" type="info">
         <n-button
           size="small"
           quaternary
           data-testid="open-review"
-          :aria-label="reviewCounts.todo ? `复习，${reviewCounts.todo} 张待复习` : '复习'"
+          :aria-label="reviewCounts.today ? `复习，今天 ${reviewCounts.today} 张到期` : '复习'"
           @click="openReviews()"
         >
           <template #icon><Icon name="book" /></template>复习

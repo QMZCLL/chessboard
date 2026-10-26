@@ -116,6 +116,11 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         }
         "cloud_lookup" => to_value(service.cloud_lookup(arg(args, "req")?)?),
         "export_study" => to_value(service.export_study(&arg::<String>(args, "id")?)?),
+        "export_archive" => to_value(service.export_archive()?),
+        "preview_archive" => to_value(service.preview_archive(arg(args, "source")?)?),
+        "import_archive" => to_value(service.import_archive(arg(args, "source")?)?),
+        "backup_info" => to_value(service.backup_info()),
+        "backup_now" => to_value(service.backup_now()?),
         "import_text" => to_value(service.import_text(&arg::<String>(args, "text")?, arg(args, "name")?)?),
         "diagnostics" => to_value(service.diagnostics()),
         "open_log_dir" => Err("开发桥不支持打开目录".into()),

@@ -26,6 +26,8 @@ import { api, copyText, errorMessage, isTauri } from "../api/backend";
 import type { AppConfig, Audience, CoachProvider, CoachScope, Detail } from "../api/types";
 import { refreshCoach, wb, type SettingsTab } from "../state/workbench";
 import { setThemePref, themePref } from "../state/theme";
+import { parseIntervals } from "../state/reviewList";
+import ArchivePanel from "./ArchivePanel.vue";
 import { viewport } from "../state/layout";
 import { secondsToMs } from "../utils/units";
 
@@ -62,6 +64,8 @@ const form = reactive({
   coach_scope: "off" as CoachScope,
   coach_audience: "beginner" as Audience,
   coach_detail: "normal" as Detail,
+  review_intervals: "1, 3, 7, 14, 30",
+  backup_keep: 7,
 });
 // 最近一次载入或保存时的表单，用来判断是否有未保存的修改
 const savedForm = ref("");
@@ -139,6 +143,8 @@ function load(c: AppConfig) {
   form.coach_scope = c.coach.auto_explain_scope;
   form.coach_audience = c.coach.audience;
   form.coach_detail = c.coach.detail;
+  form.review_intervals = c.review.intervals_days.join(", ");
+  form.backup_keep = c.review.backup_keep;
   savedForm.value = JSON.stringify(form);
 }
 
@@ -206,6 +212,7 @@ async function save() {
       audience: form.coach_audience,
       detail: form.coach_detail,
     },
+    review: { intervals_days: parseIntervals(form.review_intervals), backup_keep: form.backup_keep },
   };
   // 引擎参数在正在进行的分析结束后才生效，只在改了它们时提示
   const ENGINE_KEYS = ["quick_time_ms", "quick_depth", "deep_time_ms", "deep_depth", "multipv", "repetition_rule", "sixty_move_rule"] as const;
@@ -264,7 +271,20 @@ const engineText = computed(() => {
             <n-form-item label="学习水平"><n-select v-model:value="form.coach_audience" :options="AUDIENCES" /></n-form-item>
             <n-form-item label="AI 讲解篇幅"><n-select v-model:value="form.coach_detail" :options="DETAILS" /></n-form-item>
             <p class="muted">学习水平与篇幅用于 AI 讲解；修改后，已有的 AI 讲解会标为过期。</p>
+            <n-form-item label="复习间隔（天）">
+              <n-input v-model:value="form.review_intervals" placeholder="1, 3, 7, 14, 30" data-testid="review-intervals" />
+            </n-form-item>
+            <p class="muted">
+              标为“需要再练”或没有独立选对时用第一档；独立选对后标为“已理解”时升一档，间隔逐步拉长。这是可以调整的初始设计，不是对所有人都最合适的间隔。
+            </p>
           </n-form>
+        </n-tab-pane>
+
+        <n-tab-pane name="archive" tab="学习档案">
+          <n-form label-placement="left" label-width="112" size="small">
+            <n-form-item label="自动备份份数"><n-input-number v-model:value="form.backup_keep" :min="0" :max="100" data-testid="backup-keep" /></n-form-item>
+          </n-form>
+          <ArchivePanel v-if="tab === 'archive'" />
         </n-tab-pane>
 
         <n-tab-pane name="coach" tab="AI 讲解">

@@ -91,7 +91,7 @@ export const wb = reactive({
   settingsTab: null as SettingsTab | null,
 });
 
-export type SettingsTab = "learn" | "coach" | "engine" | "capture" | "diag";
+export type SettingsTab = "learn" | "coach" | "engine" | "capture" | "archive" | "diag";
 
 export function openSettings(tab: SettingsTab | null = null) {
   wb.settingsTab = tab;

@@ -8,6 +8,9 @@ use xq_app::ApiError;
 use xq_app::ApiResult;
 use xq_app::AppService;
 use xq_app::api::*;
+use xq_app::archive::ArchiveSource;
+use xq_app::archive::ArchiveSummary;
+use xq_app::archive::BackupInfo;
 use xq_app::capture::CaptureState;
 use xq_app::compare::CompareRequest;
 use xq_app::compare::CompareView;
@@ -255,6 +258,36 @@ pub async fn cloud_lookup(state: State<'_, AppService>, req: NodeRef) -> ApiResu
 pub async fn export_study_to_file(state: State<'_, AppService>, id: String, path: PathBuf) -> ApiResult<()> {
     let s = service(&state);
     blocking(move || s.export_study_to_file(&id, &path)).await
+}
+
+#[tauri::command]
+pub async fn export_archive_to_file(state: State<'_, AppService>, path: PathBuf) -> ApiResult<()> {
+    let s = service(&state);
+    blocking(move || s.export_archive_to_file(&path)).await
+}
+
+#[tauri::command]
+pub async fn preview_archive(state: State<'_, AppService>, source: ArchiveSource) -> ApiResult<ArchiveSummary> {
+    let s = service(&state);
+    blocking(move || s.preview_archive(source)).await
+}
+
+#[tauri::command]
+pub async fn import_archive(state: State<'_, AppService>, source: ArchiveSource) -> ApiResult<ArchiveSummary> {
+    let s = service(&state);
+    blocking(move || s.import_archive(source)).await
+}
+
+#[tauri::command]
+pub async fn backup_info(state: State<'_, AppService>) -> ApiResult<BackupInfo> {
+    let s = service(&state);
+    blocking(move || Ok(s.backup_info())).await
+}
+
+#[tauri::command]
+pub async fn backup_now(state: State<'_, AppService>) -> ApiResult<BackupInfo> {
+    let s = service(&state);
+    blocking(move || s.backup_now()).await
 }
 
 #[tauri::command]

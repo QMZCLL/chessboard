@@ -1,28 +1,39 @@
 // 复习卡片的分组、计数与文字：列表不透露答案，复习后的文字说明这次与原来的思考。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DecisionFeedback, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus } from "../../src/api/types.ts";
+import type { ArchiveSummary, DecisionFeedback, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus } from "../../src/api/types.ts";
 import {
+  archivePreviewLines,
   attemptMark,
   attemptText,
   counts,
+  DAY_MS,
   decisionTitle,
+  dueText,
   filterItems,
   historyText,
   newerItem,
-  nextTodoId,
+  nextDueId,
+  parseIntervals,
   positionLabel,
   reviewCardId,
   suggestedStatus,
+  sessionSummary,
   suggestionFor,
+  summaryText,
   thinkingText,
   whenText,
 } from "../../src/state/reviewList.ts";
 
-function item(id: string, status: ReviewStatus, history: string[] = [], complete = true): ReviewItem {
+/** 本机时间 2026-10-25 20:00 */
+const NOW = new Date(2026, 9, 25, 20, 0).getTime();
+
+function item(id: string, status: ReviewStatus, history: string[] = [], complete = true, dueInDays = 0): ReviewItem {
   const card = {
     id,
     status,
+    due_at: NOW + dueInDays * DAY_MS,
+    created_at: 0,
     turn: 3,
     side: "black",
     history: history.map((notation) => ({ mv: "a0a1", notation })),
@@ -32,11 +43,25 @@ function item(id: string, status: ReviewStatus, history: string[] = [], complete
   return { card, source_available: true, study_name: "测试" };
 }
 
-test("待复习包括待复习与需要再练，已理解单独一组", () => {
-  const items = [item("a", "again"), item("b", "due"), item("c", "understood")];
-  assert.deepEqual(filterItems(items, "todo").map((i) => i.card.id), ["a", "b"]);
-  assert.deepEqual(filterItems(items, "understood").map((i) => i.card.id), ["c"]);
-  assert.deepEqual(counts(items), { todo: 2, understood: 1, all: 3 });
+test("今天到期按下一次复习的时间（含已经过期的），需要再练与已理解按状态分组", () => {
+  const items = [item("a", "again", [], true, 1), item("b", "due", [], true, -2), item("c", "understood", [], true, 0), item("d", "understood", [], true, 3)];
+  assert.deepEqual(filterItems(items, "today", NOW).map((i) => i.card.id), ["b", "c"]);
+  assert.deepEqual(filterItems(items, "again", NOW).map((i) => i.card.id), ["a"]);
+  assert.deepEqual(filterItems(items, "understood", NOW).map((i) => i.card.id), ["c", "d"]);
+  assert.deepEqual(counts(items, NOW), { today: 2, again: 1, understood: 2, all: 4 });
+  // 今天稍晚的时间也算今天到期（按本机日期）
+  const tonight = item("e", "due");
+  tonight.card.due_at = new Date(2026, 9, 25, 23, 30).getTime();
+  assert.equal(filterItems([tonight], "today", NOW).length, 1);
+});
+
+test("下一次复习的说明按本机日期", () => {
+  const at = (days: number) => item("a", "due", [], true, days).card;
+  assert.equal(dueText(at(0), NOW), "今天到期");
+  assert.equal(dueText(at(-2), NOW), "已到期 2 天");
+  assert.equal(dueText(at(1), NOW), "明天再看");
+  assert.equal(dueText(at(3), NOW), "3 天后再看");
+  assert.equal(dueText(at(14), NOW), "11 月 8 日再看");
 });
 
 test("列表中的说明不含棋谱中的着法", () => {
@@ -71,11 +96,60 @@ test("原来的思考与这次复习的结果", () => {
   assert.equal(suggestedStatus(false), "again");
 });
 
-test("下一张待复习的卡片：跳过已理解的，到末尾从头找", () => {
-  const items = [item("a", "due"), item("b", "understood"), item("c", "again")];
-  assert.equal(nextTodoId(items, "a"), "c");
-  assert.equal(nextTodoId(items, "c"), "a");
-  assert.equal(nextTodoId([item("a", "due")], "a"), null);
+test("下一张今天到期的卡片：跳过还没到期的，到末尾从头找", () => {
+  const items = [item("a", "due"), item("b", "understood", [], true, 3), item("c", "again")];
+  assert.equal(nextDueId(items, "a", NOW), "c");
+  assert.equal(nextDueId(items, "c", NOW), "a");
+  assert.equal(nextDueId([item("a", "due")], "a", NOW), null);
+});
+
+test("一组练习的小结只统计这组开始之后的复习，安排按时间先后", () => {
+  const started = NOW - 60_000;
+  const attempt = (at: number, choice: boolean, matched: boolean): ReviewAttempt => ({
+    at,
+    choice: choice ? { mv: "h9g7", notation: "马8进7" } : null,
+    matched,
+    goal: "recall",
+    intent: null,
+    reflection: null,
+    decision: null,
+  });
+  const card = (id: string, days: number, attempts: ReviewAttempt[]) => ({ ...item(id, "due", [], true, days).card, attempts });
+  const cards = [
+    card("a", 3, [attempt(NOW, true, true)]),
+    card("b", 1, [attempt(started - 1, true, true), attempt(NOW, false, false)]),
+    card("c", 1, [attempt(NOW, true, false)]),
+    // 这组开始之前复习过、这组里没有复习
+    card("d", 0, [attempt(started - 5, true, true)]),
+  ];
+  const s = sessionSummary(cards, started, NOW);
+  assert.deepEqual({ ...s, schedule: undefined }, { total: 4, done: 3, independent: 1, missed: 1, revealed: 1, schedule: undefined });
+  assert.deepEqual(s.schedule, [
+    { text: "明天再看", count: 2 },
+    { text: "3 天后再看", count: 1 },
+  ]);
+  assert.equal(summaryText(s), "本次完成 3 张：1 张独立选对，1 张没有选对，1 张直接看了答案；还有 1 张没有复习。安排：明天再看 2 张，3 天后再看 1 张。");
+  assert.equal(summaryText(sessionSummary(cards.slice(3), started, NOW)), "这组 1 张还没有复习。");
+});
+
+test("复习间隔的文字与导入预览", () => {
+  assert.deepEqual(parseIntervals("1, 3，7、14 30"), [1, 3, 7, 14, 30]);
+  assert.deepEqual(parseIntervals("0, -2, x, 2.5"), []);
+  const summary: ArchiveSummary = {
+    exported_at: NOW,
+    app_version: "0.2.0",
+    studies_new: 2,
+    studies_existing: 1,
+    cards_new: 3,
+    cards_same: 1,
+    cards_merge: 2,
+    cards_orphan: 1,
+  };
+  const lines = archivePreviewLines(summary);
+  assert.equal(lines[0], "导出于 2026-10-25 20:00（版本 0.2.0）");
+  assert.equal(lines[1], "学习会话：新增 2 个；本机已有 1 个，保留本机的版本");
+  assert.equal(lines[2], "复习卡片：新增 3 张；与本机相同 1 张；需要合并 2 张");
+  assert.ok(lines.some((l) => l.includes("历次复习按时间合在一起")) && lines.some((l) => l.includes("不能打开原局面")));
 });
 
 test("复习时间与卡片编号", () => {

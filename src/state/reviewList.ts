@@ -1,26 +1,51 @@
 // 复习卡片的分组、计数与文字说明。只依赖数据，便于单独测试。
 // 列表与复习开始前都不显示棋谱中的着法、笔记等可能透露答案的内容。
-import type { DecisionFeedback, DecisionVerdict, Intent, PracticeGoal, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
+// “今天到期”按本机日期计算：下一次复习的时间在今天结束之前（含已经过期的）。
+import type { ArchiveSummary, DecisionFeedback, DecisionVerdict, Intent, PracticeGoal, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
 
 export const STATUS_LABEL: Record<ReviewStatus, string> = { due: "待复习", again: "需要再练", understood: "已理解" };
 
-/** todo：待复习与需要再练 */
-export type ReviewFilter = "todo" | "understood" | "all";
+/** today：今天到期（含已经过期的）；again：需要再练；understood：已理解；all：全部 */
+export type ReviewFilter = "today" | "again" | "understood" | "all";
 
-export const isTodo = (status: ReviewStatus) => status !== "understood";
+export const DAY_MS = 86_400_000;
+
+function startOfDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** 卡片下一次复习的时间（后台总会给出；没有时按加入时到期） */
+export const dueAt = (card: Pick<ReviewCard, "due_at" | "created_at">) => card.due_at ?? card.created_at;
+
+/** 今天到期：下一次复习的时间在本机今天结束之前 */
+export const isDue = (card: Pick<ReviewCard, "due_at" | "created_at">, now: number) => dueAt(card) < startOfDay(now) + DAY_MS;
+
+/** 下一次复习的说明（按本机日期）。 */
+export function dueText(card: Pick<ReviewCard, "due_at" | "created_at">, now: number): string {
+  const due = dueAt(card);
+  const days = Math.round((startOfDay(due) - startOfDay(now)) / DAY_MS);
+  if (days < 0) return `已到期 ${-days} 天`;
+  if (days === 0) return "今天到期";
+  if (days === 1) return "明天再看";
+  if (days < 7) return `${days} 天后再看`;
+  const d = new Date(due);
+  return `${d.getMonth() + 1} 月 ${d.getDate()} 日再看`;
+}
 
 /** 卡片编号：与后台相同的“会话/节点” */
 export const reviewCardId = (studyId: string, nodeId: number) => `${studyId}/${String(nodeId).padStart(10, "0")}`;
 
-export function filterItems(items: ReviewItem[], filter: ReviewFilter): ReviewItem[] {
+export function filterItems(items: ReviewItem[], filter: ReviewFilter, now: number): ReviewItem[] {
   if (filter === "all") return items;
-  if (filter === "understood") return items.filter((i) => i.card.status === "understood");
-  return items.filter((i) => isTodo(i.card.status));
+  if (filter === "today") return items.filter((i) => isDue(i.card, now));
+  return items.filter((i) => i.card.status === filter);
 }
 
-export function counts(items: ReviewItem[]): Record<ReviewFilter, number> {
-  const todo = items.filter((i) => isTodo(i.card.status)).length;
-  return { todo, understood: items.length - todo, all: items.length };
+export function counts(items: ReviewItem[], now: number): Record<ReviewFilter, number> {
+  const n = (f: ReviewFilter) => filterItems(items, f, now).length;
+  return { today: n("today"), again: n("again"), understood: n("understood"), all: items.length };
 }
 
 /** 列表中的位置说明：会话、回合与走棋方（不含着法）。 */
@@ -107,9 +132,9 @@ export function whenText(ts: number | null, now = Date.now()): string {
   return sameDay ? `今天 ${time} 复习过` : `${d.getMonth() + 1} 月 ${d.getDate()} 日复习过`;
 }
 
-/** 在当前筛选的列表中，排在这张卡片之后的下一张待复习卡片（到末尾时从头找）。 */
-export function nextTodoId(items: ReviewItem[], currentId: string | null): string | null {
-  const todo = items.filter((i) => isTodo(i.card.status) && i.card.id !== currentId);
+/** 在当前筛选的列表中，排在这张卡片之后的下一张今天到期的卡片（到末尾时从头找）。 */
+export function nextDueId(items: ReviewItem[], currentId: string | null, now: number): string | null {
+  const todo = items.filter((i) => isDue(i.card, now) && i.card.id !== currentId);
   if (!todo.length) return null;
   const at = items.findIndex((i) => i.card.id === currentId);
   const after = todo.find((i) => items.indexOf(i) > at);
@@ -122,4 +147,80 @@ export function nextTodoId(items: ReviewItem[], currentId: string | null): strin
  */
 export function newerItem(existing: ReviewItem | undefined, incoming: ReviewItem): ReviewItem {
   return existing && existing.card.revision > incoming.card.revision ? existing : incoming;
+}
+
+/** 一次复习的结果（与后台安排间隔的规则相同，见 xq-app schedule.rs） */
+export type AttemptOutcome = "independent" | "missed" | "revealed";
+
+export function outcomeOf(a: ReviewAttempt): AttemptOutcome {
+  if (!a.choice) return "revealed";
+  if (a.goal === "recall") return a.matched ? "independent" : "missed";
+  const v = a.decision?.verdict;
+  if (v === "same_as_record" || v === "reasonable") return "independent";
+  if (v === "noteworthy") return "missed";
+  return a.matched ? "independent" : "missed";
+}
+
+export interface SessionSummary {
+  /** 这组练习的张数 */
+  total: number;
+  /** 这组练习中复习过的张数 */
+  done: number;
+  independent: number;
+  missed: number;
+  revealed: number;
+  /** 复习过的卡片下一次复习的安排，按时间先后 */
+  schedule: { text: string; count: number }[];
+}
+
+/** 一组练习的小结：数字都来自这组练习开始之后的复习记录与卡片的安排。 */
+export function sessionSummary(cards: ReviewCard[], startedAt: number, now: number): SessionSummary {
+  const summary: SessionSummary = { total: cards.length, done: 0, independent: 0, missed: 0, revealed: 0, schedule: [] };
+  const groups = new Map<string, { due: number; count: number }>();
+  for (const card of cards) {
+    const inSession = card.attempts.filter((a) => a.at >= startedAt);
+    const last = inSession[inSession.length - 1];
+    if (!last) continue;
+    summary.done += 1;
+    summary[outcomeOf(last)] += 1;
+    const text = dueText(card, now);
+    const g = groups.get(text) ?? { due: dueAt(card), count: 0 };
+    g.count += 1;
+    groups.set(text, g);
+  }
+  summary.schedule = [...groups.entries()].sort((a, b) => a[1].due - b[1].due).map(([text, g]) => ({ text, count: g.count }));
+  return summary;
+}
+
+/** 小结的文字。 */
+export function summaryText(s: SessionSummary): string {
+  if (!s.done) return `这组 ${s.total} 张还没有复习。`;
+  const parts = [`${s.independent} 张独立选对`, `${s.missed} 张没有选对`, `${s.revealed} 张直接看了答案`].filter((p) => !p.startsWith("0 "));
+  const plan = s.schedule.map((g) => `${g.text} ${g.count} 张`).join("，");
+  const rest = s.total > s.done ? `；还有 ${s.total - s.done} 张没有复习` : "";
+  return `本次完成 ${s.done} 张：${parts.join("，")}${rest}。安排：${plan}。`;
+}
+
+/** 设置中的复习间隔：“1, 3, 7”这样的文字转成天数（后台再检查范围、排序与去重）。 */
+export function parseIntervals(text: string): number[] {
+  return text
+    .split(/[\s,，、]+/)
+    .filter(Boolean)
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+/** 导入学习档案前的预览说明。 */
+export function archivePreviewLines(s: ArchiveSummary): string[] {
+  const d = new Date(s.exported_at);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const when = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const lines = [
+    `导出于 ${when}（版本 ${s.app_version}）`,
+    `学习会话：新增 ${s.studies_new} 个${s.studies_existing ? `；本机已有 ${s.studies_existing} 个，保留本机的版本` : ""}`,
+    `复习卡片：新增 ${s.cards_new} 张；与本机相同 ${s.cards_same} 张；需要合并 ${s.cards_merge} 张`,
+  ];
+  if (s.cards_merge) lines.push("合并时历次复习按时间合在一起，状态、理解与安排取较新的一份");
+  if (s.cards_orphan) lines.push(`其中 ${s.cards_orphan} 张卡片的原会话不在本机也不在档案中：照样导入，可以复习，只是不能打开原局面`);
+  return lines;
 }

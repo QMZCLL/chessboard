@@ -33,6 +33,7 @@ use crate::decision::Intent;
 use crate::decision::PracticeGoal;
 use crate::decision::Reflection;
 use crate::records::Budget;
+use crate::schedule;
 use crate::service::ApiError;
 use crate::service::ApiResult;
 use crate::service::Inner;
@@ -152,10 +153,16 @@ pub struct ReviewCard {
     pub note: String,
     pub attempts: Vec<ReviewAttempt>,
     pub reviewed_at: Option<i64>,
+    /// 下一次复习的时间（见 `schedule`）；早期的卡片没有这一项，返回给界面时按规则推算。
+    #[serde(default)]
+    pub due_at: Option<i64>,
+    /// 复习间隔的档位：独立选对后标为已理解时升一档。
+    #[serde(default)]
+    pub stage: u32,
 }
 
 /// 保留的复习次数。
-const MAX_ATTEMPTS: usize = 20;
+pub(crate) const MAX_ATTEMPTS: usize = 20;
 
 /// 上次退出时还在进行的局面决策比较已经不会完成：标为没有得到结果，返回处理的卡片数。
 pub(crate) fn reset_interrupted_decisions(store: &crate::storage::Store) -> Result<usize, crate::storage::StoreError> {
@@ -298,6 +305,9 @@ impl Inner {
             note: node.note.clone(),
             attempts: Vec::new(),
             reviewed_at: None,
+            // 加入后立即到期
+            due_at: Some(now),
+            stage: 0,
         })
     }
 
@@ -307,8 +317,15 @@ impl Inner {
 
     pub(crate) fn review_item(&self, card: ReviewCard) -> ReviewItem {
         let study = self.store.load_study(&card.study_id).ok().flatten();
-        let source_available = source_available(study.as_ref(), &card);
-        let study_name = study.map(|s| s.name).unwrap_or_else(|| card.study_name.clone());
+        self.item_of(card, study.as_ref())
+    }
+
+    /// 界面看到的卡片：附上原会话的情况；没有安排的早期卡片按规则推算下一次复习的时间。
+    fn item_of(&self, mut card: ReviewCard, study: Option<&Study>) -> ReviewItem {
+        let intervals = self.config_snapshot().review.intervals_days;
+        card.due_at = Some(schedule::due_at(&card, &intervals));
+        let source_available = source_available(study, &card);
+        let study_name = study.map(|s| s.name.clone()).unwrap_or_else(|| card.study_name.clone());
         ReviewItem { card, source_available, study_name }
     }
 
@@ -330,20 +347,20 @@ impl Inner {
         self.store.update_review(id, f)?.ok_or_else(|| ApiError::from("找不到这张复习卡片，可能已经删除"))
     }
 
-    /// 全部卡片：需要再练、待复习在前，同一状态中较久没有复习的在前。
+    /// 全部卡片：先到期的在前；同时到期的，需要再练、待复习在前。
     pub(crate) fn list_reviews(&self) -> ApiResult<Vec<ReviewItem>> {
         let studies: HashMap<String, Study> = self.store.list_studies()?.into_iter().map(|s| (s.id.clone(), s)).collect();
-        let mut cards = self.store.list_reviews()?;
-        cards.sort_by_key(|c| (c.status.order(), c.reviewed_at.unwrap_or(0), c.created_at));
-        Ok(cards
+        let mut items: Vec<ReviewItem> = self
+            .store
+            .list_reviews()?
             .into_iter()
-            .map(|card| {
-                let study = studies.get(&card.study_id);
-                let source_available = source_available(study, &card);
-                let study_name = study.map(|s| s.name.clone()).unwrap_or_else(|| card.study_name.clone());
-                ReviewItem { card, source_available, study_name }
+            .map(|c| {
+                let study = studies.get(&c.study_id);
+                self.item_of(c, study)
             })
-            .collect())
+            .collect();
+        items.sort_by_key(|i| (i.card.due_at, i.card.status.order(), i.card.created_at));
+        Ok(items)
     }
 
     pub(crate) fn review_detail(&self, id: &str) -> ApiResult<ReviewDetail> {
@@ -401,15 +418,22 @@ impl Inner {
     }
 
     /// 只改请求中给出的字段（状态、笔记）；其他字段保持最新的值。
+    /// 标记状态时，按最近一次复习安排下一次复习的时间（见 `schedule`）。
     pub(crate) fn update_review(&self, req: ReviewUpdateRequest) -> ApiResult<ReviewItem> {
+        let intervals = self.config_snapshot().review.intervals_days;
+        let now = now_ms();
         let card = self.modify_card(&req.id, |c| {
             if let Some(status) = req.status {
                 c.status = status;
+                let outcome = schedule::outcome_of(c.attempts.last());
+                let (stage, days) = schedule::next_review(c.stage, status, outcome, &intervals);
+                c.stage = stage;
+                c.due_at = Some(now + i64::from(days) * schedule::DAY_MS);
             }
             if let Some(note) = req.note {
                 c.note = note;
             }
-            c.updated_at = now_ms();
+            c.updated_at = now;
         })?;
         Ok(self.review_item(card))
     }

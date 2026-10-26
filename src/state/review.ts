@@ -1,10 +1,20 @@
 // 复习：卡片列表、当前复习的卡片与这一次的选择。
 // 复习时先只显示局面，用户在棋盘上重新选择（或直接看答案）后，才显示原来的思考与讲解。
 // 练习目标分复现棋谱与局面决策；局面决策的比较在后台进行，完成后推送 review_updated 更新这次复习。
+// 每张卡片有下一次复习的时间（标记状态时由后台安排）；“今天的练习”按顺序复习今天到期的卡片，结束后给出小结。
 import { computed, reactive } from "vue";
 import { api, errorMessage, on } from "../api/backend";
 import type * as T from "../api/types";
-import { counts, filterItems, newerItem, nextTodoId, type ReviewFilter } from "./reviewList";
+import {
+  counts,
+  filterItems,
+  isDue,
+  newerItem,
+  nextDueId,
+  sessionSummary,
+  type ReviewFilter,
+  type SessionSummary,
+} from "./reviewList";
 import { nodeOf, openStudy, safeStorage, selectNode, setMode, study, wb } from "./workbench";
 
 const GOAL_KEY = "xq-review-goal";
@@ -14,7 +24,13 @@ type NoteDraft = { text: string; state: "idle" | "editing" | "saving" | "saved" 
 export const review = reactive({
   items: [] as T.ReviewItem[],
   loaded: false,
-  filter: "todo" as ReviewFilter,
+  filter: "today" as ReviewFilter,
+  /** 计算“今天到期”所用的时刻：载入列表与每次修改卡片时更新 */
+  clock: Date.now(),
+  /** 一组练习：按顺序复习的卡片与开始的时间 */
+  session: null as { ids: string[]; index: number; startedAt: number; label: string } | null,
+  /** 刚结束的一组练习的小结 */
+  summary: null as SessionSummary | null,
   current: null as T.ReviewDetail | null,
   /** choose：在棋盘上重新选择；revealed：已经选择或直接看了答案 */
   phase: "choose" as "choose" | "revealed",
@@ -52,7 +68,7 @@ function queued<R>(id: string, task: () => Promise<R>): Promise<R> {
   return run;
 }
 
-export const reviewCounts = computed(() => counts(review.items));
+export const reviewCounts = computed(() => counts(review.items, review.clock));
 
 /** 这一次复习（揭示之后） */
 export const currentAttempt = computed<T.ReviewAttempt | null>(
@@ -71,7 +87,7 @@ function subscribe() {
   // 局面决策的比较完成后写回这次复习：按修改次数合并，较早的推送不覆盖较新的卡片
   on<T.ReviewItem>("review_updated", (item) => void upsert(item));
 }
-export const shownItems = computed(() => filterItems(review.items, review.filter));
+export const shownItems = computed(() => filterItems(review.items, review.filter, review.clock));
 
 /** 这盘棋中收藏了、但还没有加入复习的着法 */
 export const starredNotInReview = computed(() => {
@@ -95,6 +111,7 @@ function upsert(item: T.ReviewItem): T.ReviewItem {
   if (i >= 0) review.items[i] = item;
   else review.items.push(item);
   if (review.current?.card.id === item.card.id) Object.assign(review.current, item);
+  review.clock = Date.now();
   // 讲解面板显示这一着的复习状态
   if (wb.detail && wb.detail.study_id === item.card.study_id && wb.detail.node.id === item.card.node_id) wb.detail.review = item.card.status;
   return item;
@@ -107,6 +124,7 @@ export async function loadReviews() {
     // 读取列表期间完成的修改不被较早读到的列表覆盖
     const known = new Map(review.items.map((i) => [i.card.id, i]));
     review.items = fresh.map((i) => newerItem(known.get(i.card.id), i));
+    review.clock = Date.now();
     review.loaded = true;
     review.error = null;
   } catch (e) {
@@ -237,6 +255,14 @@ export async function deleteCard(id: string) {
     await api.deleteReview(id);
     const card = review.items.find((i) => i.card.id === id)?.card;
     review.items = review.items.filter((i) => i.card.id !== id);
+    // 练习中删除的卡片不再排在这组里
+    const s = review.session;
+    if (s && s.ids.includes(id)) {
+      const at = s.ids.indexOf(id);
+      s.ids.splice(at, 1);
+      if (at < s.index) s.index -= 1;
+      if (!s.ids.length) review.session = null;
+    }
     if (card && wb.detail && wb.detail.study_id === card.study_id && wb.detail.node.id === card.node_id) wb.detail.review = null;
     if (review.current?.card.id === id) {
       review.current = null;
@@ -248,10 +274,48 @@ export async function deleteCard(id: string) {
   }
 }
 
-export const nextCardId = computed(() => nextTodoId(shownItems.value, review.current?.card.id ?? null));
+/** 下一张：练习中按这组的顺序，否则是列表中下一张今天到期的卡片 */
+export const nextCardId = computed(() => {
+  const s = review.session;
+  if (s) return s.ids[s.index + 1] ?? null;
+  return nextDueId(shownItems.value, review.current?.card.id ?? null, review.clock);
+});
 
 export async function showNext() {
+  const s = review.session;
+  if (s) {
+    if (s.index + 1 >= s.ids.length) return finishSession();
+    s.index += 1;
+    return showCard(s.ids[s.index]);
+  }
   if (nextCardId.value) await showCard(nextCardId.value);
+}
+
+/** 开始一组练习：今天到期的卡片（按到期先后），或需要再练的卡片；size 为空时全部。 */
+export function startSession(kind: "today" | "again", size: number | null) {
+  const now = Date.now();
+  const pool = review.items.filter((i) => (kind === "today" ? isDue(i.card, now) : i.card.status === "again"));
+  const ids = pool.slice(0, size ?? pool.length).map((i) => i.card.id);
+  if (!ids.length) return;
+  const label = kind === "today" ? "今天的练习" : "需要再练的卡片";
+  review.session = { ids, index: 0, startedAt: now, label };
+  review.summary = null;
+  review.filter = kind;
+  void showCard(ids[0]);
+}
+
+/** 结束这组练习，给出小结（只统计这组练习开始之后的复习）。 */
+export function finishSession() {
+  const s = review.session;
+  if (!s) return;
+  void saveNote();
+  const cards = s.ids.map((id) => review.items.find((i) => i.card.id === id)?.card).filter((c): c is T.ReviewCard => !!c);
+  review.summary = sessionSummary(cards, s.startedAt, Date.now());
+  review.session = null;
+}
+
+export function closeSummary() {
+  review.summary = null;
 }
 
 /** 打开原会话中的这一着（看谱学习，显示完整讲解） */

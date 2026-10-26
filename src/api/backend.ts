@@ -163,6 +163,14 @@ export const api = {
   cancelAnalysis: (requestId: string) => call<void>("cancel_analysis", { requestId }),
   cloudLookup: (study_id: string, node_id: number) => call<void>("cloud_lookup", { req: { study_id, node_id } }),
   exportStudy: (id: string) => call<string>("export_study", { id }),
+  /** 学习档案：全部会话与复习卡片（浏览器中返回内容，桌面应用写入文件） */
+  exportArchive: () => call<string>("export_archive"),
+  exportArchiveToFile: (path: string) => call<void>("export_archive_to_file", { path }),
+  /** 预览导入：不改动本机的数据 */
+  previewArchive: (source: T.ArchiveSource) => call<T.ArchiveSummary>("preview_archive", { source }),
+  importArchive: (source: T.ArchiveSource) => call<T.ArchiveSummary>("import_archive", { source }),
+  backupInfo: () => call<T.BackupInfo>("backup_info"),
+  backupNow: () => call<T.BackupInfo>("backup_now"),
   exportStudyToFile: (id: string, path: string) => call<void>("export_study_to_file", { id, path }),
   importFile: (path: string) => call<T.ImportResponse>("import_file", { path }),
   importText: (text: string, name: string | null) => call<T.ImportResponse>("import_text", { text, name }),

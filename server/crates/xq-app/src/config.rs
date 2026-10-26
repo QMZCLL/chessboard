@@ -23,6 +23,22 @@ pub struct AppConfig {
     pub capture: CaptureConfig,
     pub cloud: CloudConfig,
     pub coach: CoachConfig,
+    pub review: ReviewConfig,
+}
+
+/// 复习的安排与学习档案的自动备份。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReviewConfig {
+    /// 复习间隔的档位（天，从小到大）：独立选对后标为已理解时升一档，其余情况用第一档。
+    /// 这是可以调整的初始设计，不是对所有人都最合适的间隔。
+    pub intervals_days: Vec<u32>,
+    /// 自动备份学习档案保留的份数；0 表示不自动备份。
+    pub backup_keep: u32,
+}
+
+impl Default for ReviewConfig {
+    fn default() -> Self { Self { intervals_days: vec![1, 3, 7, 14, 30], backup_keep: 7 } }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,6 +216,7 @@ impl Default for AppConfig {
             capture: CaptureConfig::default(),
             cloud: CloudConfig::default(),
             coach: CoachConfig::default(),
+            review: ReviewConfig::default(),
         }
     }
 }
@@ -268,6 +285,7 @@ impl AppConfig {
         clamp_u32("AI 讲解最大输出", &mut self.coach.max_output_tokens, 300, 8_000);
         clamp_u32("AI 讲解并发数", &mut self.coach.max_parallel_requests, 1, 4);
         clamp_u32("稳定帧数", &mut self.capture.stable_frames, 1, 30);
+        clamp_u32("自动备份份数", &mut self.review.backup_keep, 0, 100);
         clamp_u32("无法解释时等待帧数", &mut self.capture.unexplained_frames, 0, 100);
         if !(0.3..=0.99).contains(&self.capture.confidence_threshold) {
             notes.push("识别置信度阈值超出范围，已恢复为 0.8".into());
@@ -284,6 +302,16 @@ impl AppConfig {
             notes.push("AI 讲解的凭据引用无效，已清除；请重新填写密钥".into());
             self.coach.credential_ref = None;
         }
+        let mut days: Vec<u32> = self.review.intervals_days.iter().copied().filter(|d| (1..=365).contains(d)).collect();
+        days.sort_unstable();
+        days.dedup();
+        if days.is_empty() {
+            notes.push("复习间隔无效，已恢复为 1、3、7、14、30 天".into());
+            days = ReviewConfig::default().intervals_days;
+        } else if days != self.review.intervals_days {
+            notes.push(format!("复习间隔只保留 1～365 天、从小到大排列，已调整为 {days:?} 天"));
+        }
+        self.review.intervals_days = days;
         if !["error", "warn", "info", "debug", "trace"].contains(&self.log_level.as_str()) {
             self.log_level = "info".into();
         }

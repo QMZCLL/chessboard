@@ -17,6 +17,7 @@ use xq_app::compare::CompareRequest;
 use xq_app::engine::EngineState;
 use xq_app::events::EventSink;
 use xq_app::records::Budget;
+use xq_app::archive::ArchiveSource;
 use xq_app::decision::DecisionState;
 use xq_app::decision::Intent;
 use xq_app::decision::PracticeGoal;
@@ -853,10 +854,10 @@ fn review_card_keeps_the_position_and_the_thinking_and_survives_the_study() {
         .unwrap();
     assert_eq!((updated.card.status, updated.card.note.as_str()), (ReviewStatus::Again, "马8进7保护中卒"));
 
-    // 列表：需要再练在前，然后是待复习
+    // 列表按下一次复习的时间：新加入的卡片立即到期，排在明天再看的“需要再练”之前
     service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap();
     let list = service.list_reviews().unwrap();
-    assert_eq!(list.iter().map(|i| i.card.status).collect::<Vec<_>>(), [ReviewStatus::Again, ReviewStatus::Due]);
+    assert_eq!(list.iter().map(|i| i.card.status).collect::<Vec<_>>(), [ReviewStatus::Due, ReviewStatus::Again]);
 
     // 重新启动后仍在；删除会话后卡片保留，仍可复习，只是不能打开原局面
     service.shutdown();
@@ -966,3 +967,118 @@ fn decision_practice_compares_the_choice_in_one_search_and_records_the_intent() 
     assert!(last.error.as_deref().unwrap().contains("退出前没有完成"));
     service.shutdown();
 }
+
+#[test]
+fn marking_a_card_schedules_the_next_review_from_the_latest_attempt() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: Some("复习安排".into()), kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
+    let day = xq_app::schedule::DAY_MS;
+    let attempt = |choice: Option<&str>| {
+        service
+            .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: choice.map(mv), goal: PracticeGoal::Recall, intent: None })
+            .unwrap();
+    };
+    let mark = |status: ReviewStatus| {
+        let before = now();
+        let card = service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(status), note: None }).unwrap().card;
+        (card.stage, (card.due_at.unwrap() - before + day / 2) / day)
+    };
+    // 新卡片立即到期
+    let fresh = service.list_reviews().unwrap().into_iter().find(|i| i.card.id == id).unwrap().card;
+    assert!(fresh.due_at.unwrap() <= now());
+    // 独立选对后标为已理解：升一档（3 天），再一次（7 天）
+    attempt(Some("h2e2"));
+    assert_eq!(mark(ReviewStatus::Understood), (1, 3));
+    attempt(Some("h2e2"));
+    assert_eq!(mark(ReviewStatus::Understood), (2, 7));
+    // 直接看答案后标为已理解：档位不升，明天再看
+    attempt(None);
+    assert_eq!(mark(ReviewStatus::Understood), (2, 1));
+    // 需要再练：回到第一档
+    attempt(Some("b0c2"));
+    assert_eq!(mark(ReviewStatus::Again), (0, 1));
+    // 设置中的档位
+    let mut cfg = service.status().config;
+    cfg.review.intervals_days = vec![2, 5];
+    service.update_config(cfg).unwrap();
+    attempt(Some("h2e2"));
+    assert_eq!(mark(ReviewStatus::Understood), (1, 5));
+    service.shutdown();
+}
+
+#[test]
+fn learning_archive_restores_studies_and_cards_and_merges_reviews() {
+    let rec = Arc::new(Recorder::default());
+    let home = tempfile::tempdir().unwrap();
+    let service = start_with_mock(home.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: Some("档案".into()), kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap();
+    service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Understood), note: Some("架中炮".into()) }).unwrap();
+    let archive = service.export_archive().unwrap();
+
+    // 另一台设备：预览后导入，会话保留原来的编号，卡片仍能打开原局面
+    let other = tempfile::tempdir().unwrap();
+    let restored = start_with_mock(other.path(), "", rec.clone());
+    let text = |t: &str| ArchiveSource::Text { text: t.to_string() };
+    let preview = restored.preview_archive(text(&archive)).unwrap();
+    assert_eq!((preview.studies_new, preview.cards_new, preview.cards_merge), (1, 1, 0));
+    assert!(restored.list_reviews().unwrap().is_empty(), "预览不改动本机的数据");
+    restored.import_archive(text(&archive)).unwrap();
+    let item = restored.list_reviews().unwrap().pop().unwrap();
+    assert!(item.source_available, "原会话一起恢复，编号不变");
+    assert_eq!((item.card.note.as_str(), item.card.status, item.card.attempts.len()), ("架中炮", ReviewStatus::Understood, 1));
+    assert_eq!(item.card.due_at, service.list_reviews().unwrap()[0].card.due_at, "下一次复习的安排一起恢复");
+    assert!(restored.load_study(&sid).is_ok());
+    // 再次导入：已有的会话保留本机版本，卡片相同
+    let again = restored.preview_archive(text(&archive)).unwrap();
+    assert_eq!((again.studies_new, again.studies_existing, again.cards_new, again.cards_same), (0, 1, 0, 1));
+
+    // 原设备之后又复习了一次；导入到另一台设备时合并历次复习
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None, goal: PracticeGoal::Recall, intent: None }).unwrap();
+    restored.update_review(ReviewUpdateRequest { id: id.clone(), status: None, note: Some("另一台设备上的理解".into()) }).unwrap();
+    let newer = service.export_archive().unwrap();
+    assert_eq!(restored.preview_archive(text(&newer)).unwrap().cards_merge, 1);
+    restored.import_archive(text(&newer)).unwrap();
+    let merged = restored.list_reviews().unwrap().pop().unwrap().card;
+    assert_eq!(merged.attempts.len(), 2, "历次复习合在一起");
+
+    // 原会话已删除的卡片照样导入，只是不能打开原局面
+    service.delete_study(&sid).unwrap();
+    let orphan = service.export_archive().unwrap();
+    let third = tempfile::tempdir().unwrap();
+    let fresh = start_with_mock(third.path(), "", rec.clone());
+    assert_eq!(fresh.preview_archive(text(&orphan)).unwrap().cards_orphan, 1);
+    fresh.import_archive(text(&orphan)).unwrap();
+    let item = fresh.list_reviews().unwrap().pop().unwrap();
+    assert!(!item.source_available && item.study_name == "档案");
+    assert!(fresh.review_detail(ReviewRef { id: id.clone() }).is_ok(), "仍可复习");
+    // 不是学习档案
+    assert!(fresh.preview_archive(text("{\"format\":\"xqlink-study\"}")).is_err());
+
+    // 立即备份；有学习数据时，下次启动自动备份当天的一份
+    let info = service.backup_now().unwrap();
+    assert_eq!(info.files.len(), 1);
+    assert!(info.files[0].name.starts_with("xqlink-archive-") && info.files[0].size > 0);
+    fresh.shutdown();
+    drop(fresh);
+    std::fs::remove_dir_all(third.path().join("data").join("backups")).ok();
+    let fresh = start_with_mock(third.path(), "", rec.clone());
+    assert_eq!(fresh.backup_info().files.len(), 1, "启动时自动备份");
+    for s in [service, restored, fresh] {
+        s.shutdown();
+    }
+}
+
+fn now() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 }
