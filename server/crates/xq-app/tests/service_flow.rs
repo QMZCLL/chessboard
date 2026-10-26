@@ -17,6 +17,9 @@ use xq_app::compare::CompareRequest;
 use xq_app::engine::EngineState;
 use xq_app::events::EventSink;
 use xq_app::records::Budget;
+use xq_app::decision::DecisionState;
+use xq_app::decision::Intent;
+use xq_app::decision::PracticeGoal;
 use xq_app::review::ReviewAttemptRequest;
 use xq_app::review::ReviewRef;
 use xq_app::review::ReviewStatus;
@@ -837,11 +840,11 @@ fn review_card_keeps_the_position_and_the_thinking_and_survives_the_study() {
     let id = card.id.clone();
     let detail = service.review_detail(ReviewRef { id: id.clone() }).unwrap();
     assert!(detail.legal_moves.contains(&mv("h9g7")) && detail.legal_moves.contains(&mv("b9c7")));
-    let err = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")) }).unwrap_err();
+    let err = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap_err();
     assert!(err.message.contains("不合规则"), "{}", err.message);
-    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h9g7")) }).unwrap();
+    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h9g7")), goal: PracticeGoal::Recall, intent: None }).unwrap();
     assert!(tried.card.attempts.last().unwrap().matched);
-    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None }).unwrap();
+    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None, goal: PracticeGoal::Recall, intent: None }).unwrap();
     assert_eq!(tried.card.attempts.len(), 2);
     assert!(!tried.card.attempts[1].matched, "直接看答案不算走对");
     assert!(tried.card.reviewed_at.is_some());
@@ -868,5 +871,98 @@ fn review_card_keeps_the_position_and_the_thinking_and_survives_the_study() {
     service.delete_review(ReviewRef { id: id.clone() }).unwrap();
     assert_eq!(service.list_reviews().unwrap().len(), 1);
     assert!(service.review_detail(ReviewRef { id }).is_err());
+    service.shutdown();
+}
+
+#[test]
+fn decision_practice_compares_the_choice_in_one_search_and_records_the_intent() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: Some("局面决策".into()), kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let second = service.apply_move(MoveRequest { study_id: sid.clone(), parent: first, mv: mv("h9g7"), variation: false }).unwrap().node_id.unwrap();
+    for node in [first, second] {
+        rec.wait("讲解完成", |e, v| e == "explanation_updated" && v["node_id"] == node && v["record"]["pending"] == false);
+    }
+    let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: second }).unwrap().card.id;
+
+    // 讲解的搜索都已结束；按复习的搜索顺序换上脚本并重启引擎：
+    // 多候选搜索找出引擎参考（马8进7）；之后每次是对这次的选择、棋谱着法与引擎参考的同一次搜索
+    let script = "@go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        info depth 5 seldepth 5 multipv 2 score cp 0 nodes 10 time 1 pv b9c7 h0g2\n\
+        bestmove h9g7\n\
+        @go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        info depth 5 seldepth 5 multipv 2 score cp 0 nodes 10 time 1 pv b9c7 h0g2\n\
+        bestmove h9g7\n\
+        @go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        info depth 5 seldepth 5 multipv 2 score cp -80 nodes 10 time 1 pv i6i5 e2e6\n\
+        bestmove h9g7\n\
+        @go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        bestmove h9g7\n";
+    std::fs::write(dir.path().join("engine").join("mock-uci-script.txt"), script).unwrap();
+    service.restart_engine();
+    std::thread::sleep(Duration::from_millis(300));
+    wait_engine(&service);
+    let attempt = |choice: &str, goal: PracticeGoal, intent: Option<Intent>| {
+        rec.clear();
+        let item = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv(choice)), goal, intent }).unwrap();
+        item.card.attempts.last().unwrap().clone()
+    };
+    let decided = |what: &str| {
+        let v = rec.wait(what, |e, v| {
+            e == "review_updated" && v["card"]["attempts"].as_array().unwrap().last().unwrap()["decision"]["state"] != "pending"
+        });
+        v["card"]["attempts"].as_array().unwrap().last().unwrap()["decision"].clone()
+    };
+
+    // 与棋谱不同、但与参考评分接近：意图与这一步实际的规则事实同时记下
+    let a = attempt("b9c7", PracticeGoal::Decision, Some(Intent::Develop));
+    assert_eq!(a.decision.as_ref().unwrap().state, DecisionState::Pending, "比较在后台进行");
+    let reflection = a.reflection.unwrap();
+    assert_eq!(reflection.checks, vec!["这一步把右马从底线走出"]);
+    assert!(!reflection.changes.is_empty());
+    let d = decided("接近参考");
+    assert_eq!(d["verdict"], "reasonable", "{d}");
+    assert_eq!(d["reference"]["notation"], "马8进7");
+    assert!(d["points"][0].as_str().unwrap().contains("评分接近"), "{d}");
+    assert!(d["conditions"].as_str().unwrap().contains("指定着法单独分析"));
+
+    // 明显低于参考：留下值得注意的问题，并给出对方的回应（多候选搜索的结果已缓存，不再搜索）
+    attempt("i6i5", PracticeGoal::Decision, None);
+    let d = decided("值得注意");
+    assert_eq!(d["verdict"], "noteworthy", "{d}");
+    assert!(d["points"][1].as_str().unwrap().contains("对方最值得关注的回应是炮五进四"), "{d}");
+
+    // 复现棋谱：只看是否与棋谱相同，不搜索
+    let recall = attempt("b9c7", PracticeGoal::Recall, None);
+    assert!(recall.decision.is_none() && !recall.matched);
+    // 与棋谱一致
+    attempt("h9g7", PracticeGoal::Decision, None);
+    assert_eq!(decided("与棋谱一致")["verdict"], "same_as_record");
+    let log = std::fs::read_to_string(dir.path().join("engine").join("mock-uci-commands.log")).unwrap();
+    assert!(log.contains("searchmoves b9c7 h9g7") && log.contains("searchmoves h9g7 i6i5"), "{log}");
+
+    // 退出时还在进行的比较，重新启动后标为没有得到结果（同一组着法的搜索已有缓存，这里直接写入进行中的状态）
+    service.shutdown();
+    drop(service);
+    {
+        let store = xq_app::storage::Store::open(&dir.path().join("data").join("xqlink.redb")).unwrap();
+        store
+            .update_review(&id, |c| c.attempts.last_mut().unwrap().decision.as_mut().unwrap().state = DecisionState::Pending)
+            .unwrap();
+    }
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let card = service.review_detail(ReviewRef { id }).unwrap().item.card;
+    let last = card.attempts.last().unwrap().decision.as_ref().unwrap();
+    assert_eq!(last.state, DecisionState::Failed);
+    assert!(last.error.as_deref().unwrap().contains("退出前没有完成"));
     service.shutdown();
 }

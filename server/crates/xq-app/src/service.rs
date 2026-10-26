@@ -208,6 +208,11 @@ impl AppService {
             Ok(n) => tracing::info!("{n} 条 AI 讲解请求在上次退出时中断，已标为可重新生成"),
             Err(e) => warn!("整理中断的 AI 讲解请求失败：{e}"),
         }
+        match crate::review::reset_interrupted_decisions(&store) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} 张复习卡片的局面决策比较在上次退出时中断"),
+            Err(e) => warn!("整理中断的局面决策比较失败：{e}"),
+        }
         match store.reset_interrupted_asks(now_ms()) {
             Ok(0) => {}
             Ok(n) => tracing::info!("{n} 个追问在上次退出时中断，已标为可重新提问"),
@@ -610,7 +615,7 @@ impl AppService {
     pub fn review_detail(&self, r: ReviewRef) -> ApiResult<ReviewDetail> { self.inner.review_detail(&r.id) }
 
     pub fn review_attempt(&self, req: ReviewAttemptRequest) -> ApiResult<ReviewItem> {
-        self.inner.review_attempt(&req.id, req.choice)
+        self.inner.review_attempt(req)
     }
 
     pub fn update_review(&self, req: ReviewUpdateRequest) -> ApiResult<ReviewItem> { self.inner.update_review(req) }

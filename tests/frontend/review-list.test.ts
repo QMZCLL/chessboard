@@ -1,10 +1,12 @@
 // 复习卡片的分组、计数与文字：列表不透露答案，复习后的文字说明这次与原来的思考。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ReviewCard, ReviewItem, ReviewStatus } from "../../src/api/types.ts";
+import type { DecisionFeedback, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus } from "../../src/api/types.ts";
 import {
+  attemptMark,
   attemptText,
   counts,
+  decisionTitle,
   filterItems,
   historyText,
   newerItem,
@@ -12,6 +14,7 @@ import {
   positionLabel,
   reviewCardId,
   suggestedStatus,
+  suggestionFor,
   thinkingText,
   whenText,
 } from "../../src/state/reviewList.ts";
@@ -98,4 +101,28 @@ test("同一张卡片的两份数据：修改次数多的较新，较早读取�
   // 次数相同时内容相同，采用后到的（原会话的名称等可能已经改变）
   const renamed = { ...saved, study_name: "改名后的会话" };
   assert.equal(newerItem(saved, renamed), renamed);
+});
+
+test("局面决策：只在留下值得注意的问题时建议再练，与棋谱一致不自动建议已理解", () => {
+  const base = { at: 1, choice: { mv: "b9c7", notation: "马2进3" }, matched: false, intent: null, reflection: null, decision: null };
+  const decided = (verdict: DecisionFeedback["verdict"], state: DecisionFeedback["state"] = "ready"): ReviewAttempt => ({
+    ...base,
+    goal: "decision",
+    decision: { state, verdict, reference: null, points: [], conditions: null, error: state === "failed" ? "引擎不可用" : null },
+  });
+  // 复现棋谱沿用是否与棋谱一致
+  assert.equal(suggestionFor({ ...base, goal: "recall", matched: true }), "understood");
+  assert.equal(suggestionFor({ ...base, goal: "recall" }), "again");
+  assert.equal(suggestionFor(decided("noteworthy")), "again");
+  for (const v of ["same_as_record", "reasonable", "unclear"] as const) assert.equal(suggestionFor(decided(v)), null, v);
+  assert.equal(suggestionFor(decided(null, "pending")), null);
+  // 标题：进行中、没有结果、四种结论
+  assert.match(decisionTitle(decided(null, "pending").decision!), /正在用同一次搜索比较/);
+  assert.equal(decisionTitle(decided(null, "failed").decision!), "没有得到比较结果：引擎不可用");
+  assert.equal(decisionTitle(decided("reasonable").decision!), "与棋谱不同，但本次分析中与参考评分接近");
+  // 最近几次的记号
+  assert.deepEqual(attemptMark({ ...base, goal: "recall", matched: true }), { text: "✓", tone: "ok" });
+  assert.deepEqual(attemptMark(decided("reasonable")), { text: "○", tone: "ok" });
+  assert.deepEqual(attemptMark(decided("noteworthy")), { text: "△", tone: "miss" });
+  assert.deepEqual(attemptMark(decided(null, "pending")), { text: "·", tone: "neutral" });
 });

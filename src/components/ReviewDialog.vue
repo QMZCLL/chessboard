@@ -2,14 +2,17 @@
 // 复习：左侧是卡片列表，右侧复习一张卡片。先只显示局面，在棋盘上重新选择（或直接看答案）后，
 // 再显示这次的结果、原来的思考与看过的提示、棋谱中的这一着与程序讲解，并记下自己的理解或疑问。
 // 列表与复习开始前都不显示棋谱中的着法和笔记，避免提前透露答案。
+// 练习目标：复现棋谱看是否与棋谱一致；局面决策把这次的选择与参考放在同一次搜索中比较。
+// 落子前可以选择意图，揭示后与这一步实际的规则事实对照。
 import { computed, onMounted } from "vue";
-import { NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NRadioButton, NRadioGroup, NTag, NTooltip, useMessage } from "naive-ui";
+import { NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NRadioButton, NRadioGroup, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
 import XiangqiBoard from "./XiangqiBoard.vue";
 import VerdictTag from "./VerdictTag.vue";
 import type { ReviewStatus } from "../api/types";
 import { errorMessage } from "../api/backend";
 import {
   addStarred,
+  currentAttempt,
   deleteCard,
   currentNote,
   editNote,
@@ -20,6 +23,7 @@ import {
   review,
   reviewCounts,
   saveNote,
+  setGoal,
   setStatus,
   shownItems,
   showCard,
@@ -27,7 +31,20 @@ import {
   starredNotInReview,
   submitChoice,
 } from "../state/review";
-import { attemptText, historyText, positionLabel, STATUS_LABEL, suggestedStatus, thinkingText, whenText } from "../state/reviewList";
+import {
+  attemptMark,
+  attemptText,
+  decisionTitle,
+  GOAL_LABEL,
+  historyText,
+  INTENT_LABEL,
+  INTENTS,
+  positionLabel,
+  STATUS_LABEL,
+  suggestionFor,
+  thinkingText,
+  whenText,
+} from "../state/reviewList";
 import { study, wb } from "../state/workbench";
 import { sideLabel } from "../utils/board";
 
@@ -40,12 +57,21 @@ const LEVEL = { basic: "规则讲解", partial: "分析不完整", detailed: "�
 
 // 揭示后：实线是棋谱中的这一着，虚线是这次的选择（与棋谱不同时）
 const answerArrows = computed(() => (revealed.value && card.value ? [card.value.answer.mv] : []));
+const attempt = computed(() => currentAttempt.value);
 const choiceArrow = computed(() => {
-  const a = review.attempt;
+  const a = attempt.value;
   return revealed.value && a?.choice && !a.matched ? a.choice.mv : null;
 });
 const lastMove = computed(() => card.value?.history[card.value.history.length - 1]?.mv ?? null);
-const suggestion = computed(() => (review.attempt ? suggestedStatus(review.attempt.matched) : null));
+const suggestion = computed(() => (attempt.value ? suggestionFor(attempt.value) : null));
+const decision = computed(() => attempt.value?.decision ?? null);
+const decisionTone = computed(() => {
+  const v = decision.value?.verdict;
+  if (v === "same_as_record" || v === "reasonable") return "ok";
+  return v === "noteworthy" ? "miss" : "";
+});
+const GOAL_HINT = { recall: "回忆这盘棋当时怎样走，看是否与棋谱一致", decision: "作出自己的选择，与棋谱着法、引擎参考在同一次搜索中比较" } as const;
+const toggleIntent = (i: (typeof INTENTS)[number]) => (review.intent = review.intent === i ? null : i);
 const hints = computed(() => card.value?.thinking?.hints ?? null);
 const recent = computed(() => (card.value?.attempts ?? []).slice(-8));
 
@@ -163,15 +189,66 @@ onMounted(loadReviews);
           <div class="side">
             <template v-if="!revealed">
               <p class="prompt" data-testid="review-prompt">轮到{{ sideLabel(card.side) }}走。在棋盘上走出你的选择，再对照原来的思考与讲解。</p>
+              <div class="goal">
+                <n-radio-group :value="review.goal" size="small" data-testid="review-goal" @update:value="setGoal">
+                  <n-radio-button value="recall" data-testid="review-goal-recall">{{ GOAL_LABEL.recall }}</n-radio-button>
+                  <n-radio-button value="decision" data-testid="review-goal-decision">{{ GOAL_LABEL.decision }}</n-radio-button>
+                </n-radio-group>
+                <span class="muted">{{ GOAL_HINT[review.goal] }}</span>
+              </div>
+              <div class="intent" data-testid="review-intent">
+                <span class="muted">我这一步主要想（可以不选）：</span>
+                <n-button
+                  v-for="i in INTENTS"
+                  :key="i"
+                  size="tiny"
+                  :type="review.intent === i ? 'primary' : 'default'"
+                  :secondary="review.intent !== i"
+                  :aria-pressed="review.intent === i"
+                  :data-testid="`review-intent-${i}`"
+                  @click="toggleIntent(i)"
+                >
+                  {{ INTENT_LABEL[i] }}
+                </n-button>
+              </div>
               <n-button size="small" data-testid="review-reveal" :disabled="review.busy" @click="submitChoice(null)">不走子，直接看答案</n-button>
               <p v-if="card.attempts.length" class="muted">已经复习 {{ card.attempts.length }} 次。</p>
             </template>
 
             <template v-else>
-              <p class="result" :class="{ ok: review.attempt?.matched }" data-testid="review-result">
-                {{ attemptText(review.attempt?.choice ?? null, !!review.attempt?.matched, card.answer.notation) }}
+              <!-- 局面决策中与棋谱不同不等于走错：这一行只陈述事实，结论看下面的比较 -->
+              <p class="result" :class="{ ok: attempt?.matched, neutral: attempt?.goal === 'decision' && !attempt?.matched }" data-testid="review-result">
+                {{ attemptText(attempt?.choice ?? null, !!attempt?.matched, card.answer.notation) }}
               </p>
               <p class="legend muted">棋盘上实线箭头是棋谱中的着法<template v-if="choiceArrow">，虚线是这次的选择</template>。</p>
+
+              <!-- 局面决策：同一次搜索中的比较，评分与结论都由程序给出 -->
+              <template v-if="decision">
+                <h4>局面决策</h4>
+                <p class="decision" :class="decisionTone" data-testid="review-decision">
+                  <n-spin v-if="decision.state === 'pending'" :size="12" /> {{ decisionTitle(decision) }}
+                </p>
+                <ul v-if="decision.points.length" class="claims" data-testid="review-decision-points">
+                  <li v-for="t in decision.points" :key="t">{{ t }}</li>
+                </ul>
+                <p v-if="decision.state === 'ready' && decision.reference" class="muted">对照着法：{{ decision.reference.notation }}</p>
+                <p v-if="decision.conditions" class="conditions">分析条件：{{ decision.conditions }}</p>
+              </template>
+
+              <!-- 原来的意图与这一步实际的变化（规则事实） -->
+              <template v-if="attempt?.reflection">
+                <h4 data-testid="review-intent-title">
+                  {{ attempt.reflection.intent ? `你原来想：${INTENT_LABEL[attempt.reflection.intent]}` : "你的选择实际改变了什么" }}
+                </h4>
+                <ul v-if="attempt.reflection.checks.length" class="claims" data-testid="review-intent-checks">
+                  <li v-for="t in attempt.reflection.checks" :key="t">{{ t }}</li>
+                </ul>
+                <h5 v-if="attempt.reflection.intent && attempt.reflection.changes.length">这一步实际改变了</h5>
+                <ul v-if="attempt.reflection.changes.length" class="claims" data-testid="review-changes">
+                  <li v-for="t in attempt.reflection.changes" :key="t">{{ t }}</li>
+                </ul>
+                <p v-else class="muted">这一步没有可以单独说明的直接作用。</p>
+              </template>
 
               <h4>原来的思考</h4>
               <p data-testid="review-thinking">{{ thinkingText(card.thinking) }}</p>
@@ -230,7 +307,17 @@ onMounted(loadReviews);
               </p>
 
               <p v-if="recent.length > 1" class="muted" data-testid="review-attempts">
-                最近 {{ recent.length }} 次复习：<span v-for="(a, i) in recent" :key="i" :class="a.matched ? 'ok' : 'miss'">{{ a.matched ? "✓" : "✗" }}</span>
+                最近 {{ recent.length }} 次复习：<span
+                  v-for="(a, i) in recent"
+                  :key="i"
+                  :class="attemptMark(a).tone"
+                  :title="`${GOAL_LABEL[a.goal]}${a.decision?.verdict ? ` · ${decisionTitle(a.decision)}` : ''}`"
+                  >{{ attemptMark(a).text }}</span
+                >
+                <span class="legend">（复现棋谱 ✓ 一致 ✗ 不同；局面决策 ○ 一致或接近 △ 值得注意）</span>
+              </p>
+              <p v-if="attempt?.goal === 'decision' && !suggestion && decision?.state !== 'pending'" class="muted" data-testid="review-self-check">
+                与棋谱一致或评分接近，不等于已经理解：对照原来的意图与这一步实际的变化，说得清理由再标为“已理解”。
               </p>
 
               <div class="actions">
@@ -397,11 +484,30 @@ onMounted(loadReviews);
 .ok {
   color: var(--accent-green);
 }
+.result.neutral {
+  color: var(--text-primary);
+}
 .miss {
   color: var(--accent-amber);
 }
 .legend {
   font-size: 12px;
+}
+.goal,
+.intent {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.decision {
+  font-weight: 600;
+}
+.decision.ok {
+  color: var(--accent-green);
+}
+.decision.miss {
+  color: var(--accent-amber);
 }
 .hints,
 .claims {

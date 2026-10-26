@@ -353,7 +353,7 @@ export async function boot() {
   wb.booted = true;
 }
 
-function safeStorage(op: "get" | "set", key: string, value?: string): string | null {
+export function safeStorage(op: "get" | "set", key: string, value?: string): string | null {
   try {
     if (op === "get") return localStorage.getItem(key);
     localStorage.setItem(key, value ?? "");

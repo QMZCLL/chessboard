@@ -290,10 +290,42 @@ export interface ReviewBasis {
   explained_at: number;
 }
 
+/** 练习目标：recall 复现棋谱（看是否与棋谱一致）；decision 局面决策（与参考在同一次搜索中比较） */
+export type PracticeGoal = "recall" | "decision";
+
+/** 落子前选择的意图 */
+export type Intent = "develop" | "defend" | "capture" | "check" | "improve" | "other";
+
+/** 这一步实际改变了什么（规则事实），以及与意图的对照 */
+export interface Reflection {
+  intent: Intent | null;
+  checks: string[];
+  changes: string[];
+}
+
+/** same_as_record 与棋谱一致；reasonable 与参考评分接近；noteworthy 留下值得注意的问题；unclear 分析尚不充分 */
+export type DecisionVerdict = "same_as_record" | "reasonable" | "noteworthy" | "unclear";
+
+export interface DecisionFeedback {
+  state: "pending" | "ready" | "failed";
+  verdict: DecisionVerdict | null;
+  /** 用来对照的着法：棋谱着法，或本次搜索中明显好于它的引擎参考 */
+  reference: ReviewMove | null;
+  /** 程序给出的说明 */
+  points: string[];
+  conditions: string | null;
+  error: string | null;
+}
+
 export interface ReviewAttempt {
+  /** 复习的时间（同一张卡片内唯一，比较结果按它写回） */
   at: number;
   choice: ReviewMove | null;
   matched: boolean;
+  goal: PracticeGoal;
+  intent: Intent | null;
+  reflection: Reflection | null;
+  decision: DecisionFeedback | null;
 }
 
 export interface ReviewCard {

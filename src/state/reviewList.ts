@@ -1,6 +1,6 @@
 // 复习卡片的分组、计数与文字说明。只依赖数据，便于单独测试。
 // 列表与复习开始前都不显示棋谱中的着法、笔记等可能透露答案的内容。
-import type { ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
+import type { DecisionFeedback, DecisionVerdict, Intent, PracticeGoal, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
 
 export const STATUS_LABEL: Record<ReviewStatus, string> = { due: "待复习", again: "需要再练", understood: "已理解" };
 
@@ -52,6 +52,50 @@ export function attemptText(choice: { notation: string } | null, matched: boolea
 
 /** 复习之后建议的状态：走对了建议标为已理解，否则建议再练。 */
 export const suggestedStatus = (matched: boolean): ReviewStatus => (matched ? "understood" : "again");
+
+export const GOAL_LABEL: Record<PracticeGoal, string> = { recall: "复现棋谱", decision: "局面决策" };
+
+export const INTENT_LABEL: Record<Intent, string> = {
+  develop: "出子",
+  defend: "防守",
+  capture: "吃子",
+  check: "将军",
+  improve: "改善位置",
+  other: "其他",
+};
+export const INTENTS = Object.keys(INTENT_LABEL) as Intent[];
+
+export const VERDICT_TEXT: Record<DecisionVerdict, string> = {
+  same_as_record: "与棋谱一致",
+  reasonable: "与棋谱不同，但本次分析中与参考评分接近",
+  noteworthy: "这个选择留下了一个值得注意的问题",
+  unclear: "分析尚不充分，暂不评价走法优劣",
+};
+
+/** 局面决策反馈的标题（比较还在进行或没有得到结果时说明原因）。 */
+export function decisionTitle(d: DecisionFeedback): string {
+  if (d.state === "pending") return "正在用同一次搜索比较你的选择、棋谱着法与引擎参考…";
+  if (d.state === "failed" || !d.verdict) return `没有得到比较结果：${d.error ?? "原因不明"}`;
+  return VERDICT_TEXT[d.verdict];
+}
+
+/**
+ * 复习之后建议的状态。复现棋谱按是否与棋谱一致；局面决策只在留下值得注意的问题时建议再练：
+ * 与棋谱一致或评分接近不等于已经理解，由用户对照意图与实际变化后自己判断。
+ */
+export function suggestionFor(a: ReviewAttempt): ReviewStatus | null {
+  if (a.goal === "recall") return suggestedStatus(a.matched);
+  return a.decision?.verdict === "noteworthy" ? "again" : null;
+}
+
+/** 最近几次复习中的一次：练习目标与结果的简短标记。 */
+export function attemptMark(a: ReviewAttempt): { text: string; tone: "ok" | "miss" | "neutral" } {
+  if (a.goal === "recall" || !a.choice) return a.matched ? { text: "✓", tone: "ok" } : { text: "✗", tone: "miss" };
+  const v = a.decision?.verdict;
+  if (v === "same_as_record" || v === "reasonable") return { text: "○", tone: "ok" };
+  if (v === "noteworthy") return { text: "△", tone: "miss" };
+  return { text: "·", tone: "neutral" };
+}
 
 /** 上次复习的时间。 */
 export function whenText(ts: number | null, now = Date.now()): string {

@@ -105,8 +105,15 @@ impl Inner {
     pub(crate) fn conditions(
         &self, study: &Study, node: NodeId, budget: Budget, searchmoves: Vec<Move>,
     ) -> ApiResult<AnalysisConditions> {
-        let identity = self.engine_identity()?;
         let (base_fen, moves) = study.engine_history(node)?;
+        self.conditions_from(base_fen, moves, budget, searchmoves)
+    }
+
+    /// 从给定的起始局面与着法历史得到分析条件（复习卡片的局面可能已经不在任何会话中）。
+    pub(crate) fn conditions_from(
+        &self, base_fen: String, moves: Vec<Move>, budget: Budget, searchmoves: Vec<Move>,
+    ) -> ApiResult<AnalysisConditions> {
+        let identity = self.engine_identity()?;
         let cfg = self.config_snapshot();
         let (depth, movetime_ms) = match budget {
             Budget::Quick => (cfg.analysis.quick_depth, cfg.analysis.quick_time_ms),

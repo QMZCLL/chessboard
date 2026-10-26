@@ -13,6 +13,7 @@ pub const CLOUD_RESULT: &str = "cloud_result";
 pub const COACH_UPDATED: &str = "coach_updated";
 pub const COMPARISON_UPDATED: &str = "comparison_updated";
 pub const COACH_ANSWER_UPDATED: &str = "coach_answer_updated";
+pub const REVIEW_UPDATED: &str = "review_updated";
 
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: &str, payload: serde_json::Value);

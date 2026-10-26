@@ -1,10 +1,13 @@
 // 复习：卡片列表、当前复习的卡片与这一次的选择。
 // 复习时先只显示局面，用户在棋盘上重新选择（或直接看答案）后，才显示原来的思考与讲解。
+// 练习目标分复现棋谱与局面决策；局面决策的比较在后台进行，完成后推送 review_updated 更新这次复习。
 import { computed, reactive } from "vue";
-import { api, errorMessage } from "../api/backend";
+import { api, errorMessage, on } from "../api/backend";
 import type * as T from "../api/types";
 import { counts, filterItems, newerItem, nextTodoId, type ReviewFilter } from "./reviewList";
-import { nodeOf, openStudy, selectNode, setMode, study, wb } from "./workbench";
+import { nodeOf, openStudy, safeStorage, selectNode, setMode, study, wb } from "./workbench";
+
+const GOAL_KEY = "xq-review-goal";
 
 type NoteDraft = { text: string; state: "idle" | "editing" | "saving" | "saved" | "failed"; error: string | null };
 
@@ -15,8 +18,12 @@ export const review = reactive({
   current: null as T.ReviewDetail | null,
   /** choose：在棋盘上重新选择；revealed：已经选择或直接看了答案 */
   phase: "choose" as "choose" | "revealed",
-  /** 这一次的选择（直接看答案时为空）与是否与棋谱相同 */
-  attempt: null as { choice: T.ReviewMove | null; matched: boolean } | null,
+  /** 练习目标（记住上次的选择） */
+  goal: (safeStorage("get", GOAL_KEY) === "decision" ? "decision" : "recall") as T.PracticeGoal,
+  /** 落子前选择的意图（可以不选） */
+  intent: null as T.Intent | null,
+  /** 这一次复习的时间：结果从当前卡片的复习记录中按它取出，局面决策的比较完成后随卡片更新 */
+  attemptAt: null as number | null,
   busy: false,
   error: null as string | null,
   /** 理解或疑问的草稿与保存状态，按卡片保存：切换卡片后，迟到的保存结果只影响它自己的卡片 */
@@ -46,6 +53,24 @@ function queued<R>(id: string, task: () => Promise<R>): Promise<R> {
 }
 
 export const reviewCounts = computed(() => counts(review.items));
+
+/** 这一次复习（揭示之后） */
+export const currentAttempt = computed<T.ReviewAttempt | null>(
+  () => review.current?.card.attempts.find((a) => a.at === review.attemptAt) ?? null,
+);
+
+export function setGoal(goal: T.PracticeGoal) {
+  review.goal = goal;
+  safeStorage("set", GOAL_KEY, goal);
+}
+
+let subscribed = false;
+function subscribe() {
+  if (subscribed) return;
+  subscribed = true;
+  // 局面决策的比较完成后写回这次复习：按修改次数合并，较早的推送不覆盖较新的卡片
+  on<T.ReviewItem>("review_updated", (item) => void upsert(item));
+}
 export const shownItems = computed(() => filterItems(review.items, review.filter));
 
 /** 这盘棋中收藏了、但还没有加入复习的着法 */
@@ -76,6 +101,7 @@ function upsert(item: T.ReviewItem): T.ReviewItem {
 }
 
 export async function loadReviews() {
+  subscribe();
   try {
     const fresh = await api.listReviews();
     // 读取列表期间完成的修改不被较早读到的列表覆盖
@@ -128,7 +154,8 @@ export async function showCard(id: string) {
     if (v !== view) return;
     review.current = { ...detail, ...latest };
     review.phase = "choose";
-    review.attempt = null;
+    review.attemptAt = null;
+    review.intent = null;
     review.error = null;
     // 正在编辑或保存失败的草稿保留，其余按卡片中保存的内容显示
     const draft = review.notes[id];
@@ -148,12 +175,12 @@ export async function submitChoice(choice: T.Move | null) {
   const id = current.card.id;
   review.busy = true;
   try {
-    const item = await queued(id, () => api.reviewAttempt(id, choice));
+    const { goal, intent } = review;
+    const item = await queued(id, () => api.reviewAttempt(id, choice, goal, intent));
     upsert(item);
     // 等待期间换了卡片（或再试一次）：这次的结果只记在它自己的卡片上
     if (v !== view || review.current?.card.id !== id) return;
-    const last = item.card.attempts[item.card.attempts.length - 1];
-    review.attempt = { choice: last?.choice ?? null, matched: !!last?.matched };
+    review.attemptAt = item.card.attempts[item.card.attempts.length - 1]?.at ?? null;
     review.phase = "revealed";
   } catch (e) {
     if (v === view) review.error = errorMessage(e);
@@ -166,7 +193,8 @@ export async function submitChoice(choice: T.Move | null) {
 export function retryCard() {
   view += 1;
   review.phase = "choose";
-  review.attempt = null;
+  review.attemptAt = null;
+  review.intent = null;
   review.busy = false;
 }
 

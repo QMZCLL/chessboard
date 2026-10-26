@@ -48,6 +48,7 @@ const EVENTS = [
   "coach_updated",
   "comparison_updated",
   "coach_answer_updated",
+  "review_updated",
 ] as const;
 export type EventName = (typeof EVENTS)[number];
 
@@ -152,7 +153,8 @@ export const api = {
   listReviews: () => call<T.ReviewItem[]>("list_reviews"),
   reviewDetail: (id: string) => call<T.ReviewDetail>("review_detail", { req: { id } }),
   /** 记一次复习；choice 为空表示没有走子，直接查看原来的思考与讲解 */
-  reviewAttempt: (id: string, choice: T.Move | null) => call<T.ReviewItem>("review_attempt", { req: { id, choice } }),
+  reviewAttempt: (id: string, choice: T.Move | null, goal: T.PracticeGoal, intent: T.Intent | null) =>
+    call<T.ReviewItem>("review_attempt", { req: { id, choice, goal, intent } }),
   updateReview: (id: string, patch: { status?: T.ReviewStatus; note?: string }) =>
     call<T.ReviewItem>("update_review", { req: { id, status: patch.status ?? null, note: patch.note ?? null } }),
   deleteReview: (id: string) => call<void>("delete_review", { req: { id } }),

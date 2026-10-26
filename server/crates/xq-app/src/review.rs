@@ -5,6 +5,9 @@
 //! 棋谱中的这一着、程序讲解的要点与依据（连同分析条件与讲解规则版本）、用户自己的理解或疑问。
 //! 原会话之后被修改或删除，卡片仍按快照复习；只有“打开原局面”需要原会话中的这一着仍在。
 //! 第一版只有三种状态（待复习、需要再练、已理解），不做间隔调度。
+//!
+//! 每次复习有一个练习目标：复现棋谱只看是否与棋谱相同；局面决策把这次的选择与棋谱着法、引擎参考
+//! 放在同一次搜索中比较（见 `decision`）。落子前可以选择意图，揭示后与这一步实际的规则事实对照。
 
 use std::collections::HashMap;
 
@@ -12,6 +15,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use xq_core::Color;
 use xq_core::Move;
+use xq_core::explain::ExplainContext;
 use xq_core::explain::ExplainLevel;
 use xq_core::explain::Verdict;
 use xq_core::explain::hints::UsedHints;
@@ -22,6 +26,12 @@ use xq_core::study::NodeId;
 use xq_core::study::Orientation;
 use xq_core::study::Study;
 
+use crate::decision;
+use crate::decision::DecisionFeedback;
+use crate::decision::DecisionState;
+use crate::decision::Intent;
+use crate::decision::PracticeGoal;
+use crate::decision::Reflection;
 use crate::records::Budget;
 use crate::service::ApiError;
 use crate::service::ApiResult;
@@ -90,9 +100,22 @@ pub struct ReviewBasis {
 /// 一次复习：重新选择的着法（直接看答案时为空）。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewAttempt {
+    /// 复习的时间；同一张卡片内唯一，局面决策的比较结果按它写回。
     pub at: i64,
     pub choice: Option<ReviewMove>,
     pub matched: bool,
+    /// 练习目标；早期的记录没有这一项，为复现棋谱。
+    #[serde(default)]
+    pub goal: PracticeGoal,
+    /// 落子前选择的意图。
+    #[serde(default)]
+    pub intent: Option<Intent>,
+    /// 这一步实际改变了什么，以及与意图的对照；直接看答案时为空。
+    #[serde(default)]
+    pub reflection: Option<Reflection>,
+    /// 局面决策中与棋谱着法、引擎参考的比较；复现棋谱或直接看答案时为空。
+    #[serde(default)]
+    pub decision: Option<DecisionFeedback>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +157,25 @@ pub struct ReviewCard {
 /// 保留的复习次数。
 const MAX_ATTEMPTS: usize = 20;
 
+/// 上次退出时还在进行的局面决策比较已经不会完成：标为没有得到结果，返回处理的卡片数。
+pub(crate) fn reset_interrupted_decisions(store: &crate::storage::Store) -> Result<usize, crate::storage::StoreError> {
+    let mut count = 0;
+    for card in store.list_reviews()? {
+        let pending = |a: &ReviewAttempt| a.decision.as_ref().is_some_and(|d| d.state == DecisionState::Pending);
+        if !card.attempts.iter().any(pending) {
+            continue;
+        }
+        store.update_review(&card.id, |c| {
+            for d in c.attempts.iter_mut().filter_map(|a| a.decision.as_mut()).filter(|d| d.state == DecisionState::Pending) {
+                d.state = DecisionState::Failed;
+                d.error = Some("上次比较在应用退出前没有完成".into());
+            }
+        })?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ReviewItem {
     pub card: ReviewCard,
@@ -161,6 +203,10 @@ pub struct ReviewAttemptRequest {
     pub id: String,
     /// 重新选择的着法；为空表示没有走子，直接查看原来的思考与讲解。
     pub choice: Option<Move>,
+    #[serde(default)]
+    pub goal: PracticeGoal,
+    #[serde(default)]
+    pub intent: Option<Intent>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -259,7 +305,7 @@ impl Inner {
         self.store.load_review(id)?.ok_or_else(|| ApiError::from("找不到这张复习卡片，可能已经删除"))
     }
 
-    fn review_item(&self, card: ReviewCard) -> ReviewItem {
+    pub(crate) fn review_item(&self, card: ReviewCard) -> ReviewItem {
         let study = self.store.load_study(&card.study_id).ok().flatten();
         let source_available = source_available(study.as_ref(), &card);
         let study_name = study.map(|s| s.name).unwrap_or_else(|| card.study_name.clone());
@@ -317,28 +363,40 @@ impl Inner {
         Ok(ReviewDetail { item: self.review_item(card), legal_moves })
     }
 
-    /// 记一次复习：重新选择的着法是否与棋谱相同。
-    pub(crate) fn review_attempt(&self, id: &str, choice: Option<Move>) -> ApiResult<ReviewItem> {
+    /// 记一次复习：重新选择的着法是否与棋谱相同，这一步实际改变了什么；局面决策还在后台开始比较，
+    /// 完成后写回这次复习并推送 `review_updated`。
+    pub(crate) fn review_attempt(&self, req: ReviewAttemptRequest) -> ApiResult<ReviewItem> {
+        let id = req.id.as_str();
         // 局面与棋谱着法在卡片建立后不再改变，可以先读出来检查着法
         let card = self.load_card(id)?;
         let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
-        let choice = match choice {
+        let choice = match req.choice {
             Some(mv) if rules::legal_moves(&pos).contains(&mv) => {
                 Some(ReviewMove { mv, notation: notation::move_to_chinese(&pos, mv).unwrap_or_else(|_| mv.iccs()) })
             }
             Some(mv) => return Err(format!("{} 在这个局面中不合规则", mv.iccs()).into()),
             None => None,
         };
+        let ctx = ExplainContext { history_complete: card.history_complete, repetition_count: 1 };
+        let reflection = choice.as_ref().map(|m| decision::reflect(&pos, m.mv, req.intent, &ctx));
+        let deciding = req.goal == PracticeGoal::Decision && choice.is_some();
         let now = now_ms();
+        let mut at = now;
         let card = self.modify_card(id, |c| {
             let matched = choice.as_ref().is_some_and(|m| m.mv == c.answer.mv);
-            c.attempts.push(ReviewAttempt { at: now, choice, matched });
+            // 同一毫秒内的两次复习也要能区分：比较结果按时间写回
+            at = c.attempts.last().map_or(now, |a| now.max(a.at + 1));
+            let decision = deciding.then(decision::pending);
+            c.attempts.push(ReviewAttempt { at, choice: choice.clone(), matched, goal: req.goal, intent: req.intent, reflection, decision });
             if c.attempts.len() > MAX_ATTEMPTS {
                 c.attempts.drain(..c.attempts.len() - MAX_ATTEMPTS);
             }
             c.reviewed_at = Some(now);
             c.updated_at = now;
         })?;
+        if let (true, Some(m)) = (deciding, &choice) {
+            self.review_decide(&card, at, m.mv);
+        }
         Ok(self.review_item(card))
     }
 
