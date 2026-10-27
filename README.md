@@ -135,6 +135,20 @@ pnpm test:e2e                                # 全部场景；也可指定，如
 
 场景列表、运行方式与编写说明见 [tests/e2e/README.md](./tests/e2e/README.md)。
 
+### 打包
+
+GitHub Actions 的“打包”工作流生成 Windows 安装包（MSI）与 Linux 安装包（deb）：推送 `v` 开头的标签时运行，
+工作流在默认分支上时也可以在 Actions 页面选择“打包 → Run workflow”手动运行；完成后在这次运行页面底部的 Artifacts 中下载。
+也可以在本机打包：
+
+```bash
+pnpm build:cpu                                            # Windows（需在 Windows 上运行）：server/target/release/bundle/msi/
+pnpm tauri build --config server/tauri.linux.conf.json    # Linux：server/target/release/bundle/deb/
+```
+
+安装包带有 Pikafish 引擎（x86-64-bmi2 构建），不含屏幕识别所需的模型与 ONNX Runtime（见 [libs/README.md](./libs/README.md)），
+也没有代码签名：Windows 首次运行时如出现 SmartScreen 提示，选择“更多信息 → 仍要运行”。
+
 ## 🛠 开发计划
 
 - [x] 任意局面建立、行棋方与棋盘方向分离、完整局面校验
