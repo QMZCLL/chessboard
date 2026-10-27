@@ -1,7 +1,7 @@
 // 复习卡片的分组、计数与文字：列表不透露答案，复习后的文字说明这次与原来的思考。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ArchiveSummary, DecisionFeedback, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus } from "../../src/api/types.ts";
+import type { ArchiveSummary, DecisionFeedback, ReviewAttempt, ReviewCard, ReviewIssue, ReviewItem, ReviewStatus, Theme } from "../../src/api/types.ts";
 import {
   archivePreviewLines,
   attemptMark,
@@ -11,17 +11,21 @@ import {
   decisionTitle,
   dueText,
   filterItems,
+  hasTopic,
   historyText,
   newerItem,
   nextDueId,
   parseIntervals,
   positionLabel,
+  recommendation,
   reviewCardId,
   suggestedStatus,
   sessionSummary,
   suggestionFor,
   summaryText,
   thinkingText,
+  topicLabel,
+  topics,
   whenText,
 } from "../../src/state/reviewList.ts";
 
@@ -199,4 +203,25 @@ test("局面决策：只在留下值得注意的问题时建议再练，与棋�
   assert.deepEqual(attemptMark(decided("reasonable")), { text: "○", tone: "ok" });
   assert.deepEqual(attemptMark(decided("noteworthy")), { text: "△", tone: "miss" });
   assert.deepEqual(attemptMark(decided(null, "pending")), { text: "·", tone: "neutral" });
+});
+
+test("专题：用户确认的问题在前，推荐只按同一个问题标记到两张以上", () => {
+  const withTopics = (id: string, themes: Theme[], issues: ReviewIssue[]): ReviewItem => {
+    const base = item(id, "due");
+    return { ...base, card: { ...base.card, issues }, themes: themes.map((theme) => ({ theme, why: "依据" })) };
+  };
+  const items = [
+    withTopics("a", ["protection", "recapture"], ["missed_protection"]),
+    withTopics("b", ["protection"], ["missed_protection", "missed_reply"]),
+    withTopics("c", ["lines"], []),
+  ];
+  assert.deepEqual(
+    topics(items).map((t) => `${t.label}×${t.count}`),
+    // 张数相同时按主题的固定顺序
+    ["我标记的：没有注意保护关系×2", "我标记的：没有考虑对方的回应×1", "保护关系变化×2", "炮架与线路变化×1", "吃子后的回吃关系×1"],
+  );
+  assert.ok(hasTopic(items[0], "theme:recapture") && !hasTopic(items[2], "issue:missed_reply"));
+  assert.equal(topicLabel("theme:king_safety"), "应将与将帅安全");
+  assert.deepEqual(recommendation(items), { key: "issue:missed_protection", issue: "missed_protection", count: 2 });
+  assert.equal(recommendation(items.slice(1)), null, "只标记一张时不推荐");
 });

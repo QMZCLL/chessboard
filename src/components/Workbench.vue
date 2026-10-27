@@ -6,6 +6,7 @@ import BoardArea from "./BoardArea.vue";
 import CaptureDialog from "./CaptureDialog.vue";
 import CoachBatchDialog from "./CoachBatchDialog.vue";
 import ReviewDialog from "./ReviewDialog.vue";
+import GameReportDialog from "./GameReportDialog.vue";
 import ExplanationPanel from "./ExplanationPanel.vue";
 import MoveTree from "./MoveTree.vue";
 import NewStudyDialog from "./NewStudyDialog.vue";
@@ -211,6 +212,7 @@ onBeforeUnmount(stopResize);
     <CaptureDialog />
     <CoachBatchDialog />
     <ReviewDialog />
+    <GameReportDialog />
     <SettingsDrawer />
   </div>
 </template>

@@ -11,9 +11,12 @@ import {
   isDue,
   newerItem,
   nextDueId,
+  hasTopic,
   sessionSummary,
+  topicLabel,
   type ReviewFilter,
   type SessionSummary,
+  type TopicKey,
 } from "./reviewList";
 import { nodeOf, openStudy, safeStorage, selectNode, setMode, study, wb } from "./workbench";
 
@@ -224,6 +227,11 @@ export async function setStatus(id: string, status: T.ReviewStatus) {
   upsert(await queued(id, () => api.updateReview(id, { status })));
 }
 
+/** 保存用户确认的问题（整组替换），与这张卡片的其他修改依次发送。 */
+export async function setIssues(id: string, issues: T.ReviewIssue[]) {
+  upsert(await queued(id, () => api.updateReview(id, { issues })));
+}
+
 export function editNote(text: string) {
   const id = review.current?.card.id;
   if (!id) return;
@@ -291,16 +299,17 @@ export async function showNext() {
   if (nextCardId.value) await showCard(nextCardId.value);
 }
 
-/** 开始一组练习：今天到期的卡片（按到期先后），或需要再练的卡片；size 为空时全部。 */
-export function startSession(kind: "today" | "again", size: number | null) {
+/** 开始一组练习：今天到期的卡片（按到期先后）、需要再练的卡片，或某个专题的卡片；size 为空时全部。 */
+export function startSession(kind: "today" | "again" | TopicKey, size: number | null) {
   const now = Date.now();
-  const pool = review.items.filter((i) => (kind === "today" ? isDue(i.card, now) : i.card.status === "again"));
+  const pick = (i: T.ReviewItem) => (kind === "today" ? isDue(i.card, now) : kind === "again" ? i.card.status === "again" : hasTopic(i, kind));
+  const pool = review.items.filter(pick);
   const ids = pool.slice(0, size ?? pool.length).map((i) => i.card.id);
   if (!ids.length) return;
-  const label = kind === "today" ? "今天的练习" : "需要再练的卡片";
+  const label = kind === "today" ? "今天的练习" : kind === "again" ? "需要再练的卡片" : `专题：${topicLabel(kind)}`;
   review.session = { ids, index: 0, startedAt: now, label };
   review.summary = null;
-  review.filter = kind;
+  review.filter = kind === "today" || kind === "again" ? kind : "all";
   void showCard(ids[0]);
 }
 

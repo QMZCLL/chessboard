@@ -1,7 +1,7 @@
 // 复习卡片的分组、计数与文字说明。只依赖数据，便于单独测试。
 // 列表与复习开始前都不显示棋谱中的着法、笔记等可能透露答案的内容。
 // “今天到期”按本机日期计算：下一次复习的时间在今天结束之前（含已经过期的）。
-import type { ArchiveSummary, DecisionFeedback, DecisionVerdict, Intent, PracticeGoal, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
+import type { ArchiveSummary, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
 
 export const STATUS_LABEL: Record<ReviewStatus, string> = { due: "待复习", again: "需要再练", understood: "已理解" };
 
@@ -223,4 +223,52 @@ export function archivePreviewLines(s: ArchiveSummary): string[] {
   if (s.cards_merge) lines.push("合并时历次复习按时间合在一起，状态、理解与安排取较新的一份");
   if (s.cards_orphan) lines.push(`其中 ${s.cards_orphan} 张卡片的原会话不在本机也不在档案中：照样导入，可以复习，只是不能打开原局面`);
   return lines;
+}
+
+export const THEME_LABEL: Record<Theme, string> = {
+  king_safety: "应将与将帅安全",
+  threatened: "受攻击棋子的处理",
+  protection: "保护关系变化",
+  lines: "炮架与线路变化",
+  recapture: "吃子后的回吃关系",
+};
+
+export const ISSUE_LABEL: Record<ReviewIssue, string> = {
+  missed_threat: "没有检查对方的直接威胁",
+  missed_protection: "没有注意保护关系",
+  missed_recapture: "没有算清吃子后的回吃",
+  missed_lines: "没有注意线路与炮架",
+  missed_reply: "没有考虑对方的回应",
+};
+export const ISSUES = Object.keys(ISSUE_LABEL) as ReviewIssue[];
+
+/** 专题：程序建议的主题，或用户自己确认的问题 */
+export type TopicKey = `theme:${Theme}` | `issue:${ReviewIssue}`;
+
+export function topicLabel(key: TopicKey): string {
+  const [kind, name] = key.split(":") as ["theme" | "issue", string];
+  return kind === "theme" ? THEME_LABEL[name as Theme] : `我标记的：${ISSUE_LABEL[name as ReviewIssue]}`;
+}
+
+export function hasTopic(item: ReviewItem, key: TopicKey): boolean {
+  const [kind, name] = key.split(":");
+  return kind === "theme" ? item.themes.some((t) => t.theme === name) : item.card.issues.includes(name as ReviewIssue);
+}
+
+/** 有卡片的专题与张数：用户确认的问题在前，各自按张数从多到少。 */
+export function topics(items: ReviewItem[]): { key: TopicKey; label: string; count: number }[] {
+  const keys: TopicKey[] = [...ISSUES.map((i) => `issue:${i}` as const), ...(Object.keys(THEME_LABEL) as Theme[]).map((t) => `theme:${t}` as const)];
+  const list = keys.map((key) => ({ key, label: topicLabel(key), count: items.filter((i) => hasTopic(i, key)).length })).filter((t) => t.count > 0);
+  const rank = (k: TopicKey) => (k.startsWith("issue:") ? 0 : 1);
+  return list.sort((a, b) => rank(a.key) - rank(b.key) || b.count - a.count);
+}
+
+/** 推荐练习：同一个问题标记在两张以上的卡片上（只按用户自己确认的问题推荐） */
+export function recommendation(items: ReviewItem[]): { key: TopicKey; issue: ReviewIssue; count: number } | null {
+  let best: { key: TopicKey; issue: ReviewIssue; count: number } | null = null;
+  for (const issue of ISSUES) {
+    const count = items.filter((i) => i.card.issues.includes(issue)).length;
+    if (count >= 2 && (!best || count > best.count)) best = { key: `issue:${issue}`, issue, count };
+  }
+  return best;
 }

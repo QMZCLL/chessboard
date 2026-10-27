@@ -11,6 +11,7 @@ use xq_app::api::*;
 use xq_app::archive::ArchiveSource;
 use xq_app::archive::ArchiveSummary;
 use xq_app::archive::BackupInfo;
+use xq_app::report::GameReport;
 use xq_app::capture::CaptureState;
 use xq_app::compare::CompareRequest;
 use xq_app::compare::CompareView;
@@ -258,6 +259,12 @@ pub async fn cloud_lookup(state: State<'_, AppService>, req: NodeRef) -> ApiResu
 pub async fn export_study_to_file(state: State<'_, AppService>, id: String, path: PathBuf) -> ApiResult<()> {
     let s = service(&state);
     blocking(move || s.export_study_to_file(&id, &path)).await
+}
+
+#[tauri::command]
+pub async fn game_report(state: State<'_, AppService>, id: String) -> ApiResult<GameReport> {
+    let s = service(&state);
+    blocking(move || s.game_report(&id)).await
 }
 
 #[tauri::command]

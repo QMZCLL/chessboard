@@ -69,6 +69,18 @@ watch(
       <n-button size="tiny" quaternary :disabled="latestNode === null || latestNode === wb.selected" @click="latestNode !== null && selectNode(latestNode)">
         <template #icon><Icon name="latest" :size="13" /></template>回到最新局面
       </n-button>
+      <!-- 先想后讲中报告会透露尚未揭示的着法与评价 -->
+      <n-tooltip placement="bottom">
+        <template #trigger>
+          <!-- 禁用的按钮不响应鼠标，外面包一层以显示原因 -->
+          <span>
+            <n-button size="tiny" quaternary :disabled="wb.mode === 'think'" data-testid="report-open" @click="wb.dialogs.report = true">
+              <template #icon><Icon name="book" :size="13" /></template>本局报告
+            </n-button>
+          </span>
+        </template>
+        {{ wb.mode === "think" ? "先想后讲中打开报告会透露尚未揭示的着法；切换到看谱学习后查看" : "选出这盘棋最值得复盘的几处局面" }}
+      </n-tooltip>
       <n-tooltip v-if="coach?.enabled" placement="bottom">
         <template #trigger>
           <n-button size="tiny" quaternary class="batch" data-testid="coach-batch-open" @click="wb.dialogs.coachBatch = true">

@@ -155,8 +155,10 @@ export const api = {
   /** 记一次复习；choice 为空表示没有走子，直接查看原来的思考与讲解 */
   reviewAttempt: (id: string, choice: T.Move | null, goal: T.PracticeGoal, intent: T.Intent | null) =>
     call<T.ReviewItem>("review_attempt", { req: { id, choice, goal, intent } }),
-  updateReview: (id: string, patch: { status?: T.ReviewStatus; note?: string }) =>
-    call<T.ReviewItem>("update_review", { req: { id, status: patch.status ?? null, note: patch.note ?? null } }),
+  updateReview: (id: string, patch: { status?: T.ReviewStatus; note?: string; issues?: T.ReviewIssue[] }) =>
+    call<T.ReviewItem>("update_review", { req: { id, status: patch.status ?? null, note: patch.note ?? null, issues: patch.issues ?? null } }),
+  /** 整局报告 */
+  gameReport: (id: string) => call<T.GameReport>("game_report", { id }),
   deleteReview: (id: string) => call<void>("delete_review", { req: { id } }),
   analyzePosition: (study_id: string, node_id: number, budget: T.Budget, request_id: string) =>
     call<void>("analyze_position", { req: { study_id, node_id, budget, request_id } }),

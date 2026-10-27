@@ -359,6 +359,8 @@ export interface ReviewCard {
   due_at: number | null;
   /** 复习间隔的档位：独立选对后标为已理解时升一档 */
   stage: number;
+  /** 用户自己确认的问题 */
+  issues: ReviewIssue[];
 }
 
 export interface ReviewItem {
@@ -367,6 +369,48 @@ export interface ReviewItem {
   source_available: boolean;
   /** 原会话当前的名称 */
   study_name: string;
+  /** 程序根据这一着的规则事实建议的主题（附依据） */
+  themes: ThemeTag[];
+}
+
+/** 局面主题：应将与将帅安全、受攻击棋子的处理、保护关系变化、炮架与线路变化、吃子后的回吃 */
+export type Theme = "king_safety" | "threatened" | "protection" | "lines" | "recapture";
+export interface ThemeTag {
+  theme: Theme;
+  why: string;
+}
+/** 用户自己确认的问题 */
+export type ReviewIssue = "missed_threat" | "missed_protection" | "missed_recapture" | "missed_lines" | "missed_reply";
+
+export interface KeyPosition {
+  node_id: number;
+  ply: number;
+  /** 如“第 3 回合 · 红方 马二进三” */
+  label: string;
+  /** 入选的依据（程序给出的说明） */
+  reasons: string[];
+  /** 讲解中的一句话结论 */
+  summary: string;
+  review: ReviewStatus | null;
+}
+
+export interface ReportItem {
+  node_id: number;
+  label: string;
+  text: string;
+}
+
+/** 整局报告：筛选与统计都由程序完成，文字取自已经生成的讲解 */
+export interface GameReport {
+  study_id: string;
+  study_name: string;
+  moves: number;
+  detailed: number;
+  practice: { practiced: number; matched: number; hinted: number; revealed: number };
+  key_positions: KeyPosition[];
+  good_choices: ReportItem[];
+  to_recheck: ReportItem[];
+  notes: string[];
 }
 
 export interface ReviewDetail extends ReviewItem {

@@ -15,10 +15,12 @@ pub mod events;
 pub mod llm;
 mod pipeline;
 pub mod records;
+pub mod report;
 pub mod review;
 pub mod schedule;
 mod service;
 pub mod storage;
+pub mod topics;
 mod transfer;
 
 pub use service::APP_VERSION;

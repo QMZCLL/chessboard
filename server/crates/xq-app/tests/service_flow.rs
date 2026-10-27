@@ -22,6 +22,8 @@ use xq_app::decision::DecisionState;
 use xq_app::decision::Intent;
 use xq_app::decision::PracticeGoal;
 use xq_app::review::ReviewAttemptRequest;
+use xq_app::topics::Issue;
+use xq_app::topics::Theme;
 use xq_app::review::ReviewRef;
 use xq_app::review::ReviewStatus;
 use xq_app::review::ReviewUpdateRequest;
@@ -850,7 +852,7 @@ fn review_card_keeps_the_position_and_the_thinking_and_survives_the_study() {
     assert!(!tried.card.attempts[1].matched, "直接看答案不算走对");
     assert!(tried.card.reviewed_at.is_some());
     let updated = service
-        .update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Again), note: Some("马8进7保护中卒".into()) })
+        .update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Again), note: Some("马8进7保护中卒".into()), issues: None })
         .unwrap();
     assert_eq!((updated.card.status, updated.card.note.as_str()), (ReviewStatus::Again, "马8进7保护中卒"));
 
@@ -987,7 +989,7 @@ fn marking_a_card_schedules_the_next_review_from_the_latest_attempt() {
     };
     let mark = |status: ReviewStatus| {
         let before = now();
-        let card = service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(status), note: None }).unwrap().card;
+        let card = service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(status), note: None, issues: None }).unwrap().card;
         (card.stage, (card.due_at.unwrap() - before + day / 2) / day)
     };
     // 新卡片立即到期
@@ -1025,7 +1027,7 @@ fn learning_archive_restores_studies_and_cards_and_merges_reviews() {
     let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
     let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
     service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap();
-    service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Understood), note: Some("架中炮".into()) }).unwrap();
+    service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Understood), note: Some("架中炮".into()), issues: None }).unwrap();
     let archive = service.export_archive().unwrap();
 
     // 另一台设备：预览后导入，会话保留原来的编号，卡片仍能打开原局面
@@ -1047,7 +1049,7 @@ fn learning_archive_restores_studies_and_cards_and_merges_reviews() {
 
     // 原设备之后又复习了一次；导入到另一台设备时合并历次复习
     service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None, goal: PracticeGoal::Recall, intent: None }).unwrap();
-    restored.update_review(ReviewUpdateRequest { id: id.clone(), status: None, note: Some("另一台设备上的理解".into()) }).unwrap();
+    restored.update_review(ReviewUpdateRequest { id: id.clone(), status: None, note: Some("另一台设备上的理解".into()), issues: None }).unwrap();
     let newer = service.export_archive().unwrap();
     assert_eq!(restored.preview_archive(text(&newer)).unwrap().cards_merge, 1);
     restored.import_archive(text(&newer)).unwrap();
@@ -1082,3 +1084,61 @@ fn learning_archive_restores_studies_and_cards_and_merges_reviews() {
 }
 
 fn now() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 }
+
+#[test]
+fn game_report_picks_key_positions_from_practice_and_marks() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: Some("整局报告".into()), kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let apply = |parent: xq_core::study::NodeId, m: &str, variation: bool| {
+        service.apply_move(MoveRequest { study_id: sid.clone(), parent, mv: mv(m), variation }).unwrap().node_id.unwrap()
+    };
+    let first = apply(ROOT, "h2e2", false);
+    let second = apply(first, "h9g7", false);
+    let third = apply(second, "h0g2", false);
+    // 先想后讲：第 1 着走对；第 2 着用了两级提示、走了马2进3（试走分支）；第 3 着收藏
+    let practice = |node: xq_core::study::NodeId, hints: u8, choice: &str| {
+        service
+            .record_practice(PracticeRequest {
+                study_id: sid.clone(),
+                node_id: node,
+                hints_used: hints,
+                revealed_directly: false,
+                first_choice: Some(mv(choice)),
+                hints: None,
+            })
+            .unwrap();
+    };
+    practice(first, 0, "h2e2");
+    apply(first, "b9c7", true);
+    practice(second, 2, "b9c7");
+    service.set_note(NoteRequest { study_id: sid.clone(), node_id: third, note: String::new(), starred: true }).unwrap();
+    service.add_review(NodeRef { study_id: sid.clone(), node_id: third }).unwrap();
+
+    let report = service.game_report(&sid).unwrap();
+    assert_eq!((report.moves, report.practice.practiced, report.practice.matched, report.practice.hinted), (3, 2, 1, 1));
+    let keys: Vec<_> = report.key_positions.iter().map(|k| (k.node_id, k.label.as_str())).collect();
+    assert_eq!(keys, [(second, "第 1 回合 · 黑方 马8进7"), (third, "第 2 回合 · 红方 马二进三")], "按着法顺序");
+    let reasons = &report.key_positions[0].reasons;
+    assert!(reasons.contains(&"先想后讲：第一步走了马2进3，与棋谱不同".to_string()) && reasons.contains(&"先想后讲：用了 2 级提示".to_string()), "{reasons:?}");
+    assert_eq!(report.key_positions[1].reasons, ["收藏"]);
+    assert_eq!(report.key_positions[1].review, Some(ReviewStatus::Due), "已在复习中的局面标明状态");
+    assert_eq!(report.good_choices.len(), 1);
+    assert_eq!(report.good_choices[0].text, "先想后讲中第一步与棋谱一致：炮二平五");
+    // 没有完整的引擎分析时如实说明，也不按评价入选
+    assert!(report.notes.iter().any(|n| n.contains("主线 3 着中 0 着有完整的引擎分析")), "{:?}", report.notes);
+    assert!(report.notes.iter().any(|n| n.contains("关键局面只有 2 处")));
+
+    // 卡片附带程序根据规则事实建议的主题；用户确认的问题整组保存（去重、按固定顺序）
+    let item = service.list_reviews().unwrap().pop().unwrap();
+    assert!(item.themes.iter().any(|t| t.theme == Theme::Protection && t.why.starts_with("这一步保护了")), "{:?}", item.themes);
+    let id = item.card.id;
+    let issues = vec![Issue::MissedReply, Issue::MissedThreat, Issue::MissedThreat];
+    let card = service.update_review(ReviewUpdateRequest { id, status: None, note: None, issues: Some(issues) }).unwrap().card;
+    assert_eq!(card.issues, [Issue::MissedThreat, Issue::MissedReply]);
+    service.shutdown();
+}

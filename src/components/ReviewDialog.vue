@@ -9,7 +9,7 @@ import { computed, ref } from "vue";
 import { NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NRadioButton, NRadioGroup, NSelect, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
 import XiangqiBoard from "./XiangqiBoard.vue";
 import VerdictTag from "./VerdictTag.vue";
-import type { ReviewStatus } from "../api/types";
+import type { ReviewIssue, ReviewStatus } from "../api/types";
 import { errorMessage } from "../api/backend";
 import {
   addStarred,
@@ -27,6 +27,7 @@ import {
   reviewCounts,
   saveNote,
   setGoal,
+  setIssues,
   setStatus,
   shownItems,
   showCard,
@@ -44,7 +45,13 @@ import {
   historyText,
   INTENT_LABEL,
   INTENTS,
+  ISSUE_LABEL,
+  ISSUES,
   positionLabel,
+  recommendation,
+  THEME_LABEL,
+  topics,
+  type TopicKey,
   STATUS_LABEL,
   suggestionFor,
   summaryText,
@@ -87,6 +94,20 @@ const SIZES = [
   { label: "全部", value: 0 },
 ];
 const session = computed(() => review.session);
+const topic = ref<TopicKey | null>(null);
+const topicOptions = computed(() => topics(review.items).map((t) => ({ label: `${t.label}（${t.count} 张）`, value: t.key })));
+const recommended = computed(() => recommendation(review.items));
+
+async function toggleIssue(issue: ReviewIssue) {
+  const c = card.value;
+  if (!c) return;
+  const issues = c.issues.includes(issue) ? c.issues.filter((i) => i !== issue) : [...c.issues, issue];
+  try {
+    await setIssues(c.id, issues);
+  } catch (e) {
+    message.error(errorMessage(e));
+  }
+}
 const nextLabel = computed(() => {
   const s = session.value;
   if (!s) return "下一张";
@@ -148,7 +169,13 @@ onMounted(loadReviews);
           <span data-testid="review-session-progress"><strong>{{ session.label }}</strong> · 第 {{ session.index + 1 }} / {{ session.ids.length }} 张</span>
           <n-button text type="primary" size="small" data-testid="review-finish" @click="finishSession">结束并查看小结</n-button>
         </div>
-        <div v-else class="session-start">
+        <template v-else>
+        <!-- 推荐：只按用户自己确认的问题，写明依据 -->
+        <div v-if="recommended" class="recommend" data-testid="review-recommend">
+          你有 {{ recommended.count }} 张卡片标记了“{{ ISSUE_LABEL[recommended.issue] }}”。
+          <n-button text type="primary" size="small" data-testid="review-recommend-start" @click="startSession(recommended.key, null)">练这一组</n-button>
+        </div>
+        <div class="session-start">
           <n-button size="small" type="primary" :disabled="!reviewCounts.today" data-testid="review-start-today" @click="startSession('today', sessionSize || null)">
             开始今天的练习
           </n-button>
@@ -157,6 +184,11 @@ onMounted(loadReviews);
             只练需要再练的 {{ reviewCounts.again }} 张
           </n-button>
         </div>
+        <div v-if="topicOptions.length" class="session-start">
+          <n-select v-model:value="topic" size="small" :options="topicOptions" placeholder="按专题练习" clearable class="topic" data-testid="review-topic" />
+          <n-button size="small" :disabled="!topic" data-testid="review-start-topic" @click="topic && startSession(topic, null)">练这个专题</n-button>
+        </div>
+        </template>
         <n-button v-if="starredNotInReview.length" size="small" quaternary class="add-starred" data-testid="review-add-starred" @click="addFromStarred">
           把这盘棋收藏的 {{ starredNotInReview.length }} 着加入复习
         </n-button>
@@ -332,6 +364,29 @@ onMounted(loadReviews);
               </template>
               <p v-else class="muted">加入复习时这一着的讲解还没有完成<template v-if="current.source_available">，可以打开原局面查看</template>。</p>
 
+              <template v-if="current.themes.length">
+                <h4>这一步涉及的主题</h4>
+                <ul class="claims" data-testid="review-themes">
+                  <li v-for="t in current.themes" :key="t.theme"><strong>{{ THEME_LABEL[t.theme] }}</strong>：{{ t.why }}</li>
+                </ul>
+                <p class="muted">主题由程序根据棋谱中这一着的规则事实建议。</p>
+              </template>
+              <h4>我当时的问题（自己确认，可多选）</h4>
+              <div class="issues" data-testid="review-issues">
+                <n-button
+                  v-for="i in ISSUES"
+                  :key="i"
+                  size="tiny"
+                  :type="card.issues.includes(i) ? 'primary' : 'default'"
+                  :secondary="!card.issues.includes(i)"
+                  :aria-pressed="card.issues.includes(i)"
+                  :data-testid="`review-issue-${i}`"
+                  @click="toggleIssue(i)"
+                >
+                  {{ ISSUE_LABEL[i] }}
+                </n-button>
+              </div>
+
               <h4>你的理解或疑问</h4>
               <n-input
                 :value="currentNote?.text ?? ''"
@@ -427,6 +482,21 @@ onMounted(loadReviews);
 }
 .session-start .size {
   width: 84px;
+}
+.session-start .topic {
+  flex: 1;
+  min-width: 0;
+}
+.recommend {
+  font-size: 13px;
+  padding: 6px var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--tag-gray-bg);
+}
+.issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .summary h3 {
   margin: 0 0 var(--sp-2);

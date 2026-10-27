@@ -34,6 +34,9 @@ use crate::decision::PracticeGoal;
 use crate::decision::Reflection;
 use crate::records::Budget;
 use crate::schedule;
+use crate::topics;
+use crate::topics::Issue;
+use crate::topics::ThemeTag;
 use crate::service::ApiError;
 use crate::service::ApiResult;
 use crate::service::Inner;
@@ -159,6 +162,9 @@ pub struct ReviewCard {
     /// 复习间隔的档位：独立选对后标为已理解时升一档。
     #[serde(default)]
     pub stage: u32,
+    /// 用户自己确认的问题（见 `topics`）。
+    #[serde(default)]
+    pub issues: Vec<Issue>,
 }
 
 /// 保留的复习次数。
@@ -190,6 +196,8 @@ pub struct ReviewItem {
     pub source_available: bool,
     /// 原会话当前的名称（可能已改名）；原会话不在时为加入时的名称。
     pub study_name: String,
+    /// 程序根据这一着的规则事实建议的主题（附依据）。
+    pub themes: Vec<ThemeTag>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -221,12 +229,15 @@ pub struct ReviewUpdateRequest {
     pub id: String,
     pub status: Option<ReviewStatus>,
     pub note: Option<String>,
+    /// 用户确认的问题（整组替换）。
+    #[serde(default)]
+    pub issues: Option<Vec<Issue>>,
 }
 
 pub fn card_id(study_id: &str, node_id: NodeId) -> String { format!("{study_id}/{node_id:010}") }
 
 /// 回合数：根局面黑先时第一着就是第一回合的黑方。
-fn turn_of(ply: u32, root_side: Color) -> u32 { (ply.saturating_sub(1) + u32::from(root_side == Color::Black)) / 2 + 1 }
+pub(crate) fn turn_of(ply: u32, root_side: Color) -> u32 { (ply.saturating_sub(1) + u32::from(root_side == Color::Black)) / 2 + 1 }
 
 fn source_available(study: Option<&Study>, card: &ReviewCard) -> bool {
     study.and_then(|s| s.nodes.get(&card.node_id)).is_some_and(|n| n.mv == Some(card.answer.mv))
@@ -308,6 +319,7 @@ impl Inner {
             // 加入后立即到期
             due_at: Some(now),
             stage: 0,
+            issues: Vec::new(),
         })
     }
 
@@ -326,7 +338,8 @@ impl Inner {
         card.due_at = Some(schedule::due_at(&card, &intervals));
         let source_available = source_available(study, &card);
         let study_name = study.map(|s| s.name.clone()).unwrap_or_else(|| card.study_name.clone());
-        ReviewItem { card, source_available, study_name }
+        let themes = topics::card_themes(&card.fen, card.answer.mv);
+        ReviewItem { card, source_available, study_name, themes }
     }
 
     /// 把一着加入复习；已经在复习中时返回原来的卡片，不覆盖当时的记录。
@@ -432,6 +445,11 @@ impl Inner {
             }
             if let Some(note) = req.note {
                 c.note = note;
+            }
+            if let Some(mut issues) = req.issues {
+                issues.sort_unstable();
+                issues.dedup();
+                c.issues = issues;
             }
             c.updated_at = now;
         })?;

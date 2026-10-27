@@ -117,6 +117,7 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         "cloud_lookup" => to_value(service.cloud_lookup(arg(args, "req")?)?),
         "export_study" => to_value(service.export_study(&arg::<String>(args, "id")?)?),
         "export_archive" => to_value(service.export_archive()?),
+        "game_report" => to_value(service.game_report(&arg::<String>(args, "id")?)?),
         "preview_archive" => to_value(service.preview_archive(arg(args, "source")?)?),
         "import_archive" => to_value(service.import_archive(arg(args, "source")?)?),
         "backup_info" => to_value(service.backup_info()),

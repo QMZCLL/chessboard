@@ -104,6 +104,7 @@ pub fn run() {
             commands::cloud_lookup,
             commands::export_study_to_file,
             commands::export_archive_to_file,
+            commands::game_report,
             commands::preview_archive,
             commands::import_archive,
             commands::backup_info,
