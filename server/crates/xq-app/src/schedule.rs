@@ -58,7 +58,7 @@ pub fn outcome_of(attempt: Option<&ReviewAttempt>) -> Outcome {
         // 局面决策按这次比较是否支持这个选择，与是否与棋谱一致分开；不能把没有结果折算成选对或选错
         PracticeGoal::Decision => match &a.decision {
             Some(d) if d.state == DecisionState::Pending => Outcome::Pending,
-            Some(d) => match d.support_for(a.choice.as_ref().map(|c| c.mv)) {
+            Some(d) => match d.resolved_support() {
                 DecisionSupport::Supported => Outcome::Independent,
                 DecisionSupport::NotSupported => Outcome::Missed,
                 DecisionSupport::Unknown | DecisionSupport::Legacy => Outcome::Ungraded,
@@ -209,6 +209,27 @@ mod tests {
         card.attempts.push(next);
         apply(&mut card, ReviewStatus::Understood, 20_000, &DAYS);
         assert_eq!((card.stage, card.due_at), (2, Some(20_000 + 7 * DAY_MS)));
+    }
+
+    #[test]
+    fn an_early_same_as_record_without_a_quality_judgement_is_not_counted_as_independent() {
+        // 早期版本在搜索不完整时保存的记录：与棋谱一致、对照着法就是这次的选择，没有“是否支持”这一项
+        let old: ReviewAttempt = serde_json::from_value(serde_json::json!({
+            "at": 1, "choice": { "mv": "h9g7", "notation": "马8进7" }, "matched": true, "goal": "decision", "intent": null, "reflection": null,
+            "decision": {
+                "state": "ready", "verdict": "same_as_record", "reference": { "mv": "h9g7", "notation": "马8进7" },
+                "points": ["本次搜索没有完成整轮，暂不评价走法优劣"], "conditions": "快速分析", "error": null
+            }
+        }))
+        .unwrap();
+        let d = old.decision.as_ref().unwrap();
+        assert!(old.matched && d.verdict == Some(DecisionVerdict::SameAsRecord), "匹配的事实保留");
+        assert_eq!((d.support, d.resolved_support()), (DecisionSupport::Legacy, DecisionSupport::Unknown));
+        assert_eq!(outcome_of(Some(&old)), Outcome::Ungraded);
+        let mut card = card_with(vec![old]);
+        card.stage = 2;
+        apply(&mut card, ReviewStatus::Understood, 1_000, &DAYS);
+        assert_eq!((card.stage, card.due_at), (2, Some(1_000 + 7 * DAY_MS)), "不按独立选对升档");
     }
 
     #[test]

@@ -80,10 +80,11 @@ const choiceArrow = computed(() => {
 const lastMove = computed(() => card.value?.history[card.value.history.length - 1]?.mv ?? null);
 const suggestion = computed(() => (attempt.value ? suggestionFor(attempt.value) : null));
 const decision = computed(() => attempt.value?.decision ?? null);
+// 颜色按这次比较是否支持这个选择，与是否与棋谱一致分开
 const decisionTone = computed(() => {
-  const v = decision.value?.verdict;
-  if (v === "same_as_record" || v === "reasonable") return "ok";
-  return v === "noteworthy" ? "miss" : "";
+  const s = decision.value?.state === "ready" ? decision.value.support : null;
+  if (s === "supported") return "ok";
+  return s === "not_supported" ? "miss" : "";
 });
 const GOAL_HINT = { recall: "回忆这盘棋当时怎样走，看是否与棋谱一致", decision: "作出自己的选择，与棋谱着法、引擎参考在同一次搜索中比较" } as const;
 const toggleIntent = (i: (typeof INTENTS)[number]) => (review.intent = review.intent === i ? null : i);
