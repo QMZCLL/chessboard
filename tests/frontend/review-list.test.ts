@@ -13,6 +13,7 @@ import {
   filterItems,
   hasTopic,
   historyText,
+  awaitingResult,
   newerItem,
   nextDueId,
   outcomeOf,
@@ -128,13 +129,30 @@ test("一组练习的小结只统计这组开始之后的复习，安排按时�
     card("d", 0, [attempt(started - 5, true, true)]),
   ];
   const s = sessionSummary(cards, started, NOW);
-  assert.deepEqual({ ...s, schedule: undefined }, { total: 4, done: 3, independent: 1, missed: 1, revealed: 1, schedule: undefined });
+  assert.deepEqual({ ...s, schedule: undefined }, { total: 4, done: 3, independent: 1, missed: 1, revealed: 1, pending: 0, ungraded: 0, schedule: undefined });
   assert.deepEqual(s.schedule, [
     { text: "明天再看", count: 2 },
     { text: "3 天后再看", count: 1 },
   ]);
   assert.equal(summaryText(s), "本次完成 3 张：1 张独立选对，1 张没有选对，1 张直接看了答案；还有 1 张没有复习。安排：明天再看 2 张，3 天后再看 1 张。");
   assert.equal(summaryText(sessionSummary(cards.slice(3), started, NOW)), "这组 1 张还没有复习。");
+
+  // 局面决策：比较还没有结果、无法评价，都不折算为选对或选错；已经标记、等结果的卡片安排另外说明
+  const decision = (state: "pending" | "ready", support: "supported" | "unknown"): ReviewAttempt => ({
+    ...attempt(NOW, true, false),
+    goal: "decision",
+    decision: { state, verdict: state === "ready" ? "unclear" : null, support, reference: null, points: [], conditions: null, error: null },
+  });
+  const waiting = { ...card("e", 1, [decision("pending", "unknown")]), schedule_base: { attempt_at: NOW, stage: 0, at: NOW } };
+  const unclear = card("f", 1, [decision("ready", "unknown")]);
+  assert.equal(outcomeOf(waiting.attempts[0]), "pending");
+  assert.equal(outcomeOf(unclear.attempts[0]), "ungraded");
+  assert.ok(awaitingResult(waiting) && !awaitingResult(unclear));
+  const mixed = sessionSummary([waiting, unclear], started, NOW);
+  assert.equal(summaryText(mixed), "本次完成 2 张：1 张的比较还没有完成，1 张无法评价。安排：明天再看 1 张，比较完成后确定 1 张。");
+  // 结果回来、支持这个选择：小结随卡片更新
+  const supported = { ...waiting, attempts: [{ ...decision("ready", "supported"), verdict: "reasonable" as const }] };
+  assert.equal(sessionSummary([supported, unclear], started, NOW).independent, 1);
 });
 
 test("复习间隔的文字与导入预览", () => {

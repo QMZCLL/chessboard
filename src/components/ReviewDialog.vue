@@ -14,6 +14,7 @@ import { errorMessage } from "../api/backend";
 import {
   addStarred,
   closeSummary,
+  sessionResult,
   currentAttempt,
   deleteCard,
   currentNote,
@@ -39,6 +40,7 @@ import {
 import {
   attemptMark,
   attemptText,
+  awaitingResult,
   decisionTitle,
   dueText,
   GOAL_LABEL,
@@ -143,7 +145,7 @@ async function mark(status: ReviewStatus) {
     await setStatus(id, status);
     const label = STATUS_LABEL[status];
     const marked = review.items.find((i) => i.card.id === id)?.card;
-    const when = marked ? `，${dueText(marked, Date.now())}` : "";
+    const when = !marked ? "" : awaitingResult(marked) ? "，比较完成后确定下一次复习的时间" : `，${dueText(marked, Date.now())}`;
     message.success(review.current?.card.id === id ? `已标为“${label}”${when}` : `已把之前复习的卡片标为“${label}”${when}`);
   } catch (e) {
     message.error(errorMessage(e));
@@ -217,9 +219,9 @@ onMounted(loadReviews);
       </aside>
 
       <!-- 一组练习的小结：数字都来自这组练习的复习记录与卡片的安排 -->
-      <section v-if="review.summary" class="practice summary" data-testid="review-summary-panel">
+      <section v-if="sessionResult" class="practice summary" data-testid="review-summary-panel">
         <h3>这组练习的小结</h3>
-        <p data-testid="review-session-summary">{{ summaryText(review.summary) }}</p>
+        <p data-testid="review-session-summary">{{ summaryText(sessionResult) }}</p>
         <n-button size="small" type="primary" data-testid="review-close-summary" @click="closeSummary">继续复习</n-button>
       </section>
 
@@ -232,7 +234,7 @@ onMounted(loadReviews);
           </div>
           <div class="head-actions">
             <n-tag size="small" :type="STATUS_TYPE[card.status]" :bordered="false" data-testid="review-status">{{ STATUS_LABEL[card.status] }}</n-tag>
-            <span class="muted due" data-testid="review-due">{{ dueText(card, review.clock) }}</span>
+            <span class="muted due" data-testid="review-due">{{ awaitingResult(card) ? "比较完成后确定下一次复习的时间" : dueText(card, review.clock) }}</span>
             <n-tooltip :disabled="current.source_available">
               <template #trigger>
                 <n-button size="small" quaternary :disabled="!current.source_available || review.busy" data-testid="review-open-source" @click="open">

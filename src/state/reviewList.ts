@@ -150,16 +150,26 @@ export function newerItem(existing: ReviewItem | undefined, incoming: ReviewItem
   return existing && existing.card.revision > incoming.card.revision ? existing : incoming;
 }
 
-/** 一次复习的结果（与后台安排间隔的规则相同，见 xq-app schedule.rs） */
-export type AttemptOutcome = "independent" | "missed" | "revealed";
+/**
+ * 一次复习的结果（与后台安排间隔的规则相同，见 xq-app schedule.rs）：局面决策按这次比较是否支持这个选择，
+ * 比较还没有结果（pending）或无法评价（ungraded）时不折算成选对或选错。
+ */
+export type AttemptOutcome = "independent" | "missed" | "revealed" | "pending" | "ungraded";
 
 export function outcomeOf(a: ReviewAttempt): AttemptOutcome {
   if (!a.choice) return "revealed";
   if (a.goal === "recall") return a.matched ? "independent" : "missed";
+  if (a.decision?.state === "pending") return "pending";
   const s = a.decision?.support;
   if (s === "supported") return "independent";
   if (s === "not_supported") return "missed";
-  return a.matched ? "independent" : "missed";
+  return "ungraded";
+}
+
+/** 已经按最近一次复习标记了状态，但这次的比较还没有结果：下一次复习的时间在结果出来后确定 */
+export function awaitingResult(card: ReviewCard): boolean {
+  const last = card.attempts[card.attempts.length - 1];
+  return !!last && last.decision?.state === "pending" && card.schedule_base?.attempt_at === last.at;
 }
 
 export interface SessionSummary {
@@ -170,13 +180,17 @@ export interface SessionSummary {
   independent: number;
   missed: number;
   revealed: number;
-  /** 复习过的卡片下一次复习的安排，按时间先后 */
+  /** 局面决策的比较还没有结果 */
+  pending: number;
+  /** 局面决策无法评价 */
+  ungraded: number;
+  /** 复习过的卡片下一次复习的安排，按时间先后（比较还没有结果的另外说明） */
   schedule: { text: string; count: number }[];
 }
 
 /** 一组练习的小结：数字都来自这组练习开始之后的复习记录与卡片的安排。 */
 export function sessionSummary(cards: ReviewCard[], startedAt: number, now: number): SessionSummary {
-  const summary: SessionSummary = { total: cards.length, done: 0, independent: 0, missed: 0, revealed: 0, schedule: [] };
+  const summary: SessionSummary = { total: cards.length, done: 0, independent: 0, missed: 0, revealed: 0, pending: 0, ungraded: 0, schedule: [] };
   const groups = new Map<string, { due: number; count: number }>();
   for (const card of cards) {
     const inSession = card.attempts.filter((a) => a.at >= startedAt);
@@ -184,8 +198,10 @@ export function sessionSummary(cards: ReviewCard[], startedAt: number, now: numb
     if (!last) continue;
     summary.done += 1;
     summary[outcomeOf(last)] += 1;
-    const text = dueText(card, now);
-    const g = groups.get(text) ?? { due: dueAt(card), count: 0 };
+    const awaiting = awaitingResult(card);
+    const text = awaiting ? "比较完成后确定" : dueText(card, now);
+    // 还没有确定时间的排在最后
+    const g = groups.get(text) ?? { due: awaiting ? Number.POSITIVE_INFINITY : dueAt(card), count: 0 };
     g.count += 1;
     groups.set(text, g);
   }
@@ -196,7 +212,13 @@ export function sessionSummary(cards: ReviewCard[], startedAt: number, now: numb
 /** 小结的文字。 */
 export function summaryText(s: SessionSummary): string {
   if (!s.done) return `这组 ${s.total} 张还没有复习。`;
-  const parts = [`${s.independent} 张独立选对`, `${s.missed} 张没有选对`, `${s.revealed} 张直接看了答案`].filter((p) => !p.startsWith("0 "));
+  const parts = [
+    `${s.independent} 张独立选对`,
+    `${s.missed} 张没有选对`,
+    `${s.revealed} 张直接看了答案`,
+    `${s.pending} 张的比较还没有完成`,
+    `${s.ungraded} 张无法评价`,
+  ].filter((p) => !p.startsWith("0 "));
   const plan = s.schedule.map((g) => `${g.text} ${g.count} 张`).join("，");
   const rest = s.total > s.done ? `；还有 ${s.total - s.done} 张没有复习` : "";
   return `本次完成 ${s.done} 张：${parts.join("，")}${rest}。安排：${plan}。`;

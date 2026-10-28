@@ -32,8 +32,8 @@ export const review = reactive({
   clock: Date.now(),
   /** 一组练习：按顺序复习的卡片与开始的时间 */
   session: null as { ids: string[]; index: number; startedAt: number; label: string } | null,
-  /** 刚结束的一组练习的小结 */
-  summary: null as SessionSummary | null,
+  /** 刚结束的一组练习：小结按卡片的最新状态计算，比较结果晚到时随之更新 */
+  finished: null as { ids: string[]; startedAt: number } | null,
   current: null as T.ReviewDetail | null,
   /** choose：在棋盘上重新选择；revealed：已经选择或直接看了答案 */
   phase: "choose" as "choose" | "revealed",
@@ -308,7 +308,7 @@ export function startSession(kind: "today" | "again" | TopicKey, size: number | 
   if (!ids.length) return;
   const label = kind === "today" ? "今天的练习" : kind === "again" ? "需要再练的卡片" : `专题：${topicLabel(kind)}`;
   review.session = { ids, index: 0, startedAt: now, label };
-  review.summary = null;
+  review.finished = null;
   review.filter = kind === "today" || kind === "again" ? kind : "all";
   void showCard(ids[0]);
 }
@@ -318,13 +318,20 @@ export function finishSession() {
   const s = review.session;
   if (!s) return;
   void saveNote();
-  const cards = s.ids.map((id) => review.items.find((i) => i.card.id === id)?.card).filter((c): c is T.ReviewCard => !!c);
-  review.summary = sessionSummary(cards, s.startedAt, Date.now());
+  review.finished = { ids: s.ids, startedAt: s.startedAt };
   review.session = null;
 }
 
+/** 刚结束的一组练习的小结（只统计这组练习开始之后的复习） */
+export const sessionResult = computed<SessionSummary | null>(() => {
+  const f = review.finished;
+  if (!f) return null;
+  const cards = f.ids.map((id) => review.items.find((i) => i.card.id === id)?.card).filter((c): c is T.ReviewCard => !!c);
+  return sessionSummary(cards, f.startedAt, review.clock);
+});
+
 export function closeSummary() {
-  review.summary = null;
+  review.finished = null;
 }
 
 /** 打开原会话中的这一着（看谱学习，显示完整讲解） */

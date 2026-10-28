@@ -38,6 +38,9 @@ use crate::records::AnalysisConditions;
 use crate::records::Budget;
 use crate::review::ReviewCard;
 use crate::review::ReviewMove;
+use crate::review::ReviewStatus;
+use crate::schedule;
+use crate::service::now_ms;
 use crate::service::ApiResult;
 use crate::service::Inner;
 
@@ -390,10 +393,20 @@ impl Inner {
     }
 
     /// 写回这次复习的比较结果并推送卡片。卡片已经删除、或这次复习已被更早的记录挤出时不再写入。
+    ///
+    /// 比较完成前已经按这次复习标记过状态（安排先按“还没有结果”计算）：如果这仍是最近一次复习，
+    /// 按结果从同一个起点重新安排；之后又有了新的复习时不改动，留给新的复习安排。
     fn finish_decision(&self, id: &str, at: i64, feedback: DecisionFeedback) {
+        let intervals = self.config_snapshot().review.intervals_days;
         let updated = self.store.update_review(id, |c| {
             if let Some(a) = c.attempts.iter_mut().find(|a| a.at == at) {
                 a.decision = Some(feedback);
+            }
+            let latest = c.attempts.last().is_some_and(|a| a.at == at);
+            let marked = c.schedule_base.is_some_and(|b| b.attempt_at == Some(at));
+            if latest && marked && c.status != ReviewStatus::Due {
+                schedule::apply(c, c.status, now_ms(), &intervals);
+                c.updated_at = now_ms();
             }
         });
         match updated {

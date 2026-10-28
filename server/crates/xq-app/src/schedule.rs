@@ -2,13 +2,22 @@
 //!
 //! 标记状态时按最近一次复习安排间隔（档位见 `ReviewConfig::intervals_days`，默认 1、3、7、14、30 天）：
 //! - 标为需要再练：回到第一档；
-//! - 标为已理解，但这次直接看了答案或没有独立选对（复现棋谱与棋谱不同，局面决策留下值得注意的问题或无法判断）：
+//! - 标为已理解，但这次直接看了答案或没有独立选对（复现棋谱与棋谱不同，局面决策中这次比较不支持这个选择）：
 //!   档位不升，用第一档，近期再看；
+//! - 局面决策无法评价（分析不完整、没有得到结果）：档位不升也不降；比较还没有结果时先这样安排，
+//!   结果写回时再按结果重新安排（见 `decision::finish_decision`）；
 //! - 独立选对后标为已理解：升一档，间隔逐步拉长。
+//!
+//! 一次安排绑定所依据的那次复习（`ScheduleBase`）：同一次复习重复标记，都从安排前的档位与第一次安排的时间重新计算，
+//! 不会把同一次复习当作多次成功；改了评价时按新的评价重新计算；有了新的复习之后才能继续升档。
 //!
 //! 间隔是可以调整的初始设计，不宣称对所有人都最合适。早期的卡片没有安排：已理解的按上次复习后第三档计，
 //! 其余按加入时到期。
 
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::decision::DecisionState;
 use crate::decision::DecisionSupport;
 use crate::decision::PracticeGoal;
 use crate::review::ReviewAttempt;
@@ -16,6 +25,15 @@ use crate::review::ReviewCard;
 use crate::review::ReviewStatus;
 
 pub const DAY_MS: i64 = 86_400_000;
+
+/// 最近一次安排的起点：所依据的复习（按时间）、安排前的档位与第一次安排的时间。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleBase {
+    /// 所依据的复习；还没有复习过时为空。
+    pub attempt_at: Option<i64>,
+    pub stage: u32,
+    pub at: i64,
+}
 
 /// 一次复习的结果，用于安排间隔。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,20 +44,28 @@ pub enum Outcome {
     Missed,
     /// 独立选对：复现棋谱与棋谱一致；局面决策中这次比较支持这个选择。
     Independent,
+    /// 局面决策的比较还没有结果。
+    Pending,
+    /// 局面决策无法评价：分析不完整或没有得到结果。
+    Ungraded,
 }
 
 pub fn outcome_of(attempt: Option<&ReviewAttempt>) -> Outcome {
     let Some(a) = attempt.filter(|a| a.choice.is_some()) else { return Outcome::Revealed };
-    let independent = match a.goal {
-        PracticeGoal::Recall => a.matched,
-        // 局面决策按这次比较是否支持这个选择，与是否与棋谱一致分开；比较还没有结果或无法判断时，只有与棋谱一致才算
-        PracticeGoal::Decision => match a.decision.as_ref().map(|d| d.support_for(a.choice.as_ref().map(|c| c.mv))) {
-            Some(DecisionSupport::Supported) => true,
-            Some(DecisionSupport::NotSupported) => false,
-            _ => a.matched,
+    match a.goal {
+        PracticeGoal::Recall if a.matched => Outcome::Independent,
+        PracticeGoal::Recall => Outcome::Missed,
+        // 局面决策按这次比较是否支持这个选择，与是否与棋谱一致分开；不能把没有结果折算成选对或选错
+        PracticeGoal::Decision => match &a.decision {
+            Some(d) if d.state == DecisionState::Pending => Outcome::Pending,
+            Some(d) => match d.support_for(a.choice.as_ref().map(|c| c.mv)) {
+                DecisionSupport::Supported => Outcome::Independent,
+                DecisionSupport::NotSupported => Outcome::Missed,
+                DecisionSupport::Unknown | DecisionSupport::Legacy => Outcome::Ungraded,
+            },
+            None => Outcome::Ungraded,
         },
-    };
-    if independent { Outcome::Independent } else { Outcome::Missed }
+    }
 }
 
 /// 标记状态之后的档位与间隔（天）。`intervals` 至少有一项（配置保证）。
@@ -50,11 +76,27 @@ pub fn next_review(stage: u32, status: ReviewStatus, outcome: Outcome, intervals
             let next = (stage + 1).min(intervals.len() as u32 - 1);
             (next, days(next))
         }
-        (ReviewStatus::Understood, _) => (stage, days(0)),
+        // 无法评价或还没有结果：不升档也不降档
+        (ReviewStatus::Understood, Outcome::Pending | Outcome::Ungraded) => (stage, days(stage)),
+        (ReviewStatus::Understood, Outcome::Revealed | Outcome::Missed) => (stage, days(0)),
         (ReviewStatus::Again, _) => (0, days(0)),
         // 待复习：立即到期
         (ReviewStatus::Due, _) => (0, 0),
     }
+}
+
+/// 标记状态时安排下一次复习（见模块说明）：同一次复习重复标记，从同一个起点重新计算。
+pub fn apply(card: &mut ReviewCard, status: ReviewStatus, now: i64, intervals: &[u32]) {
+    let last = card.attempts.last();
+    let key = last.map(|a| a.at);
+    let base = match card.schedule_base {
+        Some(b) if b.attempt_at == key => b,
+        _ => ScheduleBase { attempt_at: key, stage: card.stage, at: now },
+    };
+    let (stage, days) = next_review(base.stage, status, outcome_of(last), intervals);
+    card.stage = stage;
+    card.due_at = Some(base.at + i64::from(days) * DAY_MS);
+    card.schedule_base = Some(base);
 }
 
 /// 卡片下一次复习的时间；没有安排时按早期卡片的规则推算（不写回）。
@@ -126,12 +168,72 @@ mod tests {
         assert_eq!(outcome_of(Some(&attempt(true, false, Recall, None))), Outcome::Missed);
         assert_eq!(outcome_of(Some(&attempt(true, false, Decision, Some(Reasonable)))), Outcome::Independent);
         assert_eq!(outcome_of(Some(&attempt(true, false, Decision, Some(Noteworthy)))), Outcome::Missed);
-        // 无法判断或还没有结果：只有与棋谱一致才算独立选对
-        assert_eq!(outcome_of(Some(&attempt(true, false, Decision, Some(Unclear)))), Outcome::Missed);
+        // 无法判断：不算选对，也不算选错
+        assert_eq!(outcome_of(Some(&attempt(true, false, Decision, Some(Unclear)))), Outcome::Ungraded);
         // 与棋谱一致，但这次比较不支持（棋谱着法明显不如引擎参考）：不算独立选对
         let mut known_bad = attempt(true, true, Decision, Some(SameAsRecord));
         known_bad.decision.as_mut().unwrap().support = crate::decision::DecisionSupport::NotSupported;
         assert_eq!(outcome_of(Some(&known_bad)), Outcome::Missed);
-        assert_eq!(outcome_of(Some(&attempt(true, true, Decision, None))), Outcome::Independent);
+        assert_eq!(outcome_of(Some(&attempt(true, true, Decision, Some(Unclear)))), Outcome::Ungraded);
+    }
+
+    fn card_with(attempts: Vec<ReviewAttempt>) -> ReviewCard {
+        let mut c: ReviewCard = serde_json::from_value(serde_json::json!({
+            "id": "s/1", "study_id": "s", "node_id": 1, "study_name": "测试", "created_at": 1, "updated_at": 1,
+            "status": "due", "fen": "4k4/9/9/9/9/9/9/9/9/4K4 w", "side": "red", "orientation": "red_bottom",
+            "turn": 1, "history": [], "history_complete": true, "answer": { "mv": "h9g7", "notation": "马8进7" },
+            "thinking": null, "basis": null, "note": "", "attempts": [], "reviewed_at": null
+        }))
+        .unwrap();
+        c.attempts = attempts;
+        c
+    }
+
+    #[test]
+    fn marking_the_same_attempt_again_does_not_advance_twice() {
+        let mut card = card_with(vec![attempt(true, true, PracticeGoal::Recall, None)]);
+        apply(&mut card, ReviewStatus::Understood, 1_000, &DAYS);
+        let first = (card.stage, card.due_at);
+        assert_eq!(first, (1, Some(1_000 + 3 * DAY_MS)));
+        // 同一次复习再标一次：档位与到期时间都不变
+        apply(&mut card, ReviewStatus::Understood, 9_000, &DAYS);
+        assert_eq!((card.stage, card.due_at), first);
+        // 改成需要再练再改回来：都按同一个起点计算
+        apply(&mut card, ReviewStatus::Again, 9_500, &DAYS);
+        assert_eq!((card.stage, card.due_at), (0, Some(1_000 + DAY_MS)));
+        apply(&mut card, ReviewStatus::Understood, 9_800, &DAYS);
+        assert_eq!((card.stage, card.due_at), first);
+        // 有了新的复习之后才继续升档
+        let mut next = attempt(true, true, PracticeGoal::Recall, None);
+        next.at = 2;
+        card.attempts.push(next);
+        apply(&mut card, ReviewStatus::Understood, 20_000, &DAYS);
+        assert_eq!((card.stage, card.due_at), (2, Some(20_000 + 7 * DAY_MS)));
+    }
+
+    #[test]
+    fn a_pending_or_ungraded_decision_neither_advances_nor_counts_as_missed() {
+        use DecisionVerdict::*;
+        let pending = || {
+            let mut a = attempt(true, false, PracticeGoal::Decision, Some(Reasonable));
+            a.decision.as_mut().unwrap().state = DecisionState::Pending;
+            a
+        };
+        assert_eq!(outcome_of(Some(&pending())), Outcome::Pending);
+        let mut unclear = attempt(true, false, PracticeGoal::Decision, Some(Unclear));
+        assert_eq!(outcome_of(Some(&unclear)), Outcome::Ungraded);
+        unclear.decision.as_mut().unwrap().state = DecisionState::Failed;
+        assert_eq!(outcome_of(Some(&unclear)), Outcome::Ungraded);
+        // 比较还没有结果时标为已理解：保持档位
+        let mut card = card_with(vec![pending()]);
+        card.stage = 2;
+        apply(&mut card, ReviewStatus::Understood, 1_000, &DAYS);
+        assert_eq!((card.stage, card.due_at), (2, Some(1_000 + 7 * DAY_MS)));
+        // 结果回来、支持这个选择：按同一个起点重新安排，升一档
+        let d = card.attempts[0].decision.as_mut().unwrap();
+        d.state = DecisionState::Ready;
+        d.support = DecisionSupport::Supported;
+        apply(&mut card, ReviewStatus::Understood, 5_000, &DAYS);
+        assert_eq!((card.stage, card.due_at), (3, Some(1_000 + 14 * DAY_MS)));
     }
 }

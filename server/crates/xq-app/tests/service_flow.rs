@@ -995,9 +995,14 @@ fn marking_a_card_schedules_the_next_review_from_the_latest_attempt() {
     // 新卡片立即到期
     let fresh = service.list_reviews().unwrap().into_iter().find(|i| i.card.id == id).unwrap().card;
     assert!(fresh.due_at.unwrap() <= now());
-    // 独立选对后标为已理解：升一档（3 天），再一次（7 天）
+    // 独立选对后标为已理解：升一档（3 天）；同一次复习再标一次不再升档，到期时间也不变
     attempt(Some("h2e2"));
     assert_eq!(mark(ReviewStatus::Understood), (1, 3));
+    let due = |svc: &AppService| svc.list_reviews().unwrap().into_iter().find(|i| i.card.id == id).unwrap().card.due_at;
+    let first_due = due(&service);
+    assert_eq!(mark(ReviewStatus::Understood), (1, 3));
+    assert_eq!(due(&service), first_due, "同一次复习重复标记，安排不变");
+    // 有了新的复习才继续升档（7 天）
     attempt(Some("h2e2"));
     assert_eq!(mark(ReviewStatus::Understood), (2, 7));
     // 直接看答案后标为已理解：档位不升，明天再看
@@ -1177,5 +1182,58 @@ fn a_recalled_record_move_that_the_search_shows_worse_is_not_kept_as_a_good_choi
     let key = &report.key_positions[0];
     assert!(key.reasons.iter().any(|r| r == "实际着法明显不如首选（比首选低约 150 分）"), "{:?}", key.reasons);
     assert_eq!(report.practice.matched, 1, "统计中仍记为第一步与棋谱一致");
+    service.shutdown();
+}
+
+#[test]
+fn a_mark_made_before_the_decision_result_is_rescheduled_when_the_result_arrives() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let second = service.apply_move(MoveRequest { study_id: sid.clone(), parent: first, mv: mv("h9g7"), variation: false }).unwrap().node_id.unwrap();
+    for node in [first, second] {
+        rec.wait("讲解完成", |e, v| e == "explanation_updated" && v["node_id"] == node && v["record"]["pending"] == false);
+    }
+    let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: second }).unwrap().card.id;
+    // 多候选搜索找出引擎参考；同一次比较在返回前暂停，好在结果出来之前标记状态
+    let script = "@go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        info depth 5 seldepth 5 multipv 2 score cp 0 nodes 10 time 1 pv b9c7 h0g2\n\
+        bestmove h9g7\n\
+        @go\n\
+        sleep 1500\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        info depth 5 seldepth 5 multipv 2 score cp 0 nodes 10 time 1 pv b9c7 h0g2\n\
+        bestmove h9g7\n";
+    std::fs::write(dir.path().join("engine").join("mock-uci-script.txt"), script).unwrap();
+    service.restart_engine();
+    std::thread::sleep(Duration::from_millis(300));
+    wait_engine(&service);
+    rec.clear();
+    let tried = service
+        .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("b9c7")), goal: PracticeGoal::Decision, intent: None })
+        .unwrap();
+    let at = tried.card.attempts.last().unwrap().at;
+    // 比较还没有结果：先按不升档安排，不当作选错
+    let marked = service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Understood), note: None, issues: None }).unwrap().card;
+    assert_eq!(marked.attempts.last().unwrap().decision.as_ref().unwrap().state, DecisionState::Pending);
+    let base = marked.schedule_base.unwrap();
+    assert_eq!((base.attempt_at, marked.stage), (Some(at), 0));
+    // 结果回来（与参考评分接近）：从同一个起点重新安排，升一档
+    let done = rec.wait("比较完成", |e, v| {
+        e == "review_updated" && v["card"]["attempts"].as_array().unwrap().last().unwrap()["decision"]["state"] == "ready"
+    });
+    assert_eq!(done["card"]["attempts"].as_array().unwrap().last().unwrap()["decision"]["support"], "supported");
+    let card = service.list_reviews().unwrap().into_iter().find(|i| i.card.id == id).unwrap().card;
+    assert_eq!(card.stage, 1);
+    assert_eq!(card.due_at, Some(base.at + 3 * xq_app::schedule::DAY_MS), "按第一次标记的时间计算");
+    // 同一次复习再标一次：不再升档
+    let again = service.update_review(ReviewUpdateRequest { id, status: Some(ReviewStatus::Understood), note: None, issues: None }).unwrap().card;
+    assert_eq!((again.stage, again.due_at), (1, card.due_at));
     service.shutdown();
 }

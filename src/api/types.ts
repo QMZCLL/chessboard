@@ -364,6 +364,8 @@ export interface ReviewCard {
   due_at: number | null;
   /** 复习间隔的档位：独立选对后标为已理解时升一档 */
   stage: number;
+  /** 最近一次安排的起点：所依据的复习（按时间）、安排前的档位与第一次安排的时间 */
+  schedule_base: { attempt_at: number | null; stage: number; at: number } | null;
   /** 用户自己确认的问题 */
   issues: ReviewIssue[];
 }

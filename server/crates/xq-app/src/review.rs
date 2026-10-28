@@ -162,6 +162,9 @@ pub struct ReviewCard {
     /// 复习间隔的档位：独立选对后标为已理解时升一档。
     #[serde(default)]
     pub stage: u32,
+    /// 最近一次安排的起点（所依据的复习、安排前的档位与安排的时间），见 `schedule`。
+    #[serde(default)]
+    pub schedule_base: Option<schedule::ScheduleBase>,
     /// 用户自己确认的问题（见 `topics`）。
     #[serde(default)]
     pub issues: Vec<Issue>,
@@ -319,6 +322,7 @@ impl Inner {
             // 加入后立即到期
             due_at: Some(now),
             stage: 0,
+            schedule_base: None,
             issues: Vec::new(),
         })
     }
@@ -445,10 +449,7 @@ impl Inner {
         let card = self.modify_card(&req.id, |c| {
             if let Some(status) = req.status {
                 c.status = status;
-                let outcome = schedule::outcome_of(c.attempts.last());
-                let (stage, days) = schedule::next_review(c.stage, status, outcome, &intervals);
-                c.stage = stage;
-                c.due_at = Some(now + i64::from(days) * schedule::DAY_MS);
+                schedule::apply(c, status, now, &intervals);
             }
             if let Some(note) = req.note {
                 c.note = note;
