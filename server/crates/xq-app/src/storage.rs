@@ -252,16 +252,28 @@ impl Store {
     /// 并发的修改（笔记、状态、追加复习记录、补充讲解）依次进行，不会用旧快照覆盖彼此；修改次数也就随写入顺序递增。
     /// 卡片不存在时返回 `None`。
     pub fn update_review(&self, id: &str, f: impl FnOnce(&mut ReviewCard)) -> Result<Option<ReviewCard>, StoreError> {
+        self.update_review_if(id, |card| {
+            f(card);
+            true
+        })
+    }
+
+    /// 与 `update_review` 相同，但 `f` 在同一写事务中检查最新的卡片，返回 `false` 时不写回（修改次数也不变），
+    /// 结果为 `None`。
+    pub fn update_review_if(&self, id: &str, f: impl FnOnce(&mut ReviewCard) -> bool) -> Result<Option<ReviewCard>, StoreError> {
         let tx = self.db.begin_write()?;
         let updated = {
             let mut t = tx.open_table(REVIEWS)?;
             let current = t.get(id)?.map(|v| serde_json::from_str::<ReviewCard>(v.value())).transpose()?;
             match current {
                 Some(mut card) => {
-                    f(&mut card);
-                    card.revision += 1;
-                    t.insert(id, serde_json::to_string(&card)?.as_str())?;
-                    Some(card)
+                    if f(&mut card) {
+                        card.revision += 1;
+                        t.insert(id, serde_json::to_string(&card)?.as_str())?;
+                        Some(card)
+                    } else {
+                        None
+                    }
                 }
                 None => None,
             }

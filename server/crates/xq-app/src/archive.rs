@@ -22,6 +22,7 @@ use tracing::warn;
 use xq_core::study::Study;
 
 use crate::records::ExplanationRecord;
+use crate::decision;
 use crate::decision::DecisionState;
 use crate::review::MAX_ATTEMPTS;
 use crate::review::ReviewAttempt;
@@ -96,15 +97,6 @@ pub struct BackupInfo {
     pub files: Vec<BackupFile>,
 }
 
-/// 一次复习的比较进行到哪一步：已完成 > 没有得到结果 > 进行中或没有比较。
-fn decision_rank(a: &ReviewAttempt) -> u8 {
-    match a.decision.as_ref().map(|d| d.state) {
-        Some(DecisionState::Ready) => 2,
-        Some(DecisionState::Failed) => 1,
-        _ => 0,
-    }
-}
-
 /// 两张同一编号的卡片合并：历次复习按时间合在一起，同一次复习取比较进行得更完整的那份
 /// （同样完整时取较新的卡片中的那份）；状态、理解与安排等取更新时间较新的一份；修改次数保留本机的（写入时再加一）。
 /// 安排所依据的那次复习因合并有了比较结果时，按结果重新安排（见 `schedule::apply`）。
@@ -113,7 +105,7 @@ pub fn merge_cards(local: &ReviewCard, incoming: &ReviewCard, intervals: &[u32])
     let mut attempts: BTreeMap<i64, ReviewAttempt> = BTreeMap::new();
     for a in older.attempts.iter().chain(newer.attempts.iter()) {
         match attempts.get(&a.at) {
-            Some(kept) if decision_rank(kept) > decision_rank(a) => {}
+            Some(kept) if decision::progress(kept.decision.as_ref()) > decision::progress(a.decision.as_ref()) => {}
             _ => {
                 attempts.insert(a.at, a.clone());
             }

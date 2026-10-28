@@ -1275,3 +1275,66 @@ fn imported_comparisons_that_were_still_running_are_queued_again() {
         s.shutdown();
     }
 }
+
+#[test]
+fn a_late_comparison_queued_by_an_earlier_import_does_not_overwrite_an_imported_result() {
+    let rec = Arc::new(Recorder::default());
+    let home = tempfile::tempdir().unwrap();
+    let service = start_with_mock(home.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap();
+    // 档案 P：这次局面决策导出时比较还在进行
+    let mut pending: Value = serde_json::from_str(&service.export_archive().unwrap()).unwrap();
+    let attempt = &mut pending["reviews"][0]["attempts"][0];
+    attempt["goal"] = serde_json::json!("decision");
+    attempt["decision"] = serde_json::json!({
+        "state": "pending", "verdict": null, "support": "unknown", "reference": null, "points": [], "conditions": null, "error": null
+    });
+    let at = attempt["at"].as_i64().unwrap();
+    // 档案 R：原设备上这次比较之后完成，并按结果标为已理解
+    let mut ready = pending.clone();
+    let card = &mut ready["reviews"][0];
+    card["attempts"][0]["decision"] = serde_json::json!({
+        "state": "ready", "verdict": "same_as_record", "support": "supported",
+        "reference": { "mv": "h2e2", "notation": "炮二平五" }, "points": [], "conditions": "快速分析", "error": null
+    });
+    let base_at = card["updated_at"].as_i64().unwrap() + 1_000;
+    let due = base_at + 3 * xq_app::schedule::DAY_MS;
+    card["status"] = serde_json::json!("understood");
+    card["stage"] = serde_json::json!(1);
+    card["schedule_base"] = serde_json::json!({ "attempt_at": at, "stage": 0, "at": base_at });
+    card["due_at"] = serde_json::json!(due);
+    card["updated_at"] = serde_json::json!(base_at);
+
+    // 另一台设备：导入 P 后重新排队的比较先暂停，之后没有得到完整的结果
+    let other = tempfile::tempdir().unwrap();
+    let script = "@go\nsleep 1500\ninfo depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h2e2 h9g7\nbestmove h2e2\n";
+    let restored = start_with_mock(other.path(), script, rec.clone());
+    restored.import_archive(ArchiveSource::Text { text: pending.to_string() }).unwrap();
+    // 比较还没有结束时导入 R：完成的结果与安排恢复
+    restored.import_archive(ArchiveSource::Text { text: ready.to_string() }).unwrap();
+    let card_of = || restored.list_reviews().unwrap().into_iter().find(|i| i.card.id == id).unwrap().card;
+    let imported = card_of();
+    let d = imported.attempts[0].decision.as_ref().unwrap();
+    assert_eq!((d.state, d.support), (DecisionState::Ready, xq_app::decision::DecisionSupport::Supported));
+    assert_eq!((imported.status, imported.stage, imported.due_at), (ReviewStatus::Understood, 1, Some(due)));
+    rec.clear();
+    // 放行先前排队的比较：等它的第二次搜索（限定着法）发出并结束
+    let log = other.path().join("engine").join("mock-uci-commands.log");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while std::fs::read_to_string(&log).unwrap_or_default().lines().filter(|l| l.starts_with("go")).count() < 2 {
+        assert!(Instant::now() < deadline, "先前排队的比较没有继续");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let late = rec.wait_for(Duration::from_secs(2), |e, v| e == "review_updated" && v["card"]["id"] == id.as_str());
+    assert!(late.is_none(), "迟到的结果没有写入，也不推送：{late:?}");
+    assert_eq!(card_of(), imported, "完成的比较结果、是否支持这个选择与复习安排都不变");
+    for s in [service, restored] {
+        s.shutdown();
+    }
+}

@@ -417,20 +417,27 @@ impl Inner {
 
     /// 写回这次复习的比较结果并推送卡片。卡片已经删除、或这次复习已被更早的记录挤出时不再写入。
     ///
+    /// 同一次复习可能先后有几个比较任务：导出时还在进行的比较导入后重新排队，之后又导入了含完成结果的档案。
+    /// 结果只换成更进一步的（见 `progress`）：迟到的失败或不完整的结果不覆盖已经保存的结果，也不改动安排；
+    /// 检查与写入在同一个写事务中，没有写入时不推送。
+    ///
     /// 比较完成前已经按这次复习标记过状态（安排先按“还没有结果”计算）：如果这仍是最近一次复习，
     /// 按结果从同一个起点重新安排；之后又有了新的复习时不改动，留给新的复习安排。
     fn finish_decision(&self, id: &str, at: i64, feedback: DecisionFeedback) {
         let intervals = self.config_snapshot().review.intervals_days;
-        let updated = self.store.update_review(id, |c| {
-            if let Some(a) = c.attempts.iter_mut().find(|a| a.at == at) {
-                a.decision = Some(feedback);
+        let updated = self.store.update_review_if(id, |c| {
+            let Some(a) = c.attempts.iter_mut().find(|a| a.at == at) else { return false };
+            if progress(Some(&feedback)) <= progress(a.decision.as_ref()) {
+                return false;
             }
+            a.decision = Some(feedback);
             let latest = c.attempts.last().is_some_and(|a| a.at == at);
             let marked = c.schedule_base.is_some_and(|b| b.attempt_at == Some(at));
             if latest && marked && c.status != ReviewStatus::Due {
                 schedule::apply(c, c.status, now_ms(), &intervals);
                 c.updated_at = now_ms();
             }
+            true
         });
         match updated {
             Ok(Some(card)) => events::emit(self.events.as_ref(), events::REVIEW_UPDATED, &self.review_item(card)),
@@ -442,6 +449,16 @@ impl Inner {
 
 /// 局面决策开始时的状态：搜索完成前为“进行中”。
 pub(crate) fn pending() -> DecisionFeedback { DecisionFeedback::pending() }
+
+/// 一次复习的比较进行到哪一步：已有结果 > 没有得到结果 > 进行中或没有比较。
+/// 同一次复习的比较结果只换成更进一步的：档案合并、比较任务写回都按这个顺序。
+pub(crate) fn progress(d: Option<&DecisionFeedback>) -> u8 {
+    match d.map(|d| d.state) {
+        Some(DecisionState::Ready) => 2,
+        Some(DecisionState::Failed) => 1,
+        Some(DecisionState::Pending) | None => 0,
+    }
+}
 
 #[cfg(test)]
 mod tests {
