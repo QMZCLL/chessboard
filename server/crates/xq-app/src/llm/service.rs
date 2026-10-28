@@ -354,7 +354,11 @@ impl Inner {
 
     /// AI 讲解的显示状态可能改变（学习水平、详细程度等设置）：递增状态版本。
     /// 必须在新设置写入之后调用，见 `CoachView::seq`。
-    pub(crate) fn coach_view_changed(&self) { self.coach.seq.fetch_add(1, Ordering::SeqCst); }
+    pub(crate) fn coach_view_changed(&self) {
+        self.coach.seq.fetch_add(1, Ordering::SeqCst);
+        // 追问的回答是否过期同样取决于讲解设置：设置改变前读取的回答状态不能覆盖之后的
+        self.coach.ask_seq.fetch_add(1, Ordering::SeqCst);
+    }
 
     fn coach_test_point(&self, point: &'static str) {
         let hook = lock(&self.coach.test_hook).clone();
@@ -368,6 +372,7 @@ impl Inner {
     pub(crate) fn coach_config_changed(&self) {
         self.coach.config_rev.fetch_add(1, Ordering::SeqCst);
         self.coach.seq.fetch_add(1, Ordering::SeqCst);
+        self.coach.ask_seq.fetch_add(1, Ordering::SeqCst);
         self.on_explain_thread(|inner| inner.coach_settings_changed());
     }
 

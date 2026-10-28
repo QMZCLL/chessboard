@@ -7,26 +7,34 @@ import { api, errorMessage } from "../api/backend";
 import type { GameReport, KeyPosition } from "../api/types";
 import { addToReview } from "../state/review";
 import { STATUS_LABEL } from "../state/reviewList";
-import { selectNode, study, wb } from "../state/workbench";
+import { openStudy, selectNode, study, wb } from "../state/workbench";
 
 const message = useMessage();
 const report = ref<GameReport | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
+/** 报告请求的代次：关闭报告、切换会话或重新打开后，较早发出的请求返回时不再采用 */
+let seq = 0;
 
 watch(
-  () => wb.dialogs.report,
-  async (open) => {
-    const s = study.value;
-    if (!open || !s) return;
+  () => [wb.dialogs.report, study.value?.id ?? null] as const,
+  async ([open, sid]) => {
+    const id = ++seq;
+    if (!open || !sid) {
+      loading.value = false;
+      return;
+    }
+    // 打开的是另一盘棋的报告时，不先显示上一盘的内容
+    if (report.value?.study_id !== sid) report.value = null;
     loading.value = true;
     error.value = null;
     try {
-      report.value = await api.gameReport(s.id);
+      const r = await api.gameReport(sid);
+      if (id === seq) report.value = r;
     } catch (e) {
-      error.value = errorMessage(e);
+      if (id === seq) error.value = errorMessage(e);
     } finally {
-      loading.value = false;
+      if (id === seq) loading.value = false;
     }
   },
 );
@@ -38,9 +46,13 @@ const practiceText = computed(() => {
 });
 const notInReview = computed(() => report.value?.key_positions.filter((k) => !k.review) ?? []);
 
+/** 在棋盘上查看：总是报告所属的会话中的这一着 */
 async function view(nodeId: number) {
+  const r = report.value;
+  if (!r) return;
   wb.dialogs.report = false;
-  await selectNode(nodeId);
+  if (study.value?.id === r.study_id) await selectNode(nodeId);
+  else await openStudy(r.study_id, nodeId);
 }
 
 async function add(k: KeyPosition) {

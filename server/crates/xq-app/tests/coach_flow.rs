@@ -844,8 +844,9 @@ fn asking_about_a_comparison_answers_from_its_evidence_and_keeps_the_answer() {
     service.update_config(cfg).unwrap();
     let stale = service.coach_answers(pair("h0g2")).unwrap();
     assert!(stale.iter().all(|a| a.status == CoachStatus::Stale && !a.result_current), "{:?}", stale.iter().map(|a| &a.reason).collect::<Vec<_>>());
+    // 状态版本递增：设置改变前读取的“当前有效”不能在界面上覆盖之后的“已过期”
+    assert!(stale.iter().all(|a| a.seq > listed[0].seq), "设置改变后状态版本递增");
     assert!(stale[0].reason.as_deref().unwrap().contains("设置已改变"));
     assert!(stale[0].record.as_ref().unwrap().result.is_some(), "过期的回答仍然保留");
     service.shutdown();
 }
-

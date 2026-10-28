@@ -4,8 +4,9 @@
 //    请求中只有这组对比的证据；再次打开这组对比时直接显示回答，不再调用模型；
 // C. 输出不合格时修正一次后显示，修正后仍不合格时说明原因、可以重新提问；回答期间关闭对比、换到别的着法，
 //    回答仍归属原来的问题；每次调用都计入今天的次数；
-// D. 讲解设置改变后，回答标为过期，可以重新回答。
-import { BASE, bridge, check, launch, move, snap } from "../lib.mjs";
+// D. 对比面板保持打开时在设置中修改学习水平：回答立即标为过期；设置改变前读取、晚到的旧状态不能把它恢复为当前有效；
+//    可以重新回答。
+import { BASE, bridge, check, hold, launch, move, snap } from "../lib.mjs";
 
 const LLM = process.env.MOCK_LLM ?? "http://127.0.0.1:1440";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -150,11 +151,31 @@ check((await answerOf("my_move").getByTestId("coach-answer-error").count()) === 
 await closeCompare();
 
 // ---------- D. 设置改变后过期 ----------
-await coachConfig({ enabled: true, audience: "advanced" });
+// 打开这组对比时读取回答状态，拦住这次的响应（设置改变前读取的旧状态）
+let firstRead = true;
+const oldRead = await hold(page, "coach_answers", {
+  match: () => {
+    const m = firstRead;
+    firstRead = false;
+    return m;
+  },
+});
 await openTrialCompare();
+await oldRead.arrived;
+// 对比面板保持打开，在设置中把学习水平改为高级
+await page.getByRole("button", { name: "设置" }).click();
+const drawer = page.locator(".n-drawer");
+await drawer.locator(".n-form-item", { hasText: "学习水平" }).locator(".n-base-selection").click();
+await page.locator(".n-base-select-option", { hasText: "高级" }).click();
+await drawer.getByTestId("save-settings").click();
+await drawer.getByTestId("settings-state").filter({ hasText: "所有修改已保存" }).waitFor();
+await page.keyboard.press("Escape");
+await drawer.waitFor({ state: "hidden" });
 const stale = answerOf("my_move").getByTestId("coach-answer-stale");
 await stale.waitFor();
-check((await stale.innerText()).includes("设置已改变") && (await stale.innerText()).includes("重新回答"), "讲解设置改变后标为过期，可以重新回答");
+check((await stale.innerText()).includes("设置已改变") && (await stale.innerText()).includes("重新回答"), "对比面板保持打开时修改设置，回答立即标为过期，可以重新回答");
+await oldRead.release();
+check((await stale.count()) === 1, "设置改变前读取的旧状态晚到，不会把回答恢复为当前有效");
 check((await askArea.getByTestId("coach-ask-my_move").count()) === 0, "过期的问题在回答卡片中重新回答，不在上方重复列出");
 const callsBefore = (await calls()).length;
 await stale.getByRole("button", { name: "重新回答" }).click();

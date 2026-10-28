@@ -2,9 +2,10 @@
 // A. 本局报告：程序选出的关键局面写明依据（练习记录、收藏），值得保留的判断，说明评价的口径；
 //    可以在棋盘上查看、加入复习；先想后讲中不能打开报告（会透露尚未揭示的着法）；
 // B. 专题：卡片附程序根据规则事实建议的主题与依据；用户标记“我当时的问题”；
-//    同一个问题标记到两张卡片时推荐练习并写明依据；按专题练一组。
+//    同一个问题标记到两张卡片时推荐练习并写明依据；按专题练一组；
+// C. 报告属于打开时的那盘棋：先打开的另一盘棋的报告晚到，不覆盖当前的报告，查看时打开报告所属的会话。
 // 引擎的评价会随环境变化，这里只核对由练习记录与收藏决定的部分。
-import { BASE, bridge, check, launch, snap } from "../lib.mjs";
+import { BASE, bridge, check, hold, launch, snap } from "../lib.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const created = await bridge("create_study", {
@@ -95,6 +96,31 @@ await option.click();
 await dialog.getByTestId("review-start-topic").click();
 await progress.waitFor();
 check((await progress.innerText()).startsWith("专题：保护关系变化"), `按主题练一组：${optionText}`);
+await page.keyboard.press("Escape");
+await dialog.waitFor({ state: "hidden" });
+
+// ---------- C. 报告属于打开时的那盘棋 ----------
+const otherName = `报告乙 ${Date.now() % 100000}`;
+const other = await bridge("create_study", { req: { name: otherName, kind: { type: "record", text: "1. 兵七进一 卒7进1" }, orientation: null, user_side: null } });
+// 打开这盘棋（甲）的报告并拦住响应；关闭后切换到乙、打开乙的报告，乙的报告返回后再放行甲的
+const late = await hold(page, "game_report", { match: (body) => body.id === sid });
+await page.getByTestId("report-open").click();
+await late.arrived;
+await page.keyboard.press("Escape");
+await report.waitFor({ state: "hidden" });
+await page.getByRole("button", { name: "新建 / 打开" }).click();
+await page.locator(".n-tabs-tab", { hasText: "已保存" }).click();
+await page.locator(".saved-row", { hasText: otherName }).locator(".saved-main").click();
+await page.locator('[data-node="1"] .notation', { hasText: "兵七进一" }).waitFor();
+await page.getByTestId("report-open").click();
+await report.getByTestId("report-overview").filter({ hasText: otherName }).waitFor();
+await late.release();
+check(
+  (await report.getByTestId("report-overview").innerText()).includes(otherName) && (await report.locator(".loading").count()) === 0,
+  "先打开的另一盘棋的报告晚到，不覆盖当前这盘棋的报告",
+);
+check((await bridge("game_report", { id: other.study.study.id })).study_id === other.study.study.id, "报告按会话取得");
+await page.keyboard.press("Escape");
 
 console.log(problems.length ? `控制台问题：\n${problems.join("\n")}` : "  ✓ 控制台无错误");
 if (problems.length) process.exitCode = 1;

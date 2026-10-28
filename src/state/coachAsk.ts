@@ -5,7 +5,7 @@ import { api, errorMessage, on } from "../api/backend";
 import type * as T from "../api/types";
 import { cmp } from "./compare";
 import { blockedReason, newerAnswer, questionKey, questionText, QUESTION_KINDS } from "./coachQuestions";
-import { previewFrom, refreshStatus } from "./workbench";
+import { previewFrom, refreshStatus, wb } from "./workbench";
 
 export const ask = reactive({
   answers: {} as Record<string, T.AnswerView>,
@@ -91,6 +91,17 @@ watch(
   },
   (key) => {
     if (key) void loadAnswers();
+  },
+);
+
+// 讲解设置（学习水平、模型等）或 AI 讲解是否可用改变后，回答是否过期也随之改变：对比面板保持打开时也立即重新取回
+watch(
+  () => {
+    const s = wb.status;
+    return s ? JSON.stringify([s.config.coach, s.coach.ready]) : null;
+  },
+  (now, before) => {
+    if (before !== null && now !== before && cmp.view) void loadAnswers();
   },
 );
 
