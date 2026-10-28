@@ -413,7 +413,7 @@ onMounted(loadReviews);
                   :title="`${GOAL_LABEL[a.goal]}${a.decision?.verdict ? ` · ${decisionTitle(a.decision)}` : ''}`"
                   >{{ attemptMark(a).text }}</span
                 >
-                <span class="legend">（复现棋谱 ✓ 一致 ✗ 不同；局面决策 ○ 一致或接近 △ 值得注意）</span>
+                <span class="legend">（复现棋谱 ✓ 一致 ✗ 不同；局面决策 ○ 比较支持这个选择 △ 不支持 · 无法判断）</span>
               </p>
               <p v-if="attempt?.goal === 'decision' && !suggestion && decision?.state !== 'pending'" class="muted" data-testid="review-self-check">
                 与棋谱一致或评分接近，不等于已经理解：对照原来的意图与这一步实际的变化，说得清理由再标为“已理解”。

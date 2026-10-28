@@ -15,6 +15,7 @@ import {
   historyText,
   newerItem,
   nextDueId,
+  outcomeOf,
   parseIntervals,
   positionLabel,
   recommendation,
@@ -181,12 +182,17 @@ test("同一张卡片的两份数据：修改次数多的较新，较早读取�
   assert.equal(newerItem(saved, renamed), renamed);
 });
 
-test("局面决策：只在留下值得注意的问题时建议再练，与棋谱一致不自动建议已理解", () => {
+test("局面决策：按这次比较是否支持这个选择建议状态，与棋谱一致不自动建议已理解", () => {
   const base = { at: 1, choice: { mv: "b9c7", notation: "马2进3" }, matched: false, intent: null, reflection: null, decision: null };
-  const decided = (verdict: DecisionFeedback["verdict"], state: DecisionFeedback["state"] = "ready"): ReviewAttempt => ({
+  const SUPPORT = { same_as_record: "supported", reasonable: "supported", noteworthy: "not_supported", unclear: "unknown" } as const;
+  const decided = (
+    verdict: DecisionFeedback["verdict"],
+    state: DecisionFeedback["state"] = "ready",
+    support: DecisionFeedback["support"] = verdict ? SUPPORT[verdict] : "unknown",
+  ): ReviewAttempt => ({
     ...base,
     goal: "decision",
-    decision: { state, verdict, reference: null, points: [], conditions: null, error: state === "failed" ? "引擎不可用" : null },
+    decision: { state, verdict, support, reference: null, points: [], conditions: null, error: state === "failed" ? "引擎不可用" : null },
   });
   // 复现棋谱沿用是否与棋谱一致
   assert.equal(suggestionFor({ ...base, goal: "recall", matched: true }), "understood");
@@ -203,6 +209,12 @@ test("局面决策：只在留下值得注意的问题时建议再练，与棋�
   assert.deepEqual(attemptMark(decided("reasonable")), { text: "○", tone: "ok" });
   assert.deepEqual(attemptMark(decided("noteworthy")), { text: "△", tone: "miss" });
   assert.deepEqual(attemptMark(decided(null, "pending")), { text: "·", tone: "neutral" });
+  // 与棋谱一致，但棋谱着法明显不如引擎参考：仍显示“与棋谱一致”，但不算选对，建议再练
+  const knownBad = { ...decided("same_as_record", "ready", "not_supported"), matched: true };
+  assert.equal(decisionTitle(knownBad.decision!), "与棋谱一致");
+  assert.equal(suggestionFor(knownBad), "again");
+  assert.deepEqual(attemptMark(knownBad), { text: "△", tone: "miss" });
+  assert.equal(outcomeOf(knownBad), "missed");
 });
 
 test("专题：用户确认的问题在前，推荐只按同一个问题标记到两张以上", () => {

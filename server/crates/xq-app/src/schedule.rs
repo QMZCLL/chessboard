@@ -9,7 +9,7 @@
 //! 间隔是可以调整的初始设计，不宣称对所有人都最合适。早期的卡片没有安排：已理解的按上次复习后第三档计，
 //! 其余按加入时到期。
 
-use crate::decision::DecisionVerdict;
+use crate::decision::DecisionSupport;
 use crate::decision::PracticeGoal;
 use crate::review::ReviewAttempt;
 use crate::review::ReviewCard;
@@ -24,7 +24,7 @@ pub enum Outcome {
     Revealed,
     /// 走了，但没有独立选对。
     Missed,
-    /// 独立选对：复现棋谱与棋谱一致；局面决策与棋谱一致或与参考评分接近。
+    /// 独立选对：复现棋谱与棋谱一致；局面决策中这次比较支持这个选择。
     Independent,
 }
 
@@ -32,11 +32,11 @@ pub fn outcome_of(attempt: Option<&ReviewAttempt>) -> Outcome {
     let Some(a) = attempt.filter(|a| a.choice.is_some()) else { return Outcome::Revealed };
     let independent = match a.goal {
         PracticeGoal::Recall => a.matched,
-        // 比较还没有结果或无法判断时，只有与棋谱一致才算独立选对
-        PracticeGoal::Decision => match a.decision.as_ref().and_then(|d| d.verdict) {
-            Some(DecisionVerdict::SameAsRecord | DecisionVerdict::Reasonable) => true,
-            Some(DecisionVerdict::Noteworthy) => false,
-            Some(DecisionVerdict::Unclear) | None => a.matched,
+        // 局面决策按这次比较是否支持这个选择，与是否与棋谱一致分开；比较还没有结果或无法判断时，只有与棋谱一致才算
+        PracticeGoal::Decision => match a.decision.as_ref().map(|d| d.support_for(a.choice.as_ref().map(|c| c.mv))) {
+            Some(DecisionSupport::Supported) => true,
+            Some(DecisionSupport::NotSupported) => false,
+            _ => a.matched,
         },
     };
     if independent { Outcome::Independent } else { Outcome::Missed }
@@ -71,6 +71,7 @@ pub fn due_at(card: &ReviewCard, intervals: &[u32]) -> i64 {
 mod tests {
     use super::*;
     use crate::decision::DecisionFeedback;
+    use crate::decision::DecisionVerdict;
     use crate::decision::DecisionState;
     use crate::review::ReviewMove;
 
@@ -87,6 +88,8 @@ mod tests {
             decision: verdict.map(|v| DecisionFeedback {
                 state: DecisionState::Ready,
                 verdict: Some(v),
+                // 按早期记录的规则从结论推算
+                support: crate::decision::DecisionSupport::Legacy,
                 reference: None,
                 points: vec![],
                 conditions: None,
@@ -125,6 +128,10 @@ mod tests {
         assert_eq!(outcome_of(Some(&attempt(true, false, Decision, Some(Noteworthy)))), Outcome::Missed);
         // 无法判断或还没有结果：只有与棋谱一致才算独立选对
         assert_eq!(outcome_of(Some(&attempt(true, false, Decision, Some(Unclear)))), Outcome::Missed);
+        // 与棋谱一致，但这次比较不支持（棋谱着法明显不如引擎参考）：不算独立选对
+        let mut known_bad = attempt(true, true, Decision, Some(SameAsRecord));
+        known_bad.decision.as_mut().unwrap().support = crate::decision::DecisionSupport::NotSupported;
+        assert_eq!(outcome_of(Some(&known_bad)), Outcome::Missed);
         assert_eq!(outcome_of(Some(&attempt(true, true, Decision, None))), Outcome::Independent);
     }
 }

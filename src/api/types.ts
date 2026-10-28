@@ -309,6 +309,11 @@ export type DecisionVerdict = "same_as_record" | "reasonable" | "noteworthy" | "
 export interface DecisionFeedback {
   state: "pending" | "ready" | "failed";
   verdict: DecisionVerdict | null;
+  /**
+   * 这次比较是否支持这个选择（局面决策的评价依据，与是否与棋谱一致分开）：
+   * 棋谱着法明显不如引擎参考时，走了棋谱着法也是 not_supported；比较未完成或无法判断时为 unknown
+   */
+  support: "supported" | "not_supported" | "unknown";
   /** 用来对照的着法：棋谱着法，或本次搜索中明显好于它的引擎参考 */
   reference: ReviewMove | null;
   /** 程序给出的说明 */

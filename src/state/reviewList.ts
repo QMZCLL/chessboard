@@ -110,15 +110,16 @@ export function decisionTitle(d: DecisionFeedback): string {
  */
 export function suggestionFor(a: ReviewAttempt): ReviewStatus | null {
   if (a.goal === "recall") return suggestedStatus(a.matched);
-  return a.decision?.verdict === "noteworthy" ? "again" : null;
+  return a.decision?.support === "not_supported" ? "again" : null;
 }
 
 /** 最近几次复习中的一次：练习目标与结果的简短标记。 */
 export function attemptMark(a: ReviewAttempt): { text: string; tone: "ok" | "miss" | "neutral" } {
   if (a.goal === "recall" || !a.choice) return a.matched ? { text: "✓", tone: "ok" } : { text: "✗", tone: "miss" };
-  const v = a.decision?.verdict;
-  if (v === "same_as_record" || v === "reasonable") return { text: "○", tone: "ok" };
-  if (v === "noteworthy") return { text: "△", tone: "miss" };
+  // 局面决策按这次比较是否支持这个选择：与棋谱一致、但棋谱着法明显不如引擎参考时也是值得注意
+  const s = a.decision?.support;
+  if (s === "supported") return { text: "○", tone: "ok" };
+  if (s === "not_supported") return { text: "△", tone: "miss" };
   return { text: "·", tone: "neutral" };
 }
 
@@ -155,9 +156,9 @@ export type AttemptOutcome = "independent" | "missed" | "revealed";
 export function outcomeOf(a: ReviewAttempt): AttemptOutcome {
   if (!a.choice) return "revealed";
   if (a.goal === "recall") return a.matched ? "independent" : "missed";
-  const v = a.decision?.verdict;
-  if (v === "same_as_record" || v === "reasonable") return "independent";
-  if (v === "noteworthy") return "missed";
+  const s = a.decision?.support;
+  if (s === "supported") return "independent";
+  if (s === "not_supported") return "missed";
   return a.matched ? "independent" : "missed";
 }
 

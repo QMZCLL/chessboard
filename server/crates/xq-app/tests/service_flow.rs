@@ -1142,3 +1142,40 @@ fn game_report_picks_key_positions_from_practice_and_marks() {
     assert_eq!(card.issues, [Issue::MissedThreat, Issue::MissedReply]);
     service.shutdown();
 }
+
+#[test]
+fn a_recalled_record_move_that_the_search_shows_worse_is_not_kept_as_a_good_choice() {
+    // 第 1 着炮二平五：多候选搜索的首选是马二进三，实际着法单独分析明显更低
+    let script = "@go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 200 nodes 10 time 1 pv h0g2 h9g7\n\
+        info depth 5 seldepth 5 multipv 2 score cp 190 nodes 10 time 1 pv b0c2 h9g7\n\
+        bestmove h0g2\n\
+        @go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 50 nodes 10 time 1 pv h2e2 h9g7\n\
+        bestmove h2e2\n";
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("完整讲解", |e, v| e == "explanation_updated" && v["node_id"] == first && v["status"] == "detailed");
+    service
+        .record_practice(PracticeRequest {
+            study_id: sid.clone(),
+            node_id: first,
+            hints_used: 0,
+            revealed_directly: false,
+            first_choice: Some(mv("h2e2")),
+            hints: None,
+        })
+        .unwrap();
+    let report = service.game_report(&sid).unwrap();
+    assert!(report.good_choices.is_empty(), "回忆对了棋谱着法，但它已被评价为明显不如首选：{:?}", report.good_choices);
+    let key = &report.key_positions[0];
+    assert!(key.reasons.iter().any(|r| r == "实际着法明显不如首选（比首选低约 150 分）"), "{:?}", key.reasons);
+    assert_eq!(report.practice.matched, 1, "统计中仍记为第一步与棋谱一致");
+    service.shutdown();
+}

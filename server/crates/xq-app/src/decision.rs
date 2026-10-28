@@ -4,6 +4,8 @@
 //! - 复现棋谱只看是否与棋谱相同；局面决策承认与棋谱不同的合理选择：棋谱中的着法也可能不是好的参考，
 //!   先用多候选搜索找出引擎参考，再对三步做同一次搜索（`searchmoves`），按同一深度的评分比较。
 //! - 反馈只有四种：与棋谱一致；与棋谱不同，但与参考评分接近；留下了值得注意的问题；分析尚不充分。
+//!   “与棋谱一致”只陈述匹配的事实；这次比较是否支持这个选择另外记录（`DecisionSupport`）：
+//!   棋谱着法在同一次搜索中明显不如引擎参考时，走了棋谱着法也不算决策正确。
 //!   评分、边界与将杀分沿用试走对比的判断（`judge_pair`），不完整的搜索不评价优劣。
 //!   对比中“略逊”的分差（见 `NOTEWORTHY_GAP`）在练习中仍算与参考接近：快速搜索里这样的差距不足以说明选择有问题。
 //! - 意图对照只用规则事实（吃子、将军、出子、受攻击的棋子、保护关系），不推测用户的想法。
@@ -117,11 +119,28 @@ pub enum DecisionVerdict {
     Unclear,
 }
 
+/// 这次比较是否支持这个选择：局面决策的评价依据，与“是否与棋谱一致”分开。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionSupport {
+    /// 与参考评分接近，或就是参考。
+    Supported,
+    /// 明显不如参考（包括走了在同一次搜索中明显不如引擎参考的棋谱着法）。
+    NotSupported,
+    /// 比较还没有结果、分析不完整或没有得到结果。
+    Unknown,
+    /// 早期的记录没有这一项，读取时按结论推算（见 `DecisionFeedback::support_for`）。
+    #[default]
+    Legacy,
+}
+
 /// 局面决策的反馈。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecisionFeedback {
     pub state: DecisionState,
     pub verdict: Option<DecisionVerdict>,
+    #[serde(default)]
+    pub support: DecisionSupport,
     /// 用来对照的着法：棋谱中的着法，或本次搜索中明显好于它的引擎参考。
     pub reference: Option<ReviewMove>,
     /// 程序给出的说明：同一次搜索的评分比较、对方的回应、分析是否完整。
@@ -132,7 +151,36 @@ pub struct DecisionFeedback {
 
 impl DecisionFeedback {
     fn pending() -> Self {
-        Self { state: DecisionState::Pending, verdict: None, reference: None, points: Vec::new(), conditions: None, error: None }
+        Self {
+            state: DecisionState::Pending,
+            verdict: None,
+            support: DecisionSupport::Unknown,
+            reference: None,
+            points: Vec::new(),
+            conditions: None,
+            error: None,
+        }
+    }
+
+    /// 这次比较是否支持 `choice`；早期的记录按结论与对照着法推算。
+    pub fn support_for(&self, choice: Option<Move>) -> DecisionSupport {
+        if self.support != DecisionSupport::Legacy {
+            return self.support;
+        }
+        if self.state != DecisionState::Ready {
+            return DecisionSupport::Unknown;
+        }
+        match self.verdict {
+            Some(DecisionVerdict::Reasonable) => DecisionSupport::Supported,
+            Some(DecisionVerdict::Noteworthy) => DecisionSupport::NotSupported,
+            // 对照着法换成了明显更好的引擎参考，说明棋谱着法不是好的选择
+            Some(DecisionVerdict::SameAsRecord) => match (&self.reference, choice) {
+                (Some(r), Some(c)) if r.mv == c => DecisionSupport::Supported,
+                (Some(_), Some(_)) => DecisionSupport::NotSupported,
+                _ => DecisionSupport::Unknown,
+            },
+            Some(DecisionVerdict::Unclear) | None => DecisionSupport::Unknown,
+        }
     }
 
     fn failed(error: String) -> Self { Self { state: DecisionState::Failed, error: Some(error), ..Self::pending() } }
@@ -141,6 +189,11 @@ impl DecisionFeedback {
 /// 一组受攻击棋子的称呼。
 fn labels(board: &xq_core::Board, squares: impl Iterator<Item = xq_core::Square>) -> String {
     join_labels(&squares.map(|sq| label_at(board, sq)).collect::<Vec<_>>())
+}
+
+/// 一种威胁的说明。
+pub(crate) fn threat_kind(t: &facts::Threat) -> &'static str {
+    if t.defended { "受到价值更低的棋子攻击（能吃回，但交换吃亏）" } else { "受到攻击、缺少保护" }
 }
 
 /// 与意图对照的规则事实。
@@ -165,22 +218,18 @@ fn intent_checks(intent: Intent, f: &facts::MoveFacts) -> Vec<String> {
             if f.was_in_check {
                 out.push("走之前正被将军，这一步应将".to_string());
             }
-            let before = &f.before.board;
-            let after = &f.after.board;
-            let threatened = |list: &[facts::Threat]| list.iter().filter(|t| !t.defended).map(|t| t.square).collect::<Vec<_>>();
-            let (was, now) = (threatened(&f.threats_before), threatened(&f.threats_after));
-            // 走动的棋子换了位置：按它的新位置判断是否仍受威胁
-            let still = |sq: xq_core::Square| if sq == f.mv.from { now.contains(&f.mv.to) } else { now.contains(&sq) };
-            let (kept, solved): (Vec<_>, Vec<_>) = was.iter().copied().partition(|sq| still(*sq));
-            if was.is_empty() && !f.was_in_check {
+            let (before, after) = (&f.before.board, &f.after.board);
+            if f.threats_before.is_empty() && !f.was_in_check {
                 out.push("走之前没有己方棋子直接受到威胁".to_string());
             }
-            if !solved.is_empty() {
-                out.push(format!("{}原本受到攻击、缺少保护，现在不再直接受威胁", labels(before, solved.into_iter())));
-            }
-            if !kept.is_empty() {
-                let at = kept.into_iter().map(|sq| if sq == f.mv.from { f.mv.to } else { sq });
-                out.push(format!("{}仍然受到攻击、缺少保护", labels(after, at)));
+            // 威胁有两种（见 `facts::en_prise`）：被吃后不能吃回；能吃回，但攻击者价值更低、交换吃亏
+            for t in &f.threats_before {
+                // 走动的棋子换了位置：按它的新位置判断是否仍受威胁
+                let at = if t.square == f.mv.from { f.mv.to } else { t.square };
+                match f.threats_after.iter().find(|n| n.square == at) {
+                    None => out.push(format!("{}原本{}，现在不再受到这个威胁", label_at(before, t.square), threat_kind(t))),
+                    Some(now) => out.push(format!("{}仍然{}", label_at(after, at), threat_kind(now))),
+                }
             }
             if !f.new_protects.is_empty() {
                 out.push(format!("这一步保护了{}", labels(after, f.new_protects.iter().map(|r| r.target))));
@@ -217,17 +266,19 @@ pub fn judge_decision(
     before: &Position, choice: Move, answer: Move, best: Option<Move>, lines: &[EngineLine], complete: bool,
 ) -> DecisionFeedback {
     let line = |mv: Move| lines.iter().find(|l| l.mv == mv && l.pv.first() == Some(&mv) && line_is_legal(before, &l.pv));
-    let ready = |verdict: DecisionVerdict, reference: Move, points: Vec<String>| DecisionFeedback {
+    let ready = |verdict: DecisionVerdict, support: DecisionSupport, reference: Move, points: Vec<String>| DecisionFeedback {
         state: DecisionState::Ready,
         verdict: Some(verdict),
+        support,
         reference: Some(review_move(before, reference)),
         points,
         conditions: None,
         error: None,
     };
     if !complete {
+        // 与棋谱一致是事实，但棋谱着法的好坏也没有得到比较
         let verdict = if choice == answer { DecisionVerdict::SameAsRecord } else { DecisionVerdict::Unclear };
-        return ready(verdict, answer, vec!["本次搜索没有完成整轮，暂不评价走法优劣".to_string()]);
+        return ready(verdict, DecisionSupport::Unknown, answer, vec!["本次搜索没有完成整轮，暂不评价走法优劣".to_string()]);
     }
     let mut points = Vec::new();
     // 对照着法：棋谱中的着法；引擎参考在同一次搜索中明显好于它时改用引擎参考
@@ -240,31 +291,35 @@ pub fn judge_decision(
         points.push(format!("本次搜索中，{text}：棋谱中的这一着不一定是最好的参考，下面以引擎参考{}对照", name(before, b)));
     }
     if choice == answer {
-        return ready(DecisionVerdict::SameAsRecord, reference, points);
+        // 棋谱着法明显不如引擎参考时，与棋谱一致不等于选对
+        let support = if reference == answer { DecisionSupport::Supported } else { DecisionSupport::NotSupported };
+        return ready(DecisionVerdict::SameAsRecord, support, reference, points);
     }
     if choice == reference {
         // 这次的选择就是本次搜索中明显好于棋谱着法的引擎参考
-        return ready(DecisionVerdict::Reasonable, reference, points);
+        return ready(DecisionVerdict::Reasonable, DecisionSupport::Supported, reference, points);
     }
     let (Some(lc), Some(lr)) = (line(choice), line(reference)) else {
         points.push("搜索没有同时给出这两步的结果，暂不评价走法优劣".to_string());
-        return ready(DecisionVerdict::Unclear, reference, points);
+        return ready(DecisionVerdict::Unclear, DecisionSupport::Unknown, reference, points);
     };
     let (choice_name, reference_name) = (name(before, choice), name(before, reference));
     let (outcome, text) = judge_pair(lc, lr, &choice_name, &reference_name);
     points.push(format!("同一次搜索中，{text}"));
-    let verdict = match outcome {
-        CompareOutcome::MineBetter | CompareOutcome::Close => DecisionVerdict::Reasonable,
-        CompareOutcome::ReferenceBetter if exact_gap(lc, lr).is_some_and(|d| d <= NOTEWORTHY_GAP) => DecisionVerdict::Reasonable,
+    let (verdict, support) = match outcome {
+        CompareOutcome::MineBetter | CompareOutcome::Close => (DecisionVerdict::Reasonable, DecisionSupport::Supported),
+        CompareOutcome::ReferenceBetter if exact_gap(lc, lr).is_some_and(|d| d <= NOTEWORTHY_GAP) => {
+            (DecisionVerdict::Reasonable, DecisionSupport::Supported)
+        }
         CompareOutcome::ReferenceBetter => {
             if let Some(reply) = lc.pv.get(1) {
                 points.push(format!("走{choice_name}之后，对方最值得关注的回应是{}", name(&before.after(choice), *reply)));
             }
-            DecisionVerdict::Noteworthy
+            (DecisionVerdict::Noteworthy, DecisionSupport::NotSupported)
         }
-        CompareOutcome::Unclear | CompareOutcome::NotAnalyzed => DecisionVerdict::Unclear,
+        CompareOutcome::Unclear | CompareOutcome::NotAnalyzed => (DecisionVerdict::Unclear, DecisionSupport::Unknown),
     };
-    ready(verdict, reference, points)
+    ready(verdict, support, reference, points)
 }
 
 impl Inner {
@@ -372,7 +427,7 @@ mod tests {
         // 棋谱：炮二平五；这次的选择：马二进三（接近）或兵三进一（明显低）
         let lines = [line("h2e2", 30, &["h2e2", "h9g7"]), line("h0g2", 20, &["h0g2", "b9c7"]), line("g3g4", -60, &["g3g4", "h7e7"])];
         let same = judge_decision(&start, mv("h2e2"), mv("h2e2"), None, &lines, true);
-        assert_eq!(same.verdict, Some(DecisionVerdict::SameAsRecord));
+        assert_eq!((same.verdict, same.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::Supported));
         let close = judge_decision(&start, mv("h0g2"), mv("h2e2"), None, &lines, true);
         assert_eq!(close.verdict, Some(DecisionVerdict::Reasonable));
         assert!(close.points[0].contains("评分接近"), "{:?}", close.points);
@@ -382,7 +437,7 @@ mod tests {
         assert_eq!(slightly.verdict, Some(DecisionVerdict::Reasonable));
         assert!(slightly.points[0].contains("低约 70 分（略逊）"), "{:?}", slightly.points);
         let worse = judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &lines, true);
-        assert_eq!(worse.verdict, Some(DecisionVerdict::Noteworthy));
+        assert_eq!((worse.verdict, worse.support), (Some(DecisionVerdict::Noteworthy), DecisionSupport::NotSupported));
         assert!(worse.points[0].contains("兵三进一比炮二平五低约 90 分"), "{:?}", worse.points);
         assert_eq!(worse.points[1], "走兵三进一之后，对方最值得关注的回应是炮8平5");
         assert_eq!(worse.reference.unwrap().notation, "炮二平五");
@@ -399,10 +454,16 @@ mod tests {
         assert_eq!(close_to_best.verdict, Some(DecisionVerdict::Reasonable));
         // 走了引擎参考本身
         assert_eq!(judge_decision(&start, mv("h2e2"), mv("g3g4"), Some(mv("h2e2")), &lines, true).verdict, Some(DecisionVerdict::Reasonable));
-        // 与棋谱一致，但棋谱着法明显不如引擎参考：仍是“与棋谱一致”，同时说明这一点
+        // 与棋谱一致，但棋谱着法明显不如引擎参考：仍陈述“与棋谱一致”，但这次比较不支持这个选择
         let same = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &lines, true);
-        assert_eq!(same.verdict, Some(DecisionVerdict::SameAsRecord));
+        assert_eq!((same.verdict, same.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::NotSupported));
         assert!(same.points[0].contains("不一定是最好的参考"));
+        // 早期的记录没有这一项：按结论与对照着法推算
+        let legacy = DecisionFeedback { support: DecisionSupport::Legacy, ..same.clone() };
+        assert_eq!(legacy.support_for(Some(mv("g3g4"))), DecisionSupport::NotSupported);
+        let legacy_ok = DecisionFeedback { support: DecisionSupport::Legacy, ..close_to_best.clone() };
+        assert_eq!(legacy_ok.support_for(Some(mv("h0g2"))), DecisionSupport::Supported);
+        assert_eq!(DecisionFeedback::pending().support_for(Some(mv("h0g2"))), DecisionSupport::Unknown);
     }
 
     #[test]
@@ -410,8 +471,11 @@ mod tests {
         let start = Position::startpos();
         let lines = [line("h2e2", 30, &["h2e2"]), line("g3g4", -60, &["g3g4"])];
         let partial = judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &lines, false);
-        assert_eq!(partial.verdict, Some(DecisionVerdict::Unclear));
+        assert_eq!((partial.verdict, partial.support), (Some(DecisionVerdict::Unclear), DecisionSupport::Unknown));
         assert!(partial.points[0].contains("没有完成整轮"));
+        // 搜索不完整时走了棋谱着法：陈述一致，但棋谱着法的好坏也没有得到比较
+        let partial_same = judge_decision(&start, mv("h2e2"), mv("h2e2"), None, &lines, false);
+        assert_eq!((partial_same.verdict, partial_same.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::Unknown));
         let mut bounded = lines.clone();
         bounded[0].bound = Bound::Lower;
         bounded[1].bound = Bound::Lower;
@@ -437,8 +501,21 @@ mod tests {
         // 受到车攻击、没有保护的炮走开；仍留在车的线路上则仍受威胁
         let attacked = parse_position("r3k4/9/9/9/C8/9/9/9/9/3K5 w").unwrap();
         let away = reflect(&attacked, mv("a5b5"), Some(Intent::Defend), &ctx).checks;
-        assert!(away.len() == 1 && away[0].contains("原本受到攻击") && away[0].contains("不再直接受威胁"), "{away:?}");
+        assert!(away.len() == 1 && away[0].contains("原本受到攻击") && away[0].contains("现在不再受到这个威胁"), "{away:?}");
         let stays = reflect(&attacked, mv("a5a4"), Some(Intent::Defend), &ctx).checks;
         assert!(stays.iter().any(|c| c.contains("仍然受到攻击")), "{stays:?}");
+        // 有保护、但受到价值更低的棋子攻击（卒攻击车，马能吃回）：同样是威胁，走开后解除
+        let pawn = parse_position("4k4/9/9/9/p3P4/R8/2N6/9/9/4K4 w").unwrap();
+        let moved = reflect(&pawn, mv("a4b4"), Some(Intent::Defend), &ctx).checks;
+        assert!(!moved.iter().any(|c| c.contains("没有己方棋子直接受到威胁")), "{moved:?}");
+        assert!(
+            moved.iter().any(|c| c.contains("车原本受到价值更低的棋子攻击（能吃回，但交换吃亏），现在不再受到这个威胁")),
+            "{moved:?}"
+        );
+        // 车不动（走帅）：仍受威胁；马走开后车失去保护，威胁变为缺少保护
+        let other = reflect(&pawn, mv("e0e1"), Some(Intent::Defend), &ctx).checks;
+        assert!(other.iter().any(|c| c.contains("车仍然受到价值更低的棋子攻击")), "{other:?}");
+        let unguarded = reflect(&pawn, mv("c3d5"), Some(Intent::Defend), &ctx).checks;
+        assert!(unguarded.iter().any(|c| c.contains("车仍然受到攻击、缺少保护")), "{unguarded:?}");
     }
 }

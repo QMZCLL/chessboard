@@ -181,7 +181,10 @@ impl AppService {
                 if p.revealed_directly {
                     weights.push((KeyReason::Choice, 1, "先想后讲：没有走子就看了讲解".into()));
                 } else if p.matched {
-                    good_choices.push(ReportItem { node_id, label: label.clone(), text: format!("先想后讲中第一步与棋谱一致：{notation}") });
+                    // 与棋谱一致是回忆对了；棋谱着法本身已被评价为明显不如首选时，不算值得保留的判断
+                    if !verdict(expl).is_some_and(|v| matches!(v.tone, VerdictTone::Mistake | VerdictTone::Blunder)) {
+                        good_choices.push(ReportItem { node_id, label: label.clone(), text: format!("先想后讲中第一步与棋谱一致：{notation}") });
+                    }
                 } else if let Some((choice, v)) = attempt {
                     match v {
                         Some(v) if matches!(v.tone, VerdictTone::Mistake | VerdictTone::Blunder) => {

@@ -336,6 +336,13 @@ impl Inner {
     fn item_of(&self, mut card: ReviewCard, study: Option<&Study>) -> ReviewItem {
         let intervals = self.config_snapshot().review.intervals_days;
         card.due_at = Some(schedule::due_at(&card, &intervals));
+        // 早期的比较结果没有“是否支持这个选择”，按结论推算后再交给界面
+        for a in &mut card.attempts {
+            let choice = a.choice.as_ref().map(|c| c.mv);
+            if let Some(d) = a.decision.as_mut() {
+                d.support = d.support_for(choice);
+            }
+        }
         let source_available = source_available(study, &card);
         let study_name = study.map(|s| s.name.clone()).unwrap_or_else(|| card.study_name.clone());
         let themes = topics::card_themes(&card.fen, card.answer.mv);

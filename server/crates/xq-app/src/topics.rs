@@ -69,9 +69,11 @@ pub fn card_themes(fen_before: &str, mv: Move) -> Vec<ThemeTag> {
     } else if !f.checkers.is_empty() {
         add(Theme::KingSafety, "这一步将军".into());
     }
-    let threatened: Vec<Square> = f.threats_before.iter().filter(|t| !t.defended).map(|t| t.square).collect();
-    if !threatened.is_empty() {
-        add(Theme::Threatened, format!("走之前{}受到攻击、缺少保护", labels(before, threatened.into_iter())));
+    // 两种威胁都算（见 `facts::en_prise`）：被吃后不能吃回；能吃回，但攻击者价值更低、交换吃亏
+    if !f.threats_before.is_empty() {
+        let why: Vec<String> =
+            f.threats_before.iter().map(|t| format!("{}{}", label_at(before, t.square), crate::decision::threat_kind(t))).collect();
+        add(Theme::Threatened, format!("走之前{}", why.join("；")));
     }
     if !f.new_protects.is_empty() {
         add(Theme::Protection, format!("这一步保护了{}", labels(after, f.new_protects.iter().map(|r| r.target))));
