@@ -3,13 +3,15 @@
 //    可以在棋盘上查看、加入复习；先想后讲中不能打开报告（会透露尚未揭示的着法）；
 // B. 专题：卡片附程序根据规则事实建议的主题与依据；用户标记“我当时的问题”；
 //    同一个问题标记到两张卡片时推荐练习并写明依据；按专题练一组；
-// C. 报告属于打开时的那盘棋：先打开的另一盘棋的报告晚到，不覆盖当前的报告，查看时打开报告所属的会话。
+// C. 报告属于打开时的那盘棋：先打开的另一盘棋的报告晚到，不覆盖当前的报告，查看时打开报告所属的会话；
+// D. “全部加入复习”整批属于开始时的那份报告：中途关闭报告、换到另一盘棋并打开它的报告，后续的卡片仍加入原来那盘棋。
 // 引擎的评价会随环境变化，这里只核对由练习记录与收藏决定的部分。
 import { BASE, bridge, check, hold, launch, snap } from "../lib.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const name = `整局报告 ${Date.now() % 100000}`;
 const created = await bridge("create_study", {
-  req: { name: "整局报告", kind: { type: "record", text: "1. 炮二平五 马8进7 2. 马二进三 车9平8 3. 车一平二 马2进3" }, orientation: null, user_side: null },
+  req: { name, kind: { type: "record", text: "1. 炮二平五 马8进7 2. 马二进三 车9平8 3. 车一平二 马2进3" }, orientation: null, user_side: null },
 });
 const sid = created.study.study.id;
 for (let i = 0; i < 200; i++) {
@@ -120,6 +122,44 @@ check(
   "先打开的另一盘棋的报告晚到，不覆盖当前这盘棋的报告",
 );
 check((await bridge("game_report", { id: other.study.study.id })).study_id === other.study.study.id, "报告按会话取得");
+await page.keyboard.press("Escape");
+await report.waitFor({ state: "hidden" });
+
+// ---------- D. 全部加入复习属于开始时的那份报告 ----------
+async function openSaved(studyName, firstMove) {
+  await page.getByRole("button", { name: "新建 / 打开" }).click();
+  await page.locator(".n-tabs-tab", { hasText: "已保存" }).click();
+  await page.locator(".saved-row", { hasText: studyName }).locator(".saved-main").click();
+  await page.locator('[data-node="1"] .notation', { hasText: firstMove }).waitFor();
+}
+const cardsOf = async (id) => (await bridge("list_reviews")).filter((i) => i.card.study_id === id).length;
+for (const i of await bridge("list_reviews")) await bridge("delete_review", { req: { id: i.card.id } });
+await openSaved(name, "炮二平五");
+const adds = [];
+const onRequest = (r) => {
+  if (r.url().includes("/__bridge/invoke/add_review")) adds.push(r.postDataJSON().req);
+};
+page.on("request", onRequest);
+// 拦住甲的第一条加入复习的响应；关闭报告、换到乙并打开乙的报告后再放行
+const first = await hold(page, "add_review", { match: (body) => body.req.study_id === sid });
+await page.getByTestId("report-open").click();
+await report.getByTestId("report-overview").filter({ hasText: name }).waitFor();
+const keys = await report.locator("[data-report-node]").count();
+await report.getByTestId("report-add-all").click();
+await first.arrived;
+await page.keyboard.press("Escape");
+await report.waitFor({ state: "hidden" });
+await openSaved(otherName, "兵七进一");
+await page.getByTestId("report-open").click();
+await report.getByTestId("report-overview").filter({ hasText: otherName }).waitFor();
+await first.release();
+for (let i = 0; i < 50 && (await cardsOf(sid)) < keys; i++) await sleep(200);
+page.off("request", onRequest);
+check(
+  adds.length === keys && adds.every((r) => r.study_id === sid) && (await cardsOf(sid)) === keys,
+  `整批属于开始时的那盘棋：${adds.map((r) => `${r.study_id === sid ? "甲" : "乙"}/${r.node_id}`).join("、")}`,
+);
+check((await cardsOf(other.study.study.id)) === 0 && (await report.getByTestId("report-overview").innerText()).includes(otherName), "另一盘棋的复习卡片与报告不受影响");
 await page.keyboard.press("Escape");
 
 console.log(problems.length ? `控制台问题：\n${problems.join("\n")}` : "  ✓ 控制台无错误");

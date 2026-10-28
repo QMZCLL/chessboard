@@ -55,20 +55,25 @@ async function view(nodeId: number) {
   else await openStudy(r.study_id, nodeId);
 }
 
-async function add(k: KeyPosition) {
-  const s = report.value;
-  if (!s) return;
+/** 把报告所属会话中的这一处加入复习，返回是否成功 */
+async function add(studyId: string, k: KeyPosition): Promise<boolean> {
   try {
-    k.review = (await addToReview(s.study_id, k.node_id)).card.status;
+    k.review = (await addToReview(studyId, k.node_id)).card.status;
+    return true;
   } catch (e) {
     message.error(errorMessage(e));
+    return false;
   }
 }
 
+/** 全部加入：整批使用开始时这份报告的会话与关键局面，中途关闭报告、换了棋谱也不改用新的会话 */
 async function addAll() {
+  const r = report.value;
+  if (!r) return;
   const list = notInReview.value;
-  for (const k of list) await add(k);
-  message.success(`已把 ${list.length} 处关键局面加入复习`);
+  let added = 0;
+  for (const k of list) if (await add(r.study_id, k)) added++;
+  if (added) message.success(`已把 ${added} 处关键局面加入复习`);
 }
 </script>
 
@@ -89,7 +94,7 @@ async function addAll() {
             <span class="spacer" />
             <n-button size="tiny" quaternary @click="view(k.node_id)">在棋盘上查看</n-button>
             <n-tag v-if="k.review" size="small" :bordered="false">复习中 · {{ STATUS_LABEL[k.review] }}</n-tag>
-            <n-button v-else size="tiny" secondary data-testid="report-add" @click="add(k)">加入复习</n-button>
+            <n-button v-else size="tiny" secondary data-testid="report-add" @click="add(report.study_id, k)">加入复习</n-button>
           </div>
           <div class="reasons">
             <n-tag v-for="r in k.reasons" :key="r" size="small" :bordered="false" class="reason">{{ r }}</n-tag>
