@@ -5,6 +5,9 @@
 //! - 会话保留原来的编号，卡片与原局面的关联不变；本机已有同一编号的会话时保留本机的版本；
 //! - 卡片按编号合并：历次复习按时间合在一起，状态、理解与安排取较新的一份；原会话已经删除的卡片照样导入，
 //!   仍可以复习，只是不能打开原局面；
+//! - 同一次复习按它自己的比较结果合并（已完成的优先于进行中的），不依赖整张卡片的更新时间：
+//!   比较结果写回时不改卡片的更新时间，同一时刻导出的两份档案可能只差在比较是否完成；
+//! - 导入后仍在进行中的比较（导出时还没有完成）在本机重新排队；
 //! - 每天第一次启动时自动备份一份（日期按 UTC），保留的份数见设置；也可以立即备份（覆盖当天的一份）。
 
 use std::collections::BTreeMap;
@@ -19,8 +22,12 @@ use tracing::warn;
 use xq_core::study::Study;
 
 use crate::records::ExplanationRecord;
+use crate::decision::DecisionState;
 use crate::review::MAX_ATTEMPTS;
+use crate::review::ReviewAttempt;
 use crate::review::ReviewCard;
+use crate::review::ReviewStatus;
+use crate::schedule;
 use crate::service::APP_VERSION;
 use crate::service::ApiError;
 use crate::service::ApiResult;
@@ -89,17 +96,32 @@ pub struct BackupInfo {
     pub files: Vec<BackupFile>,
 }
 
-/// 两张同一编号的卡片合并：历次复习按时间合在一起（同一时间的取较新的卡片中的那次），
-/// 状态、理解与安排等取更新时间较新的一份；修改次数保留本机的（写入时再加一）。
-pub fn merge_cards(local: &ReviewCard, incoming: &ReviewCard) -> ReviewCard {
+/// 一次复习的比较进行到哪一步：已完成 > 没有得到结果 > 进行中或没有比较。
+fn decision_rank(a: &ReviewAttempt) -> u8 {
+    match a.decision.as_ref().map(|d| d.state) {
+        Some(DecisionState::Ready) => 2,
+        Some(DecisionState::Failed) => 1,
+        _ => 0,
+    }
+}
+
+/// 两张同一编号的卡片合并：历次复习按时间合在一起，同一次复习取比较进行得更完整的那份
+/// （同样完整时取较新的卡片中的那份）；状态、理解与安排等取更新时间较新的一份；修改次数保留本机的（写入时再加一）。
+/// 安排所依据的那次复习因合并有了比较结果时，按结果重新安排（见 `schedule::apply`）。
+pub fn merge_cards(local: &ReviewCard, incoming: &ReviewCard, intervals: &[u32]) -> ReviewCard {
     let (newer, older) = if incoming.updated_at > local.updated_at { (incoming, local) } else { (local, incoming) };
-    let mut attempts = BTreeMap::new();
+    let mut attempts: BTreeMap<i64, ReviewAttempt> = BTreeMap::new();
     for a in older.attempts.iter().chain(newer.attempts.iter()) {
-        attempts.insert(a.at, a.clone());
+        match attempts.get(&a.at) {
+            Some(kept) if decision_rank(kept) > decision_rank(a) => {}
+            _ => {
+                attempts.insert(a.at, a.clone());
+            }
+        }
     }
     let mut attempts: Vec<_> = attempts.into_values().collect();
     attempts.drain(..attempts.len().saturating_sub(MAX_ATTEMPTS));
-    ReviewCard {
+    let mut merged = ReviewCard {
         attempts,
         created_at: local.created_at.min(incoming.created_at),
         reviewed_at: local.reviewed_at.max(incoming.reviewed_at),
@@ -107,7 +129,15 @@ pub fn merge_cards(local: &ReviewCard, incoming: &ReviewCard) -> ReviewCard {
         thinking: newer.thinking.clone().or_else(|| older.thinking.clone()),
         revision: local.revision,
         ..newer.clone()
+    };
+    let last = merged.attempts.last().map(|a| a.at);
+    let based_on_last = merged.schedule_base.is_some_and(|b| b.attempt_at.is_some() && b.attempt_at == last);
+    if based_on_last && merged.status != ReviewStatus::Due {
+        // 起点已经存在，`now` 不会用到
+        let status = merged.status;
+        schedule::apply(&mut merged, status, now_ms(), intervals);
     }
+    merged
 }
 
 /// 两张卡片内容是否相同（修改次数是各自设备上的计数，不参与比较）。
@@ -218,10 +248,21 @@ impl Inner {
                 }
             }
         }
+        let intervals = self.config_snapshot().review.intervals_days;
         for card in archive.reviews {
-            let stored = self.store.insert_review(&card)?;
-            if !same_card(&stored, &card) {
-                self.store.update_review(&card.id, |c| *c = merge_cards(c, &card))?;
+            let mut stored = self.store.insert_review(&card)?;
+            if !same_card(&stored, &card)
+                && let Some(merged) = self.store.update_review(&card.id, |c| *c = merge_cards(c, &card, &intervals))?
+            {
+                stored = merged;
+            }
+            // 导出时还没有完成的比较不会在本机继续：重新排队
+            for a in &stored.attempts {
+                if let (Some(choice), Some(d)) = (&a.choice, &a.decision)
+                    && d.state == DecisionState::Pending
+                {
+                    self.review_decide(&stored, a.at, choice.mv);
+                }
             }
         }
         Ok(summary)
@@ -327,8 +368,12 @@ impl AppService {
 mod tests {
     use super::*;
     use crate::decision::PracticeGoal;
-    use crate::review::ReviewAttempt;
-    use crate::review::ReviewStatus;
+    use crate::decision::DecisionFeedback;
+    use crate::decision::DecisionSupport;
+    use crate::decision::DecisionVerdict;
+    use crate::review::ReviewMove;
+
+    const DAYS: [u32; 5] = [1, 3, 7, 14, 30];
 
     fn card(updated_at: i64, note: &str, attempts: &[i64]) -> ReviewCard {
         let mut c: ReviewCard = serde_json::from_value(serde_json::json!({
@@ -361,19 +406,19 @@ mod tests {
         let mut incoming = card(200, "另一台设备的理解", &[20, 30]);
         incoming.status = ReviewStatus::Understood;
         incoming.due_at = Some(5_000);
-        let merged = merge_cards(&local, &incoming);
+        let merged = merge_cards(&local, &incoming, &DAYS);
         assert_eq!(merged.attempts.iter().map(|a| a.at).collect::<Vec<_>>(), [10, 20, 30]);
         assert_eq!((merged.note.as_str(), merged.status, merged.due_at), ("另一台设备的理解", ReviewStatus::Understood, Some(5_000)));
         assert_eq!((merged.reviewed_at, merged.revision), (Some(30), 7), "修改次数保留本机的");
         // 本机的较新：保留本机的内容
         let newer_local = card(300, "本机后来改过的理解", &[40]);
-        assert_eq!(merge_cards(&newer_local, &incoming).note, "本机后来改过的理解");
+        assert_eq!(merge_cards(&newer_local, &incoming, &DAYS).note, "本机后来改过的理解");
         // 修改次数不同、内容相同：视为相同
         assert!(same_card(&local, &ReviewCard { revision: 1, ..local.clone() }));
         // 合在一起超过保留次数时保留最近的
         let many = card(300, "", &(0..MAX_ATTEMPTS as i64).collect::<Vec<_>>());
         let more = card(10, "", &[1_000, 1_001]);
-        let merged = merge_cards(&many, &more);
+        let merged = merge_cards(&many, &more, &DAYS);
         assert_eq!(merged.attempts.len(), MAX_ATTEMPTS);
         assert_eq!(merged.attempts.last().unwrap().at, 1_001);
     }
@@ -384,5 +429,36 @@ mod tests {
         assert_eq!(backup_name(1_761_436_800_000), "xqlink-archive-2025-10-26.json");
         assert_eq!(civil_date(-1), (1969, 12, 31));
         assert_eq!(civil_date(11_016), (2000, 2, 29));
+    }
+
+    #[test]
+    fn a_finished_comparison_survives_merging_in_either_order() {
+        // 同一次复习、同样的卡片更新时间：一份导出时比较还在进行，另一份已经完成
+        let decided = |state: DecisionState| {
+            let mut c = card(100, "", &[50]);
+            let a = &mut c.attempts[0];
+            a.goal = PracticeGoal::Decision;
+            a.choice = Some(ReviewMove { mv: xq_core::Move::parse_iccs("e0e1").unwrap(), notation: "帅五进一".into() });
+            a.decision = Some(DecisionFeedback {
+                state,
+                verdict: (state == DecisionState::Ready).then_some(DecisionVerdict::Reasonable),
+                support: if state == DecisionState::Ready { DecisionSupport::Supported } else { DecisionSupport::Unknown },
+                reference: None,
+                points: vec![],
+                conditions: None,
+                error: None,
+            });
+            // 比较还没有结果时已经标为已理解：先按不升档安排
+            c.status = ReviewStatus::Understood;
+            crate::schedule::apply(&mut c, ReviewStatus::Understood, 1_000, &DAYS);
+            c
+        };
+        let (pending, ready) = (decided(DecisionState::Pending), decided(DecisionState::Ready));
+        assert_eq!((pending.stage, ready.stage), (0, 1));
+        for (local, incoming) in [(&pending, &ready), (&ready, &pending)] {
+            let merged = merge_cards(local, incoming, &DAYS);
+            assert_eq!(merged.attempts[0].decision.as_ref().unwrap().state, DecisionState::Ready, "完成的比较结果保留");
+            assert_eq!((merged.stage, merged.due_at), (1, Some(1_000 + 3 * crate::schedule::DAY_MS)), "按结果重新安排");
+        }
     }
 }

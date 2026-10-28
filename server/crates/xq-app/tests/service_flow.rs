@@ -1237,3 +1237,41 @@ fn a_mark_made_before_the_decision_result_is_rescheduled_when_the_result_arrives
     assert_eq!((again.stage, again.due_at), (1, card.due_at));
     service.shutdown();
 }
+
+
+#[test]
+fn imported_comparisons_that_were_still_running_are_queued_again() {
+    let rec = Arc::new(Recorder::default());
+    let home = tempfile::tempdir().unwrap();
+    let service = start_with_mock(home.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap();
+    // 档案中的这次复习是局面决策，导出时比较还在进行
+    let mut archive: serde_json::Value = serde_json::from_str(&service.export_archive().unwrap()).unwrap();
+    let attempt = &mut archive["reviews"][0]["attempts"][0];
+    attempt["goal"] = serde_json::json!("decision");
+    attempt["decision"] = serde_json::json!({
+        "state": "pending", "verdict": null, "support": "unknown", "reference": null, "points": [], "conditions": null, "error": null
+    });
+    let other = tempfile::tempdir().unwrap();
+    let restored = start_with_mock(other.path(), "", rec.clone());
+    restored.import_archive(ArchiveSource::Text { text: archive.to_string() }).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let state = loop {
+        let card = restored.review_detail(ReviewRef { id: id.clone() }).unwrap().item.card;
+        let state = card.attempts[0].decision.as_ref().unwrap().state;
+        if state != DecisionState::Pending || Instant::now() > deadline {
+            break state;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_ne!(state, DecisionState::Pending, "导入后重新排队，不会一直停在进行中");
+    for s in [service, restored] {
+        s.shutdown();
+    }
+}
