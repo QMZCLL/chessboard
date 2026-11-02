@@ -66,26 +66,63 @@ function dispatch(event: string, payload: unknown) {
   });
 }
 
+/** 一条后台事件：格式不对时跳过，不影响之后的事件 */
+function deliver(data: string) {
+  let msg: unknown;
+  try {
+    msg = JSON.parse(data);
+  } catch {
+    console.warn("跳过无法解析的后台事件");
+    return;
+  }
+  const event = (msg as { event?: unknown } | null)?.event;
+  if (typeof event !== "string") {
+    console.warn("跳过格式不对的后台事件");
+    return;
+  }
+  dispatch(event, (msg as { payload?: unknown }).payload);
+}
+
+/** 开发桥的事件流：断开后浏览器会自动重连；连接被拒绝而关闭时不会，按退避时间重新连接 */
+function connectBridge(attempt = 0) {
+  const source = new EventSource(`${BRIDGE}/events`);
+  source.onmessage = (m) => deliver(m.data);
+  source.onopen = () => {
+    attempt = 0;
+  };
+  source.onerror = () => {
+    if (source.readyState !== EventSource.CLOSED) return;
+    source.close();
+    setTimeout(() => connectBridge(attempt + 1), Math.min(30_000, 500 * 2 ** attempt));
+  };
+}
+
+/** 注册全部事件（随应用一直有效）；只注册了一部分时撤销已经注册的，再次订阅时不会重复收到同一个事件 */
+async function listenAll() {
+  const { listen } = await import("@tauri-apps/api/event");
+  const registered: (() => void)[] = [];
+  try {
+    for (const name of EVENTS) registered.push(await listen(name, (e) => dispatch(name, e.payload)));
+  } catch (e) {
+    for (const off of registered) off();
+    throw e;
+  }
+}
+
 function subscribe(): Promise<void> {
   if (subscribed) return subscribed;
-  subscribed = (async () => {
-    if (isTauri) {
-      const { listen } = await import("@tauri-apps/api/event");
-      for (const name of EVENTS) await listen(name, (e) => dispatch(name, e.payload));
-    } else {
-      const source = new EventSource(`${BRIDGE}/events`);
-      source.onmessage = (m) => {
-        const { event, payload } = JSON.parse(m.data);
-        dispatch(event, payload);
-      };
-    }
-  })();
+  const attempt = isTauri ? listenAll() : Promise.resolve(connectBridge());
+  // 订阅失败时不保留失败的结果：之后再订阅（例如再次调用 on 或 ready）时重新尝试
+  subscribed = attempt.catch((e) => {
+    subscribed = null;
+    throw e;
+  });
   return subscribed;
 }
 
 /** 订阅后台事件，返回取消订阅的函数。 */
 export function on<P>(event: EventName, handler: (payload: P) => void): () => void {
-  void subscribe();
+  void subscribe().catch((e) => console.error("订阅后台事件失败", e));
   const set = handlers.get(event) ?? new Set<Handler>();
   set.add(handler as Handler);
   handlers.set(event, set);
