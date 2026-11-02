@@ -114,7 +114,7 @@ async function toggleIssue(issue: ReviewIssue) {
 const nextLabel = computed(() => {
   const s = session.value;
   if (!s) return "下一张";
-  return s.index + 1 < s.ids.length ? `下一张（${s.index + 2} / ${s.ids.length}）` : "完成这组练习";
+  return nextCardId.value ? `下一张（${s.cards.indexOf(nextCardId.value) + 1} / ${s.cards.length}）` : "完成这组练习";
 });
 const recent = computed(() => (card.value?.attempts ?? []).slice(-8));
 
@@ -169,7 +169,7 @@ onMounted(loadReviews);
         </n-radio-group>
         <!-- 一组练习：按顺序复习，结束后给出小结 -->
         <div v-if="session" class="session" data-testid="review-session">
-          <span data-testid="review-session-progress"><strong>{{ session.label }}</strong> · 第 {{ session.index + 1 }} / {{ session.ids.length }} 张</span>
+          <span data-testid="review-session-progress"><strong>{{ session.label }}</strong> · 第 {{ session.index + 1 }} / {{ session.cards.length }} 张</span>
           <n-button text type="primary" size="small" data-testid="review-finish" @click="finishSession">结束并查看小结</n-button>
         </div>
         <template v-else>

@@ -14,6 +14,7 @@ pub mod engine;
 pub mod events;
 pub mod llm;
 mod pipeline;
+pub mod practice;
 pub mod records;
 pub mod report;
 pub mod review;

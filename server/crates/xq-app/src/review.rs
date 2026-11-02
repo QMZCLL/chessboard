@@ -120,6 +120,12 @@ pub struct ReviewAttempt {
     /// 局面决策中与棋谱着法、引擎参考的比较；复现棋谱或直接看答案时为空。
     #[serde(default)]
     pub decision: Option<DecisionFeedback>,
+    /// 所属的练习批次（见 `practice`）；不在一组练习中作答，或早期的记录为空。
+    #[serde(default)]
+    pub practice: Option<String>,
+    /// 界面为这次作答生成的请求编号：同一个请求重复提交（重复点击、重试）时只记一次。
+    #[serde(default)]
+    pub request: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,7 +222,7 @@ pub struct ReviewRef {
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ReviewAttemptRequest {
     pub id: String,
     /// 重新选择的着法；为空表示没有走子，直接查看原来的思考与讲解。
@@ -225,6 +231,12 @@ pub struct ReviewAttemptRequest {
     pub goal: PracticeGoal,
     #[serde(default)]
     pub intent: Option<Intent>,
+    /// 这次作答属于哪一组练习（这组练习要包含这张卡片）。
+    #[serde(default)]
+    pub practice: Option<String>,
+    /// 请求编号：已经有同一编号的作答时不再记录，返回原来的卡片。
+    #[serde(default)]
+    pub request: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -403,8 +415,14 @@ impl Inner {
 
     /// 记一次复习：重新选择的着法是否与棋谱相同，这一步实际改变了什么；局面决策还在后台开始比较，
     /// 完成后写回这次复习并推送 `review_updated`。
+    ///
+    /// 带请求编号时按编号去重（检查与写入在同一写事务中）：同一个请求再次到达，只返回已经记下的那次，
+    /// 不再追加，也不再开始比较。
     pub(crate) fn review_attempt(&self, req: ReviewAttemptRequest) -> ApiResult<ReviewItem> {
         let id = req.id.as_str();
+        if let Some(p) = &req.practice {
+            self.check_practice(p, id)?;
+        }
         // 局面与棋谱着法在卡片建立后不再改变，可以先读出来检查着法
         let card = self.load_card(id)?;
         let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
@@ -420,18 +438,37 @@ impl Inner {
         let deciding = req.goal == PracticeGoal::Decision && choice.is_some();
         let now = now_ms();
         let mut at = now;
-        let card = self.modify_card(id, |c| {
+        let request = req.request.clone();
+        let written = self.store.update_review_if(id, |c| {
+            if request.is_some() && c.attempts.iter().any(|a| a.request == request) {
+                return false;
+            }
             let matched = choice.as_ref().is_some_and(|m| m.mv == c.answer.mv);
             // 同一毫秒内的两次复习也要能区分：比较结果按时间写回
             at = c.attempts.last().map_or(now, |a| now.max(a.at + 1));
             let decision = deciding.then(decision::pending);
-            c.attempts.push(ReviewAttempt { at, choice: choice.clone(), matched, goal: req.goal, intent: req.intent, reflection, decision });
+            c.attempts.push(ReviewAttempt {
+                at,
+                choice: choice.clone(),
+                matched,
+                goal: req.goal,
+                intent: req.intent,
+                reflection,
+                decision,
+                practice: req.practice.clone(),
+                request: request.clone(),
+            });
             if c.attempts.len() > MAX_ATTEMPTS {
                 c.attempts.drain(..c.attempts.len() - MAX_ATTEMPTS);
             }
             c.reviewed_at = Some(now);
             c.updated_at = now;
+            true
         })?;
+        let Some(card) = written else {
+            // 同一个请求已经记下（或卡片已经删除）
+            return Ok(self.review_item(self.load_card(id)?));
+        };
         if let (true, Some(m)) = (deciding, &choice) {
             self.review_decide(&card, at, m.mv);
         }

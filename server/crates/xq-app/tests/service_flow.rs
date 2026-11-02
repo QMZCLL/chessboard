@@ -21,6 +21,9 @@ use xq_app::archive::ArchiveSource;
 use xq_app::decision::DecisionState;
 use xq_app::decision::Intent;
 use xq_app::decision::PracticeGoal;
+use xq_app::practice::PracticeSource;
+use xq_app::practice::PracticeStartRequest;
+use xq_app::practice::PracticeUpdateRequest;
 use xq_app::review::ReviewAttemptRequest;
 use xq_app::topics::Issue;
 use xq_app::topics::Theme;
@@ -843,11 +846,11 @@ fn review_card_keeps_the_position_and_the_thinking_and_survives_the_study() {
     let id = card.id.clone();
     let detail = service.review_detail(ReviewRef { id: id.clone() }).unwrap();
     assert!(detail.legal_moves.contains(&mv("h9g7")) && detail.legal_moves.contains(&mv("b9c7")));
-    let err = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap_err();
+    let err = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None, ..Default::default() }).unwrap_err();
     assert!(err.message.contains("不合规则"), "{}", err.message);
-    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h9g7")), goal: PracticeGoal::Recall, intent: None }).unwrap();
+    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h9g7")), goal: PracticeGoal::Recall, intent: None, ..Default::default() }).unwrap();
     assert!(tried.card.attempts.last().unwrap().matched);
-    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None, goal: PracticeGoal::Recall, intent: None }).unwrap();
+    let tried = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None, goal: PracticeGoal::Recall, intent: None, ..Default::default() }).unwrap();
     assert_eq!(tried.card.attempts.len(), 2);
     assert!(!tried.card.attempts[1].matched, "直接看答案不算走对");
     assert!(tried.card.reviewed_at.is_some());
@@ -916,7 +919,7 @@ fn decision_practice_compares_the_choice_in_one_search_and_records_the_intent() 
     wait_engine(&service);
     let attempt = |choice: &str, goal: PracticeGoal, intent: Option<Intent>| {
         rec.clear();
-        let item = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv(choice)), goal, intent }).unwrap();
+        let item = service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv(choice)), goal, intent, ..Default::default() }).unwrap();
         item.card.attempts.last().unwrap().clone()
     };
     let decided = |what: &str| {
@@ -984,7 +987,7 @@ fn marking_a_card_schedules_the_next_review_from_the_latest_attempt() {
     let day = xq_app::schedule::DAY_MS;
     let attempt = |choice: Option<&str>| {
         service
-            .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: choice.map(mv), goal: PracticeGoal::Recall, intent: None })
+            .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: choice.map(mv), goal: PracticeGoal::Recall, intent: None, ..Default::default() })
             .unwrap();
     };
     let mark = |status: ReviewStatus| {
@@ -1031,7 +1034,7 @@ fn learning_archive_restores_studies_and_cards_and_merges_reviews() {
     let sid = created.study.study.id.clone();
     let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
     let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
-    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap();
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None, ..Default::default() }).unwrap();
     service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Understood), note: Some("架中炮".into()), issues: None }).unwrap();
     let archive = service.export_archive().unwrap();
 
@@ -1053,7 +1056,7 @@ fn learning_archive_restores_studies_and_cards_and_merges_reviews() {
     assert_eq!((again.studies_new, again.studies_existing, again.cards_new, again.cards_same), (0, 1, 0, 1));
 
     // 原设备之后又复习了一次；导入到另一台设备时合并历次复习
-    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None, goal: PracticeGoal::Recall, intent: None }).unwrap();
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: None, goal: PracticeGoal::Recall, intent: None, ..Default::default() }).unwrap();
     restored.update_review(ReviewUpdateRequest { id: id.clone(), status: None, note: Some("另一台设备上的理解".into()), issues: None }).unwrap();
     let newer = service.export_archive().unwrap();
     assert_eq!(restored.preview_archive(text(&newer)).unwrap().cards_merge, 1);
@@ -1216,7 +1219,7 @@ fn a_mark_made_before_the_decision_result_is_rescheduled_when_the_result_arrives
     wait_engine(&service);
     rec.clear();
     let tried = service
-        .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("b9c7")), goal: PracticeGoal::Decision, intent: None })
+        .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("b9c7")), goal: PracticeGoal::Decision, intent: None, ..Default::default() })
         .unwrap();
     let at = tried.card.attempts.last().unwrap().at;
     // 比较还没有结果：先按不升档安排，不当作选错
@@ -1250,7 +1253,7 @@ fn imported_comparisons_that_were_still_running_are_queued_again() {
     let sid = created.study.study.id.clone();
     let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
     let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
-    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap();
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None, ..Default::default() }).unwrap();
     // 档案中的这次复习是局面决策，导出时比较还在进行
     let mut archive: serde_json::Value = serde_json::from_str(&service.export_archive().unwrap()).unwrap();
     let attempt = &mut archive["reviews"][0]["attempts"][0];
@@ -1287,7 +1290,7 @@ fn a_late_comparison_queued_by_an_earlier_import_does_not_overwrite_an_imported_
     let sid = created.study.study.id.clone();
     let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
     let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: first }).unwrap().card.id;
-    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None }).unwrap();
+    service.review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("h2e2")), goal: PracticeGoal::Recall, intent: None, ..Default::default() }).unwrap();
     // 档案 P：这次局面决策导出时比较还在进行
     let mut pending: Value = serde_json::from_str(&service.export_archive().unwrap()).unwrap();
     let attempt = &mut pending["reviews"][0]["attempts"][0];
@@ -1337,4 +1340,90 @@ fn a_late_comparison_queued_by_an_earlier_import_does_not_overwrite_an_imported_
     for s in [service, restored] {
         s.shutdown();
     }
+}
+
+#[test]
+fn a_practice_session_keeps_its_order_and_position_across_restarts_and_records_each_request_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let mut parent = ROOT;
+    let mut ids = Vec::new();
+    for m in ["h2e2", "h9g7", "h0g2"] {
+        parent = service.apply_move(MoveRequest { study_id: sid.clone(), parent, mv: mv(m), variation: false }).unwrap().node_id.unwrap();
+        ids.push(service.add_review(NodeRef { study_id: sid.clone(), node_id: parent }).unwrap().card.id);
+    }
+    let start = |cards: Vec<String>| {
+        service.start_practice(PracticeStartRequest {
+            label: "今天的练习".into(),
+            source: PracticeSource::Today,
+            topic: None,
+            goal: PracticeGoal::Recall,
+            cards,
+        })
+    };
+    assert!(start(vec![]).is_err(), "没有卡片时不开始");
+    assert!(start(vec!["不存在".into()]).is_err());
+    let session = start(vec![ids[1].clone(), ids[0].clone(), ids[1].clone()]).unwrap();
+    assert_eq!(session.cards, vec![ids[1].clone(), ids[0].clone()], "按选定的顺序，重复的只保留一次");
+
+    // 作答记入这组练习；同一个请求再次到达只记一次，也不改动卡片
+    let attempt = |card: &str, request: &str| ReviewAttemptRequest {
+        id: card.to_string(),
+        choice: Some(mv("h9g7")),
+        practice: Some(session.id.clone()),
+        request: Some(request.to_string()),
+        ..Default::default()
+    };
+    let first = service.review_attempt(attempt(&ids[1], "r1")).unwrap().card;
+    assert_eq!(first.attempts[0].practice.as_deref(), Some(session.id.as_str()));
+    let again = service.review_attempt(attempt(&ids[1], "r1")).unwrap().card;
+    assert_eq!((again.attempts.len(), again.revision), (1, first.revision), "重复提交的请求不追加作答");
+    let retry = service.review_attempt(attempt(&ids[1], "r2")).unwrap().card;
+    assert_eq!(retry.attempts.len(), 2, "新的请求（再试一次）照常记录");
+    let outside = service.review_attempt(attempt(&ids[2], "r3")).unwrap_err();
+    assert!(outside.message.contains("没有这张卡片"), "{}", outside.message);
+
+    // 换到下一题、记下跳过、改练习目标；越界的位置不接受
+    let moved = service
+        .update_practice(PracticeUpdateRequest {
+            id: session.id.clone(),
+            index: Some(1),
+            skip: Some(ids[0].clone()),
+            goal: Some(PracticeGoal::Decision),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!((moved.index, moved.skipped.clone(), moved.goal, moved.revision), (1, vec![ids[0].clone()], PracticeGoal::Decision, 1));
+    assert!(service.update_practice(PracticeUpdateRequest { id: session.id.clone(), index: Some(2), ..Default::default() }).is_err());
+
+    // 重新启动后继续：顺序、位置与跳过的题目不变
+    service.shutdown();
+    drop(service);
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    assert_eq!(service.current_practice().unwrap(), Some(moved.clone()));
+
+    // 开始新的一组时，之前的一组记为结束；结束的一组不再换题，再次结束不变
+    let next = service
+        .start_practice(PracticeStartRequest {
+            label: "需要再练的卡片".into(),
+            source: PracticeSource::Again,
+            topic: None,
+            goal: PracticeGoal::Recall,
+            cards: vec![ids[2].clone()],
+        })
+        .unwrap();
+    assert_eq!(service.current_practice().unwrap().map(|s| s.id), Some(next.id.clone()));
+    let refused = service.update_practice(PracticeUpdateRequest { id: session.id.clone(), index: Some(0), ..Default::default() }).unwrap_err();
+    assert!(refused.message.contains("已经结束"), "{}", refused.message);
+    let done = service.update_practice(PracticeUpdateRequest { id: next.id.clone(), finish: true, ..Default::default() }).unwrap();
+    let finished_at = done.finished_at.expect("已经结束");
+    let twice = service.update_practice(PracticeUpdateRequest { id: next.id.clone(), finish: true, ..Default::default() }).unwrap();
+    assert_eq!(twice.finished_at, Some(finished_at));
+    assert_eq!(service.current_practice().unwrap(), None);
+    service.shutdown();
 }

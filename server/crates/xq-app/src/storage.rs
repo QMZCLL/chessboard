@@ -1,4 +1,4 @@
-//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存、教练追问、复习卡片。
+//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存、教练追问、复习卡片与练习批次。
 //! 使用嵌入式数据库 redb，值以 JSON 保存，并带有数据版本，便于后续迁移。
 
 use std::path::Path;
@@ -15,6 +15,7 @@ use crate::llm::CoachRecord;
 use crate::llm::CoachResult;
 use crate::llm::CoachState;
 use crate::llm::ask::AnswerRecord;
+use crate::practice::PracticeSession;
 use crate::records::AnalysisRecord;
 use crate::records::CloudRecord;
 use crate::records::ExplanationRecord;
@@ -33,6 +34,8 @@ const COACH_USAGE: &str = "coach_usage";
 const COACH_ASK: TableDefinition<&str, &str> = TableDefinition::new("coach_ask");
 /// 复习卡片，键为“会话/节点”（与讲解记录相同）。卡片是独立的快照，删除会话时保留。
 const REVIEWS: TableDefinition<&str, &str> = TableDefinition::new("reviews");
+/// 练习批次，键为批次编号（见 `practice`）。
+const PRACTICE: TableDefinition<&str, &str> = TableDefinition::new("practice");
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -106,6 +109,7 @@ impl Store {
             tx.open_table(COACH_CACHE)?;
             tx.open_table(COACH_ASK)?;
             tx.open_table(REVIEWS)?;
+            tx.open_table(PRACTICE)?;
         }
         tx.commit()?;
         Ok(Store { db })
@@ -117,6 +121,45 @@ impl Store {
         tx.open_table(table)?.insert(key, json.as_str())?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// 在同一写事务中读取最新的值、修改并写回；`f` 返回 `false` 时不写回。不存在或没有写回时返回 `None`。
+    fn update_if<T: Serialize + DeserializeOwned>(
+        &self, table: TableDefinition<&str, &str>, key: &str, f: impl FnOnce(&mut T) -> bool,
+    ) -> Result<Option<T>, StoreError> {
+        let tx = self.db.begin_write()?;
+        let updated = {
+            let mut t = tx.open_table(table)?;
+            let current = t.get(key)?.map(|v| serde_json::from_str::<T>(v.value())).transpose()?;
+            match current {
+                Some(mut value) => {
+                    if f(&mut value) {
+                        t.insert(key, serde_json::to_string(&value)?.as_str())?;
+                        Some(value)
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            }
+        };
+        tx.commit()?;
+        Ok(updated)
+    }
+
+    /// 表中全部能解析的值；无法解析的跳过并记录。
+    fn list<T: DeserializeOwned>(&self, table: TableDefinition<&str, &str>, what: &str) -> Result<Vec<T>, StoreError> {
+        let tx = self.db.begin_read()?;
+        let t = tx.open_table(table)?;
+        let mut out = Vec::new();
+        for item in t.iter()? {
+            let (_, v) = item?;
+            match serde_json::from_str::<T>(v.value()) {
+                Ok(c) => out.push(c),
+                Err(e) => tracing::warn!("跳过无法解析的{what}：{e}"),
+            }
+        }
+        Ok(out)
     }
 
     fn get<T: DeserializeOwned>(&self, table: TableDefinition<&str, &str>, key: &str) -> Result<Option<T>, StoreError> {
@@ -261,41 +304,62 @@ impl Store {
     /// 与 `update_review` 相同，但 `f` 在同一写事务中检查最新的卡片，返回 `false` 时不写回（修改次数也不变），
     /// 结果为 `None`。
     pub fn update_review_if(&self, id: &str, f: impl FnOnce(&mut ReviewCard) -> bool) -> Result<Option<ReviewCard>, StoreError> {
-        let tx = self.db.begin_write()?;
-        let updated = {
-            let mut t = tx.open_table(REVIEWS)?;
-            let current = t.get(id)?.map(|v| serde_json::from_str::<ReviewCard>(v.value())).transpose()?;
-            match current {
-                Some(mut card) => {
-                    if f(&mut card) {
-                        card.revision += 1;
-                        t.insert(id, serde_json::to_string(&card)?.as_str())?;
-                        Some(card)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
+        self.update_if(REVIEWS, id, |card: &mut ReviewCard| {
+            let write = f(card);
+            if write {
+                card.revision += 1;
             }
-        };
-        tx.commit()?;
-        Ok(updated)
+            write
+        })
     }
 
     pub fn load_review(&self, id: &str) -> Result<Option<ReviewCard>, StoreError> { self.get(REVIEWS, id) }
 
-    pub fn list_reviews(&self) -> Result<Vec<ReviewCard>, StoreError> {
-        let tx = self.db.begin_read()?;
-        let t = tx.open_table(REVIEWS)?;
-        let mut out = Vec::new();
-        for item in t.iter()? {
-            let (_, v) = item?;
-            match serde_json::from_str::<ReviewCard>(v.value()) {
-                Ok(c) => out.push(c),
-                Err(e) => tracing::warn!("跳过无法解析的复习卡片：{e}"),
+    pub fn list_reviews(&self) -> Result<Vec<ReviewCard>, StoreError> { self.list(REVIEWS, "复习卡片") }
+
+    /// 开始一组练习：在同一写事务中把其他还没有结束的练习记为结束、写入这一组，
+    /// 再按开始时间只保留最近 `keep` 组（含这一组）。
+    pub fn start_practice(&self, session: &PracticeSession, keep: usize) -> Result<(), StoreError> {
+        let tx = self.db.begin_write()?;
+        {
+            let mut t = tx.open_table(PRACTICE)?;
+            let mut earlier: Vec<PracticeSession> = Vec::new();
+            for item in t.iter()? {
+                let (_, v) = item?;
+                match serde_json::from_str::<PracticeSession>(v.value()) {
+                    Ok(s) => earlier.push(s),
+                    Err(e) => tracing::warn!("跳过无法解析的练习批次：{e}"),
+                }
+            }
+            for s in earlier.iter_mut().filter(|s| s.finished_at.is_none()) {
+                s.finished_at = Some(session.started_at);
+                s.updated_at = session.started_at;
+                s.revision += 1;
+                t.insert(s.id.as_str(), serde_json::to_string(&*s)?.as_str())?;
+            }
+            t.insert(session.id.as_str(), serde_json::to_string(session)?.as_str())?;
+            earlier.sort_by_key(|s| std::cmp::Reverse(s.started_at));
+            for old in earlier.iter().skip(keep.saturating_sub(1)) {
+                t.remove(old.id.as_str())?;
             }
         }
-        Ok(out)
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn load_practice(&self, id: &str) -> Result<Option<PracticeSession>, StoreError> { self.get(PRACTICE, id) }
+
+    pub fn list_practice(&self) -> Result<Vec<PracticeSession>, StoreError> { self.list(PRACTICE, "练习批次") }
+
+    /// 修改一组练习：与 `update_review_if` 相同，同一写事务中检查与写回，写回时修改次数加一。
+    pub fn update_practice(&self, id: &str, f: impl FnOnce(&mut PracticeSession) -> bool) -> Result<Option<PracticeSession>, StoreError> {
+        self.update_if(PRACTICE, id, |s: &mut PracticeSession| {
+            let write = f(s);
+            if write {
+                s.revision += 1;
+            }
+            write
+        })
     }
 
     pub fn delete_review(&self, id: &str) -> Result<(), StoreError> {

@@ -23,6 +23,9 @@ use xq_app::llm::ask::AnswerView;
 use xq_app::llm::ask::AnswersRequest;
 use xq_app::llm::ask::Question;
 use xq_app::records::ExplanationRecord;
+use xq_app::practice::PracticeSession;
+use xq_app::practice::PracticeStartRequest;
+use xq_app::practice::PracticeUpdateRequest;
 use xq_app::review::ReviewAttemptRequest;
 use xq_app::review::ReviewDetail;
 use xq_app::review::ReviewItem;
@@ -241,6 +244,24 @@ pub async fn update_review(state: State<'_, AppService>, req: ReviewUpdateReques
 pub async fn delete_review(state: State<'_, AppService>, req: ReviewRef) -> ApiResult<()> {
     let s = service(&state);
     blocking(move || s.delete_review(req)).await
+}
+
+#[tauri::command]
+pub async fn start_practice(state: State<'_, AppService>, req: PracticeStartRequest) -> ApiResult<PracticeSession> {
+    let s = service(&state);
+    blocking(move || s.start_practice(req)).await
+}
+
+#[tauri::command]
+pub async fn current_practice(state: State<'_, AppService>) -> ApiResult<Option<PracticeSession>> {
+    let s = service(&state);
+    blocking(move || s.current_practice()).await
+}
+
+#[tauri::command]
+pub async fn update_practice(state: State<'_, AppService>, req: PracticeUpdateRequest) -> ApiResult<PracticeSession> {
+    let s = service(&state);
+    blocking(move || s.update_practice(req)).await
 }
 
 #[tauri::command]

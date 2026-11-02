@@ -137,6 +137,8 @@ mod tests {
                 conditions: None,
                 error: None,
             }),
+            practice: None,
+            request: None,
         }
     }
 

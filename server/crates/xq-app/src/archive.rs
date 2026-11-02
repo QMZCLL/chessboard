@@ -385,6 +385,8 @@ mod tests {
                 intent: None,
                 reflection: None,
                 decision: None,
+                practice: None,
+                request: None,
             })
             .collect();
         c.reviewed_at = attempts.iter().max().copied();

@@ -110,6 +110,9 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         "review_attempt" => to_value(service.review_attempt(arg(args, "req")?)?),
         "update_review" => to_value(service.update_review(arg(args, "req")?)?),
         "delete_review" => to_value(service.delete_review(arg(args, "req")?)?),
+        "start_practice" => to_value(service.start_practice(arg(args, "req")?)?),
+        "current_practice" => to_value(service.current_practice()?),
+        "update_practice" => to_value(service.update_practice(arg(args, "req")?)?),
         "cancel_analysis" => {
             service.cancel_analysis(&arg::<String>(args, "requestId")?);
             Ok(Value::Null)

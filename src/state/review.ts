@@ -2,8 +2,10 @@
 // 复习时先只显示局面，用户在棋盘上重新选择（或直接看答案）后，才显示原来的思考与讲解。
 // 练习目标分复现棋谱与局面决策；局面决策的比较在后台进行，完成后推送 review_updated 更新这次复习。
 // 每张卡片有下一次复习的时间（标记状态时由后台安排）；“今天的练习”按顺序复习今天到期的卡片，结束后给出小结。
+// 一组练习由后台保存（见 xq-app practice.rs）：卡片顺序在开始时固定，当前题目、跳过的题目与练习目标随练习写回，
+// 退出或重新启动后从原处继续；这组练习中的作答带上批次编号，已经作答的题目恢复到揭示之后。
 import { computed, reactive } from "vue";
-import { api, errorMessage, on } from "../api/backend";
+import { api, errorMessage, newRequestId, on } from "../api/backend";
 import type * as T from "../api/types";
 import {
   counts,
@@ -12,7 +14,9 @@ import {
   newerItem,
   nextDueId,
   hasTopic,
-  sessionSummary,
+  practiceAttempts,
+  practiceSummary,
+  presentFrom,
   topicLabel,
   type ReviewFilter,
   type SessionSummary,
@@ -30,10 +34,10 @@ export const review = reactive({
   filter: "today" as ReviewFilter,
   /** 计算“今天到期”所用的时刻：载入列表与每次修改卡片时更新 */
   clock: Date.now(),
-  /** 一组练习：按顺序复习的卡片与开始的时间 */
-  session: null as { ids: string[]; index: number; startedAt: number; label: string } | null,
+  /** 进行中的一组练习（后台保存，重新启动后继续） */
+  session: null as T.PracticeSession | null,
   /** 刚结束的一组练习：小结按卡片的最新状态计算，比较结果晚到时随之更新 */
-  finished: null as { ids: string[]; startedAt: number } | null,
+  finished: null as T.PracticeSession | null,
   current: null as T.ReviewDetail | null,
   /** choose：在棋盘上重新选择；revealed：已经选择或直接看了答案 */
   phase: "choose" as "choose" | "revealed",
@@ -43,6 +47,8 @@ export const review = reactive({
   intent: null as T.Intent | null,
   /** 这一次复习的时间：结果从当前卡片的复习记录中按它取出，局面决策的比较完成后随卡片更新 */
   attemptAt: null as number | null,
+  /** 这一次作答的请求编号：每次进入选择时重新生成；同一次作答重复提交（重试）时后台只记一次 */
+  request: newRequestId(),
   busy: false,
   error: null as string | null,
   /** 理解或疑问的草稿与保存状态，按卡片保存：切换卡片后，迟到的保存结果只影响它自己的卡片 */
@@ -81,6 +87,67 @@ export const currentAttempt = computed<T.ReviewAttempt | null>(
 export function setGoal(goal: T.PracticeGoal) {
   review.goal = goal;
   safeStorage("set", GOAL_KEY, goal);
+  // 练习中改了目标：这组练习记住新的目标
+  if (review.session && review.session.goal !== goal) {
+    review.session.goal = goal;
+    void savePractice({ goal });
+  }
+}
+
+/** 这组练习中当前题目的卡片 */
+export const sessionCardId = computed(() => (review.session ? (review.session.cards[review.session.index] ?? null) : null));
+
+const cardExists = (id: string) => review.items.some((i) => i.card.id === id);
+
+/**
+ * 采用后台返回的一组练习：同一组的两份数据中修改次数少的不覆盖较新的；已经结束的不再作为进行中的练习。
+ * 进行中的练习的目标就是复习时的目标。
+ */
+function adoptSession(s: T.PracticeSession | null) {
+  const cur = review.session;
+  if (s && cur && cur.id === s.id && cur.revision > s.revision) return;
+  if (!s || s.finished_at !== null) {
+    if (!s || cur?.id === s.id) review.session = null;
+    return;
+  }
+  review.session = s;
+  review.goal = s.goal;
+}
+
+/**
+ * 还在发送的练习修改：换题、跳过、改目标都先改本地再写回，写回期间本地已经是较新的状态，
+ * 较早的响应与读取不覆盖它；最后一次修改的响应包含全部修改。
+ */
+let practiceWrites = 0;
+
+/** 把这组练习的修改写回后台；同一组的修改依次发送，失败时提示 */
+async function savePractice(patch: { index?: number; skip?: string; goal?: T.PracticeGoal; finish?: boolean }): Promise<T.PracticeSession | null> {
+  const s = review.session ?? review.finished;
+  if (!s) return null;
+  practiceWrites += 1;
+  try {
+    const saved = await queued(`practice:${s.id}`, () => api.updatePractice(s.id, patch));
+    if (practiceWrites === 1) {
+      if (review.session?.id === saved.id) adoptSession(saved);
+      if (review.finished?.id === saved.id) review.finished = saved;
+    }
+    return saved;
+  } catch (e) {
+    review.error = errorMessage(e);
+    return null;
+  } finally {
+    practiceWrites -= 1;
+  }
+}
+
+/** 读取还没有结束的一组练习（启动与打开复习时）；本地的修改还在写回时不采用读到的 */
+async function loadPractice() {
+  try {
+    const s = await api.currentPractice();
+    if (!practiceWrites) adoptSession(s);
+  } catch (e) {
+    review.error = errorMessage(e);
+  }
 }
 
 let subscribed = false;
@@ -122,6 +189,7 @@ function upsert(item: T.ReviewItem): T.ReviewItem {
 
 export async function loadReviews() {
   subscribe();
+  void loadPractice();
   try {
     const fresh = await api.listReviews();
     // 读取列表期间完成的修改不被较早读到的列表覆盖
@@ -151,11 +219,12 @@ export async function addStarred(): Promise<number> {
   return ids.length;
 }
 
-/** 打开复习；指定卡片时直接复习它（不在当前分组中时显示全部） */
+/** 打开复习；指定卡片时直接复习它（不在当前分组中时显示全部），否则有进行中的练习时从原处继续 */
 export function openReviews(id?: string) {
   wb.dialogs.review = true;
-  void loadReviews().then(() => {
+  void Promise.all([loadReviews(), loadPractice()]).then(() => {
     if (id && !shownItems.value.some((i) => i.card.id === id)) review.filter = "all";
+    if (!id && review.session && review.current?.card.id !== sessionCardId.value) return void resumeSession();
     const target = id ?? (review.current ? null : (shownItems.value[0]?.card.id ?? null));
     if (target) void showCard(target);
   });
@@ -163,8 +232,11 @@ export function openReviews(id?: string) {
 
 export const currentNote = computed<NoteDraft | null>(() => (review.current ? (review.notes[review.current.card.id] ?? null) : null));
 
-/** 开始复习一张卡片：只显示局面，等待重新选择。快速切换时只采用最后一次打开的卡片。 */
-export async function showCard(id: string) {
+/**
+ * 开始复习一张卡片：只显示局面，等待重新选择。快速切换时只采用最后一次打开的卡片。
+ * restore 是一组练习的编号：这张卡片在这组练习中已经作答过时，恢复到最近一次作答揭示之后。
+ */
+export async function showCard(id: string, restore: string | null = null) {
   const v = ++view;
   review.busy = true;
   try {
@@ -174,9 +246,12 @@ export async function showCard(id: string) {
     const latest = upsert(detail);
     if (v !== view) return;
     review.current = { ...detail, ...latest };
-    review.phase = "choose";
-    review.attemptAt = null;
+    const mine = restore ? practiceAttempts(latest.card, restore) : [];
+    const answered = mine[mine.length - 1];
+    review.phase = answered ? "revealed" : "choose";
+    review.attemptAt = answered?.at ?? null;
     review.intent = null;
+    review.request = newRequestId();
     review.error = null;
     // 正在编辑或保存失败的草稿保留，其余按卡片中保存的内容显示
     const draft = review.notes[id];
@@ -194,14 +269,18 @@ export async function submitChoice(choice: T.Move | null) {
   if (!current || review.phase !== "choose" || review.busy) return;
   const v = view;
   const id = current.card.id;
+  // 这组练习中的当前题目：作答记入这组练习
+  const practice = review.session && sessionCardId.value === id ? review.session.id : null;
+  const request = review.request;
   review.busy = true;
   try {
     const { goal, intent } = review;
-    const item = await queued(id, () => api.reviewAttempt(id, choice, goal, intent));
+    const item = await queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request));
     upsert(item);
     // 等待期间换了卡片（或再试一次）：这次的结果只记在它自己的卡片上
     if (v !== view || review.current?.card.id !== id) return;
-    review.attemptAt = item.card.attempts[item.card.attempts.length - 1]?.at ?? null;
+    const attempts = item.card.attempts;
+    review.attemptAt = (attempts.find((a) => a.request === request) ?? attempts[attempts.length - 1])?.at ?? null;
     review.phase = "revealed";
   } catch (e) {
     if (v === view) review.error = errorMessage(e);
@@ -216,6 +295,7 @@ export function retryCard() {
   review.phase = "choose";
   review.attemptAt = null;
   review.intent = null;
+  review.request = newRequestId();
   review.busy = false;
 }
 
@@ -263,17 +343,11 @@ export async function deleteCard(id: string) {
     await api.deleteReview(id);
     const card = review.items.find((i) => i.card.id === id)?.card;
     review.items = review.items.filter((i) => i.card.id !== id);
-    // 练习中删除的卡片不再排在这组里
-    const s = review.session;
-    if (s && s.ids.includes(id)) {
-      const at = s.ids.indexOf(id);
-      s.ids.splice(at, 1);
-      if (at < s.index) s.index -= 1;
-      if (!s.ids.length) review.session = null;
-    }
     if (card && wb.detail && wb.detail.study_id === card.study_id && wb.detail.node.id === card.node_id) wb.detail.review = null;
     if (review.current?.card.id === id) {
       review.current = null;
+      // 练习中删除了当前这一题：这组练习的顺序不变，说明已删除，继续后面的题目
+      if (review.session && sessionCardId.value === id) return await goTo(review.session.index);
       const next = shownItems.value[0]?.card.id;
       if (next) await showCard(next);
     }
@@ -282,52 +356,94 @@ export async function deleteCard(id: string) {
   }
 }
 
-/** 下一张：练习中按这组的顺序，否则是列表中下一张今天到期的卡片 */
+/** 下一张：练习中按这组的顺序（跳过已删除的卡片），否则是列表中下一张今天到期的卡片 */
 export const nextCardId = computed(() => {
   const s = review.session;
-  if (s) return s.ids[s.index + 1] ?? null;
+  if (s) {
+    const at = presentFrom(s, s.index + 1, cardExists);
+    return at === null ? null : s.cards[at];
+  }
   return nextDueId(shownItems.value, review.current?.card.id ?? null, review.clock);
 });
 
+/** 显示这组练习的当前题目：卡片已删除时往后找；已经作答过的恢复到揭示之后 */
+export async function resumeSession() {
+  const s = review.session;
+  if (s) await goTo(s.index);
+}
+
+/** 换到这组练习中的第 index 题（卡片已删除时往后找），并写回当前位置；后面没有题目时结束这组练习 */
+export async function goTo(index: number, patch: { skip?: string } = {}) {
+  const s = review.session;
+  if (!s) return;
+  const at = presentFrom(s, index, cardExists);
+  if (at === null) {
+    if (patch.skip) await savePractice(patch);
+    return finishSession();
+  }
+  const moved = at !== s.index;
+  s.index = at;
+  if (moved || patch.skip) void savePractice({ ...patch, ...(moved ? { index: at } : {}) });
+  await showCard(s.cards[at], s.id);
+}
+
+/** 跳过这一题：没有作答就离开（与直接看答案不同，后者是一次作答），记入这组练习后进入下一题 */
+export async function skipCard() {
+  const s = review.session;
+  const id = sessionCardId.value;
+  if (!s || !id) return;
+  if (!s.skipped.includes(id)) s.skipped.push(id);
+  await goTo(s.index + 1, { skip: id });
+}
+
 export async function showNext() {
   const s = review.session;
-  if (s) {
-    if (s.index + 1 >= s.ids.length) return finishSession();
-    s.index += 1;
-    return showCard(s.ids[s.index]);
-  }
+  if (s) return goTo(s.index + 1);
   if (nextCardId.value) await showCard(nextCardId.value);
 }
 
-/** 开始一组练习：今天到期的卡片（按到期先后）、需要再练的卡片，或某个专题的卡片；size 为空时全部。 */
-export function startSession(kind: "today" | "again" | TopicKey, size: number | null) {
+/**
+ * 开始一组练习：今天到期的卡片（按到期先后）、需要再练的卡片，或某个专题的卡片；size 为空时全部。
+ * 卡片的顺序在开始时确定，由后台保存；之前还没有结束的一组记为结束。
+ */
+export async function startSession(kind: "today" | "again" | TopicKey, size: number | null) {
   const now = Date.now();
   const pick = (i: T.ReviewItem) => (kind === "today" ? isDue(i.card, now) : kind === "again" ? i.card.status === "again" : hasTopic(i, kind));
   const pool = review.items.filter(pick);
-  const ids = pool.slice(0, size ?? pool.length).map((i) => i.card.id);
-  if (!ids.length) return;
+  const cards = pool.slice(0, size ?? pool.length).map((i) => i.card.id);
+  if (!cards.length) return;
   const label = kind === "today" ? "今天的练习" : kind === "again" ? "需要再练的卡片" : `专题：${topicLabel(kind)}`;
-  review.session = { ids, index: 0, startedAt: now, label };
-  review.finished = null;
-  review.filter = kind === "today" || kind === "again" ? kind : "all";
-  void showCard(ids[0]);
+  const source: T.PracticeSource = kind === "today" || kind === "again" ? kind : "topic";
+  try {
+    const s = await api.startPractice({ label, source, topic: source === "topic" ? kind : null, goal: review.goal, cards });
+    review.session = s;
+    review.finished = null;
+    review.filter = source === "topic" ? "all" : source;
+    await showCard(s.cards[0], s.id);
+  } catch (e) {
+    review.error = errorMessage(e);
+  }
 }
 
-/** 结束这组练习，给出小结（只统计这组练习开始之后的复习）。 */
-export function finishSession() {
+/** 结束这组练习，给出小结（只统计属于这组练习的作答）。 */
+export async function finishSession() {
   const s = review.session;
   if (!s) return;
   void saveNote();
-  review.finished = { ids: s.ids, startedAt: s.startedAt };
+  review.finished = s;
   review.session = null;
+  await savePractice({ finish: true });
 }
 
-/** 刚结束的一组练习的小结（只统计这组练习开始之后的复习） */
+/** 刚结束的一组练习的小结（只统计属于这组练习的作答） */
 export const sessionResult = computed<SessionSummary | null>(() => {
   const f = review.finished;
   if (!f) return null;
-  const cards = f.ids.map((id) => review.items.find((i) => i.card.id === id)?.card).filter((c): c is T.ReviewCard => !!c);
-  return sessionSummary(cards, f.startedAt, review.clock);
+  return practiceSummary(
+    f,
+    review.items.map((i) => i.card),
+    review.clock,
+  );
 });
 
 export function closeSummary() {

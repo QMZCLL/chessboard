@@ -331,6 +331,37 @@ export interface ReviewAttempt {
   intent: Intent | null;
   reflection: Reflection | null;
   decision: DecisionFeedback | null;
+  /** 所属的练习批次；不在一组练习中作答或早期的记录为空 */
+  practice: string | null;
+  /** 界面为这次作答生成的请求编号（重复提交只记一次） */
+  request: string | null;
+}
+
+/** 练习批次的来源：今天到期、需要再练、某个专题 */
+export type PracticeSource = "today" | "again" | "topic";
+
+/**
+ * 一组练习：开始时选定的卡片与顺序、当前的题目、跳过的题目与练习目标；退出或重新启动后从原处继续。
+ * 作答记在卡片的复习记录中，并带上批次编号（ReviewAttempt.practice）。
+ */
+export interface PracticeSession {
+  id: string;
+  label: string;
+  source: PracticeSource;
+  /** 专题练习的专题键 */
+  topic: string | null;
+  goal: PracticeGoal;
+  cards: string[];
+  /** 当前的题目（cards 中的位置） */
+  index: number;
+  /** 没有作答就离开的题目（与直接看答案不同） */
+  skipped: string[];
+  started_at: number;
+  updated_at: number;
+  /** 结束的时间；还在进行时为空 */
+  finished_at: number | null;
+  /** 修改次数：判断同一组练习的两份数据哪份较新 */
+  revision: number;
 }
 
 export interface ReviewCard {

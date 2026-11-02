@@ -1,7 +1,7 @@
 // 复习卡片的分组、计数与文字说明。只依赖数据，便于单独测试。
 // 列表与复习开始前都不显示棋谱中的着法、笔记等可能透露答案的内容。
 // “今天到期”按本机日期计算：下一次复习的时间在今天结束之前（含已经过期的）。
-import type { ArchiveSummary, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
+import type { ArchiveSummary, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, PracticeSession, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
 
 export const STATUS_LABEL: Record<ReviewStatus, string> = { due: "待复习", again: "需要再练", understood: "已理解" };
 
@@ -172,10 +172,30 @@ export function awaitingResult(card: ReviewCard): boolean {
   return !!last && last.decision?.state === "pending" && card.schedule_base?.attempt_at === last.at;
 }
 
+/** 一组练习中一道题的进展：todo 还没有作答；answered 已作答（含直接看答案）；skipped 跳过；missing 卡片已删除 */
+export type EntryState = "todo" | "answered" | "skipped" | "missing";
+
+/** 这张卡片在这组练习中的作答，按时间先后 */
+export function practiceAttempts(card: Pick<ReviewCard, "attempts">, practiceId: string): ReviewAttempt[] {
+  return card.attempts.filter((a) => a.practice === practiceId);
+}
+
+export function entryState(session: Pick<PracticeSession, "id" | "skipped">, cardId: string, card: ReviewCard | undefined): EntryState {
+  if (!card) return "missing";
+  if (practiceAttempts(card, session.id).length) return "answered";
+  return session.skipped.includes(cardId) ? "skipped" : "todo";
+}
+
+/** 从 from（含）往后，第一道卡片还在的题目的位置；没有时为 null */
+export function presentFrom(session: Pick<PracticeSession, "cards">, from: number, exists: (id: string) => boolean): number | null {
+  for (let i = Math.max(0, from); i < session.cards.length; i++) if (exists(session.cards[i])) return i;
+  return null;
+}
+
 export interface SessionSummary {
-  /** 这组练习的张数 */
+  /** 这组练习的张数（含练习中删除的卡片） */
   total: number;
-  /** 这组练习中复习过的张数 */
+  /** 这组练习中作答过的张数 */
   done: number;
   independent: number;
   missed: number;
@@ -184,20 +204,30 @@ export interface SessionSummary {
   pending: number;
   /** 局面决策无法评价 */
   ungraded: number;
-  /** 复习过的卡片下一次复习的安排，按时间先后（比较还没有结果的另外说明） */
+  /** 没有作答就跳过的张数 */
+  skipped: number;
+  /** 练习中删除的卡片 */
+  missing: number;
+  /** 作答过的卡片下一次复习的安排，按时间先后（比较还没有结果的另外说明） */
   schedule: { text: string; count: number }[];
 }
 
-/** 一组练习的小结：数字都来自这组练习开始之后的复习记录与卡片的安排。 */
-export function sessionSummary(cards: ReviewCard[], startedAt: number, now: number): SessionSummary {
-  const summary: SessionSummary = { total: cards.length, done: 0, independent: 0, missed: 0, revealed: 0, pending: 0, ungraded: 0, schedule: [] };
+/**
+ * 一组练习的小结：只统计属于这组练习的作答，每张卡片按这组中的第一次作答计算
+ * （揭示之后的“再试一次”是后续练习，不改写第一次的表现）；安排按卡片的最新状态，比较结果晚到时随之更新。
+ */
+export function practiceSummary(session: Pick<PracticeSession, "id" | "cards" | "skipped">, cards: ReviewCard[], now: number): SessionSummary {
+  const summary: SessionSummary = { total: session.cards.length, done: 0, independent: 0, missed: 0, revealed: 0, pending: 0, ungraded: 0, skipped: 0, missing: 0, schedule: [] };
+  const byId = new Map(cards.map((c) => [c.id, c]));
   const groups = new Map<string, { due: number; count: number }>();
-  for (const card of cards) {
-    const inSession = card.attempts.filter((a) => a.at >= startedAt);
-    const last = inSession[inSession.length - 1];
-    if (!last) continue;
+  for (const id of session.cards) {
+    const card = byId.get(id);
+    const state = entryState(session, id, card);
+    if (state === "missing") summary.missing += 1;
+    if (state === "skipped") summary.skipped += 1;
+    if (state !== "answered" || !card) continue;
     summary.done += 1;
-    summary[outcomeOf(last)] += 1;
+    summary[outcomeOf(practiceAttempts(card, session.id)[0])] += 1;
     const awaiting = awaitingResult(card);
     const text = awaiting ? "比较完成后确定" : dueText(card, now);
     // 还没有确定时间的排在最后
@@ -211,7 +241,10 @@ export function sessionSummary(cards: ReviewCard[], startedAt: number, now: numb
 
 /** 小结的文字。 */
 export function summaryText(s: SessionSummary): string {
-  if (!s.done) return `这组 ${s.total} 张还没有复习。`;
+  const left = s.total - s.done - s.skipped - s.missing;
+  const others = [s.skipped && `跳过 ${s.skipped} 张`, s.done && left > 0 && `还有 ${left} 张没有复习`, s.missing && `${s.missing} 张卡片已删除`].filter(Boolean);
+  const rest = others.length ? `；${others.join("；")}` : "";
+  if (!s.done) return `这组 ${s.total} 张还没有复习${rest}。`;
   const parts = [
     `${s.independent} 张独立选对`,
     `${s.missed} 张没有选对`,
@@ -220,7 +253,6 @@ export function summaryText(s: SessionSummary): string {
     `${s.ungraded} 张无法评价`,
   ].filter((p) => !p.startsWith("0 "));
   const plan = s.schedule.map((g) => `${g.text} ${g.count} 张`).join("，");
-  const rest = s.total > s.done ? `；还有 ${s.total - s.done} 张没有复习` : "";
   return `本次完成 ${s.done} 张：${parts.join("，")}${rest}。安排：${plan}。`;
 }
 

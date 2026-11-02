@@ -50,6 +50,9 @@ use crate::llm::service::CoachRuntime;
 use crate::records::Budget;
 use crate::records::ExplainStatus;
 use crate::records::ExplanationRecord;
+use crate::practice::PracticeSession;
+use crate::practice::PracticeStartRequest;
+use crate::practice::PracticeUpdateRequest;
 use crate::review::ReviewAttemptRequest;
 use crate::review::ReviewDetail;
 use crate::review::ReviewItem;
@@ -623,6 +626,14 @@ impl AppService {
     pub fn update_review(&self, req: ReviewUpdateRequest) -> ApiResult<ReviewItem> { self.inner.update_review(req) }
 
     pub fn delete_review(&self, r: ReviewRef) -> ApiResult<()> { self.inner.delete_review(&r.id) }
+
+    /// 开始一组练习（见 `practice`）：固定卡片的顺序，之前还没有结束的一组记为结束。
+    pub fn start_practice(&self, req: PracticeStartRequest) -> ApiResult<PracticeSession> { self.inner.start_practice(req) }
+
+    /// 还没有结束的一组练习，用于继续上次的练习。
+    pub fn current_practice(&self) -> ApiResult<Option<PracticeSession>> { self.inner.current_practice() }
+
+    pub fn update_practice(&self, req: PracticeUpdateRequest) -> ApiResult<PracticeSession> { self.inner.update_practice(req) }
 
     pub fn cancel_analysis(&self, request_id: &str) { self.inner.engine.cancel_group(&format!("analyze:{request_id}")); }
 }

@@ -22,7 +22,9 @@ import {
   recommendation,
   reviewCardId,
   suggestedStatus,
-  sessionSummary,
+  entryState,
+  practiceSummary,
+  presentFrom,
   suggestionFor,
   summaryText,
   thinkingText,
@@ -109,9 +111,9 @@ test("下一张今天到期的卡片：跳过还没到期的，到末尾从头�
   assert.equal(nextDueId([item("a", "due")], "a", NOW), null);
 });
 
-test("一组练习的小结只统计这组开始之后的复习，安排按时间先后", () => {
-  const started = NOW - 60_000;
-  const attempt = (at: number, choice: boolean, matched: boolean): ReviewAttempt => ({
+test("一组练习的小结只统计属于这组练习的作答，按第一次作答计算，安排按时间先后", () => {
+  const P = "p1";
+  const attempt = (at: number, choice: boolean, matched: boolean, practice: string | null = P): ReviewAttempt => ({
     at,
     choice: choice ? { mv: "h9g7", notation: "马8进7" } : null,
     matched,
@@ -119,23 +121,43 @@ test("一组练习的小结只统计这组开始之后的复习，安排按时�
     intent: null,
     reflection: null,
     decision: null,
+    practice,
+    request: null,
   });
   const card = (id: string, days: number, attempts: ReviewAttempt[]) => ({ ...item(id, "due", [], true, days).card, attempts });
+  const session = (ids: string[], skipped: string[] = []) => ({ id: P, cards: ids, skipped });
   const cards = [
     card("a", 3, [attempt(NOW, true, true)]),
-    card("b", 1, [attempt(started - 1, true, true), attempt(NOW, false, false)]),
-    card("c", 1, [attempt(NOW, true, false)]),
-    // 这组开始之前复习过、这组里没有复习
-    card("d", 0, [attempt(started - 5, true, true)]),
+    // 这组之外的复习不算；这组中第一次没有选对，揭示后再试一次选对：按第一次计算
+    card("b", 1, [attempt(NOW - 9, true, true, null), attempt(NOW, true, false), attempt(NOW + 1, true, true)]),
+    card("c", 1, [attempt(NOW, false, false)]),
+    // 这组里没有作答
+    card("d", 0, [attempt(NOW - 5, true, true, "另一组")]),
   ];
-  const s = sessionSummary(cards, started, NOW);
-  assert.deepEqual({ ...s, schedule: undefined }, { total: 4, done: 3, independent: 1, missed: 1, revealed: 1, pending: 0, ungraded: 0, schedule: undefined });
+  const s = practiceSummary(session(["a", "b", "c", "d"]), cards, NOW);
+  assert.deepEqual(
+    { ...s, schedule: undefined },
+    { total: 4, done: 3, independent: 1, missed: 1, revealed: 1, pending: 0, ungraded: 0, skipped: 0, missing: 0, schedule: undefined },
+  );
   assert.deepEqual(s.schedule, [
     { text: "明天再看", count: 2 },
     { text: "3 天后再看", count: 1 },
   ]);
   assert.equal(summaryText(s), "本次完成 3 张：1 张独立选对，1 张没有选对，1 张直接看了答案；还有 1 张没有复习。安排：明天再看 2 张，3 天后再看 1 张。");
-  assert.equal(summaryText(sessionSummary(cards.slice(3), started, NOW)), "这组 1 张还没有复习。");
+  assert.equal(summaryText(practiceSummary(session(["d"]), cards, NOW)), "这组 1 张还没有复习。");
+  // 跳过与已删除的卡片分开说明；跳过之后又作答的按作答计算
+  const withGaps = practiceSummary(session(["a", "d", "x"], ["d", "a"]), cards, NOW);
+  assert.deepEqual([withGaps.done, withGaps.skipped, withGaps.missing], [1, 1, 1]);
+  assert.equal(summaryText(withGaps), "本次完成 1 张：1 张独立选对；跳过 1 张；1 张卡片已删除。安排：3 天后再看 1 张。");
+  assert.deepEqual(
+    ["a", "d", "x"].map((id) => entryState(session(["a", "d", "x"], ["d"]), id, cards.find((c) => c.id === id))),
+    ["answered", "skipped", "missing"],
+  );
+  assert.equal(entryState(session(["d"]), "d", cards[3]), "todo");
+  // 往后找卡片还在的题目
+  const exists = (id: string) => id !== "x";
+  assert.equal(presentFrom({ cards: ["a", "x", "b"] }, 1, exists), 2);
+  assert.equal(presentFrom({ cards: ["a", "x"] }, 1, exists), null);
 
   // 局面决策：比较还没有结果、无法评价，都不折算为选对或选错；已经标记、等结果的卡片安排另外说明
   const decision = (state: "pending" | "ready", support: "supported" | "unknown"): ReviewAttempt => ({
@@ -148,11 +170,11 @@ test("一组练习的小结只统计这组开始之后的复习，安排按时�
   assert.equal(outcomeOf(waiting.attempts[0]), "pending");
   assert.equal(outcomeOf(unclear.attempts[0]), "ungraded");
   assert.ok(awaitingResult(waiting) && !awaitingResult(unclear));
-  const mixed = sessionSummary([waiting, unclear], started, NOW);
+  const mixed = practiceSummary(session(["e", "f"]), [waiting, unclear], NOW);
   assert.equal(summaryText(mixed), "本次完成 2 张：1 张的比较还没有完成，1 张无法评价。安排：明天再看 1 张，比较完成后确定 1 张。");
   // 结果回来、支持这个选择：小结随卡片更新
   const supported = { ...waiting, attempts: [{ ...decision("ready", "supported"), verdict: "reasonable" as const }] };
-  assert.equal(sessionSummary([supported, unclear], started, NOW).independent, 1);
+  assert.equal(practiceSummary(session(["e", "f"]), [supported, unclear], NOW).independent, 1);
 });
 
 test("复习间隔的文字与导入预览", () => {
@@ -201,7 +223,7 @@ test("同一张卡片的两份数据：修改次数多的较新，较早读取�
 });
 
 test("局面决策：按这次比较是否支持这个选择建议状态，与棋谱一致不自动建议已理解", () => {
-  const base = { at: 1, choice: { mv: "b9c7", notation: "马2进3" }, matched: false, intent: null, reflection: null, decision: null };
+  const base = { at: 1, choice: { mv: "b9c7", notation: "马2进3" }, matched: false, intent: null, reflection: null, decision: null, practice: null, request: null };
   const SUPPORT = { same_as_record: "supported", reasonable: "supported", noteworthy: "not_supported", unclear: "unknown" } as const;
   const decided = (
     verdict: DecisionFeedback["verdict"],

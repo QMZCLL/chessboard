@@ -152,9 +152,28 @@ export const api = {
   addReview: (study_id: string, node_id: number) => call<T.ReviewItem>("add_review", { req: { study_id, node_id } }),
   listReviews: () => call<T.ReviewItem[]>("list_reviews"),
   reviewDetail: (id: string) => call<T.ReviewDetail>("review_detail", { req: { id } }),
-  /** 记一次复习；choice 为空表示没有走子，直接查看原来的思考与讲解 */
-  reviewAttempt: (id: string, choice: T.Move | null, goal: T.PracticeGoal, intent: T.Intent | null) =>
-    call<T.ReviewItem>("review_attempt", { req: { id, choice, goal, intent } }),
+  /**
+   * 记一次复习；choice 为空表示没有走子，直接查看原来的思考与讲解。practice 是这次作答所属的练习批次；
+   * request 是这次作答的请求编号，同一编号重复提交时后台只记一次
+   */
+  reviewAttempt: (
+    id: string,
+    choice: T.Move | null,
+    goal: T.PracticeGoal,
+    intent: T.Intent | null,
+    practice: string | null = null,
+    request: string | null = null,
+  ) => call<T.ReviewItem>("review_attempt", { req: { id, choice, goal, intent, practice, request } }),
+  /** 开始一组练习：卡片按给出的顺序；之前还没有结束的一组记为结束 */
+  startPractice: (req: { label: string; source: T.PracticeSource; topic: string | null; goal: T.PracticeGoal; cards: string[] }) =>
+    call<T.PracticeSession>("start_practice", { req }),
+  /** 还没有结束的一组练习 */
+  currentPractice: () => call<T.PracticeSession | null>("current_practice"),
+  /** 换题、记下跳过、改练习目标或结束 */
+  updatePractice: (id: string, patch: { index?: number; skip?: string; goal?: T.PracticeGoal; finish?: boolean }) =>
+    call<T.PracticeSession>("update_practice", {
+      req: { id, index: patch.index ?? null, skip: patch.skip ?? null, goal: patch.goal ?? null, finish: patch.finish ?? false },
+    }),
   updateReview: (id: string, patch: { status?: T.ReviewStatus; note?: string; issues?: T.ReviewIssue[] }) =>
     call<T.ReviewItem>("update_review", { req: { id, status: patch.status ?? null, note: patch.note ?? null, issues: patch.issues ?? null } }),
   /** 整局报告 */
