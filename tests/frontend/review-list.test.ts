@@ -22,7 +22,9 @@ import {
   recommendation,
   reviewCardId,
   suggestedStatus,
+  entryBadge,
   entryState,
+  outcomeBadge,
   practiceSummary,
   presentFrom,
   suggestionFor,
@@ -154,6 +156,12 @@ test("一组练习的小结只统计属于这组练习的作答，按第一次�
     ["answered", "skipped", "missing"],
   );
   assert.equal(entryState(session(["d"]), "d", cards[3]), "todo");
+  // 练习中的标签：作答过的按这组中的第一次作答，其余写明进展
+  const gaps = session(["b", "c", "d", "x"], ["d"]);
+  assert.deepEqual(
+    ["b", "c", "d", "x"].map((id) => entryBadge(gaps, id, cards.find((c) => c.id === id)).text),
+    ["与棋谱不同", "直接看了答案", "已跳过", "卡片已删除"],
+  );
   // 往后找卡片还在的题目
   const exists = (id: string) => id !== "x";
   assert.equal(presentFrom({ cards: ["a", "x", "b"] }, 1, exists), 2);
@@ -172,9 +180,13 @@ test("一组练习的小结只统计属于这组练习的作答，按第一次�
   assert.ok(awaitingResult(waiting) && !awaitingResult(unclear));
   const mixed = practiceSummary(session(["e", "f"]), [waiting, unclear], NOW);
   assert.equal(summaryText(mixed), "本次完成 2 张：1 张的比较还没有完成，1 张无法评价。安排：明天再看 1 张，比较完成后确定 1 张。");
+  // 局面决策的标签：比较中与无法评价是中性的
+  assert.deepEqual(outcomeBadge(waiting.attempts[0]), { text: "比较中", tone: "neutral" });
+  assert.deepEqual(outcomeBadge(unclear.attempts[0]), { text: "无法评价", tone: "neutral" });
   // 结果回来、支持这个选择：小结随卡片更新
   const supported = { ...waiting, attempts: [{ ...decision("ready", "supported"), verdict: "reasonable" as const }] };
   assert.equal(practiceSummary(session(["e", "f"]), [supported, unclear], NOW).independent, 1);
+  assert.deepEqual(outcomeBadge(supported.attempts[0]), { text: "比较支持", tone: "ok" });
 });
 
 test("复习间隔的文字与导入预览", () => {

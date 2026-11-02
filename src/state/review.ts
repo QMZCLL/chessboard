@@ -38,6 +38,8 @@ export const review = reactive({
   session: null as T.PracticeSession | null,
   /** 刚结束的一组练习：小结按卡片的最新状态计算，比较结果晚到时随之更新 */
   finished: null as T.PracticeSession | null,
+  /** 练习中的说明（例如这组中有卡片已经删除、已跳过） */
+  notice: null as string | null,
   current: null as T.ReviewDetail | null,
   /** choose：在棋盘上重新选择；revealed：已经选择或直接看了答案 */
   phase: "choose" as "choose" | "revealed",
@@ -219,12 +221,11 @@ export async function addStarred(): Promise<number> {
   return ids.length;
 }
 
-/** 打开复习；指定卡片时直接复习它（不在当前分组中时显示全部），否则有进行中的练习时从原处继续 */
+/** 打开复习库；指定卡片时直接复习它（不在当前分组中时显示全部）。进行中的练习在工作区中继续 */
 export function openReviews(id?: string) {
   wb.dialogs.review = true;
-  void Promise.all([loadReviews(), loadPractice()]).then(() => {
+  void loadReviews().then(() => {
     if (id && !shownItems.value.some((i) => i.card.id === id)) review.filter = "all";
-    if (!id && review.session && review.current?.card.id !== sessionCardId.value) return void resumeSession();
     const target = id ?? (review.current ? null : (shownItems.value[0]?.card.id ?? null));
     if (target) void showCard(target);
   });
@@ -377,6 +378,9 @@ export async function goTo(index: number, patch: { skip?: string } = {}) {
   const s = review.session;
   if (!s) return;
   const at = presentFrom(s, index, cardExists);
+  // 中间有已经删除的卡片：说明已跳过，继续后面的题目
+  const gone = s.cards.slice(Math.max(0, index), at ?? s.cards.length).map((_, i) => Math.max(0, index) + i + 1);
+  review.notice = gone.length ? `第 ${gone.join("、")} 题的卡片已经删除，已跳过` : null;
   if (at === null) {
     if (patch.skip) await savePractice(patch);
     return finishSession();
@@ -404,14 +408,14 @@ export async function showNext() {
 
 /**
  * 开始一组练习：今天到期的卡片（按到期先后）、需要再练的卡片，或某个专题的卡片；size 为空时全部。
- * 卡片的顺序在开始时确定，由后台保存；之前还没有结束的一组记为结束。
+ * 卡片的顺序在开始时确定，由后台保存；之前还没有结束的一组记为结束。返回是否开始了。
  */
-export async function startSession(kind: "today" | "again" | TopicKey, size: number | null) {
+async function startSession(kind: "today" | "again" | TopicKey, size: number | null): Promise<boolean> {
   const now = Date.now();
   const pick = (i: T.ReviewItem) => (kind === "today" ? isDue(i.card, now) : kind === "again" ? i.card.status === "again" : hasTopic(i, kind));
   const pool = review.items.filter(pick);
   const cards = pool.slice(0, size ?? pool.length).map((i) => i.card.id);
-  if (!cards.length) return;
+  if (!cards.length) return false;
   const label = kind === "today" ? "今天的练习" : kind === "again" ? "需要再练的卡片" : `专题：${topicLabel(kind)}`;
   const source: T.PracticeSource = kind === "today" || kind === "again" ? kind : "topic";
   try {
@@ -420,9 +424,38 @@ export async function startSession(kind: "today" | "again" | TopicKey, size: num
     review.finished = null;
     review.filter = source === "topic" ? "all" : source;
     await showCard(s.cards[0], s.id);
+    return true;
   } catch (e) {
     review.error = errorMessage(e);
+    return false;
   }
+}
+
+function enterWorkspace() {
+  wb.dialogs.review = false;
+  wb.main = "practice";
+}
+
+/** 进入专注练习工作区，从这组练习的当前题目继续 */
+export async function openPractice() {
+  if (!review.session) return;
+  enterWorkspace();
+  await resumeSession();
+}
+
+/** 开始一组练习，并进入专注练习工作区；没有开始时（例如卡片刚被删除）留在原处，返回 false，原因见 review.error */
+export async function startPractice(kind: "today" | "again" | TopicKey, size: number | null): Promise<boolean> {
+  const started = await startSession(kind, size);
+  if (started) enterWorkspace();
+  return started;
+}
+
+/** 保存退出：这组练习的位置已经写回，之后可以从原处继续 */
+export async function exitPractice() {
+  await saveNote();
+  review.finished = null;
+  review.notice = null;
+  wb.main = "board";
 }
 
 /** 结束这组练习，给出小结（只统计属于这组练习的作答）。 */
@@ -446,14 +479,11 @@ export const sessionResult = computed<SessionSummary | null>(() => {
   );
 });
 
-export function closeSummary() {
-  review.finished = null;
-}
-
 /** 打开原会话中的这一着（看谱学习，显示完整讲解） */
 export async function openSource(item: T.ReviewItem) {
   await saveNote();
   wb.dialogs.review = false;
+  wb.main = "board";
   if (wb.mode !== "auto") await setMode("auto");
   if (study.value?.id === item.card.study_id) await selectNode(item.card.node_id);
   else await openStudy(item.card.study_id, item.card.node_id);

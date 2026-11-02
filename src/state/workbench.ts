@@ -87,6 +87,8 @@ export const wb = reactive({
   capture: { state: "idle" } as T.CaptureState,
   followLive: true,
   dialogs: { newStudy: false, capture: false, settings: false, studies: false, coachBatch: false, review: false, report: false },
+  /** 主区域：棋盘学习，或一组练习的专注练习工作区（练习保存在后台，退出后可以继续） */
+  main: "board" as "board" | "practice",
   /** 下次打开设置时显示的分组（从其他位置跳转到某项设置时使用） */
   settingsTab: null as SettingsTab | null,
 });
@@ -523,6 +525,7 @@ function lastMainline(view: T.StudyView): number {
 export async function openStudy(id: string, select?: number) {
   const view = await api.loadStudy(id);
   setView(view);
+  wb.main = "board";
   safeStorage("set", "xq-last-study", id);
   await selectNode(select ?? view.study.live_node ?? lastMainline(view));
 }
@@ -560,6 +563,7 @@ async function refreshView(id: string) {
 export async function createStudy(req: T.CreateStudyRequest): Promise<T.ImportResponse> {
   const resp = await api.createStudy(req);
   setView(resp.study);
+  wb.main = "board";
   safeStorage("set", "xq-last-study", resp.study.study.id);
   for (const n of resp.notes) notify("warning", n);
   await selectNode(req.kind.type === "record" ? lastMainline(resp.study) : 0);
@@ -569,6 +573,7 @@ export async function createStudy(req: T.CreateStudyRequest): Promise<T.ImportRe
 export async function importText(text: string, name: string | null) {
   const resp = await api.importText(text, name);
   setView(resp.study);
+  wb.main = "board";
   safeStorage("set", "xq-last-study", resp.study.study.id);
   for (const n of resp.notes) notify(resp.stopped ? "warning" : "success", n);
   await selectNode(lastMainline(resp.study));
@@ -579,6 +584,7 @@ export async function importFromFile() {
   if (!path) return;
   const resp = await api.importFile(path);
   setView(resp.study);
+  wb.main = "board";
   safeStorage("set", "xq-last-study", resp.study.study.id);
   for (const n of resp.notes) notify(resp.stopped ? "warning" : "success", n);
   await selectNode(lastMainline(resp.study));

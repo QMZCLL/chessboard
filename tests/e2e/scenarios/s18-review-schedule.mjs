@@ -1,6 +1,7 @@
 // 场景 18：到期复习、每日练习与学习档案。
 // A. 复习入口与“今天”分组按下一次复习的时间：新加入的卡片立即到期；
-// B. 今天的练习：按顺序复习，标记后说明下一次复习的时间（独立选对后标为已理解拉长间隔，直接看答案或没有选对时明天再看），
+// B. 今天的练习：在专注练习工作区中按开始时的顺序复习，顶部显示练习目标与进度；每个阶段突出一个主要操作；
+//    标记后说明下一次复习的时间（独立选对后标为已理解拉长间隔，直接看答案或没有选对时明天再看），
 //    结束后的小结来自实际记录；只练需要再练的卡片；
 // C. 设置中的复习间隔；
 // D. 学习档案：导出、导入前预览、恢复删除的卡片（历次复习与安排一起恢复）、立即备份。
@@ -53,36 +54,59 @@ await dialog.getByTestId("review-filter-today").waitFor();
 check((await dialog.getByTestId("review-filter-today").innerText()).includes("3"), "“今天”分组有 3 张");
 check((await dialog.locator("[data-review]").first().innerText()).includes("今天到期"), "列表中说明下一次复习的时间");
 
-// ---------- B. 今天的练习 ----------
+// ---------- B. 今天的练习：在专注练习工作区中按顺序复习 ----------
+const ws = page.getByTestId("practice-workspace");
+const wsCard = ws.getByTestId("review-card");
+async function wsMove(mv) {
+  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await wsCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+}
+const isPrimary = (el) => el.evaluate((e) => e.classList.contains("n-button--primary-type"));
+/** 在工作区中标记状态，返回这次标记的提示 */
+async function wsMark(which) {
+  const messages = page.locator(".n-message");
+  const before = await messages.count();
+  await ws.getByTestId(`review-mark-${which}`).click();
+  await messages.nth(before).waitFor();
+  return (await messages.nth(before).innerText()).trim();
+}
+const history = () => ws.getByTestId("review-history").innerText();
 await dialog.getByTestId("review-start-today").click();
-const session = dialog.getByTestId("review-session-progress");
-await session.waitFor();
-check((await session.innerText()).includes("今天的练习 · 第 1 / 3 张"), `开始一组练习：${(await session.innerText()).replace(/\n/g, " ")}`);
-await dialog.locator(`[data-review="${ids[0]}"].active`).waitFor();
+const progress = ws.getByTestId("practice-progress");
+await progress.waitFor();
+await dialog.waitFor({ state: "hidden" });
+check(
+  (await ws.getByTestId("practice-label").innerText()) === "今天的练习" && (await progress.innerText()).includes("第 1 / 3 题"),
+  `开始一组练习后进入专注练习工作区：${(await progress.innerText()).replace(/\n/g, " ")}`,
+);
+check((await ws.getByTestId("practice-goal").innerText()).startsWith("复现棋谱"), "工作区顶部始终显示练习目标");
 // 第 1 张（炮二平五）：走对，标为已理解
-await reviewMove("h2e2");
-await dialog.getByTestId("review-result").waitFor();
-let notice = await mark("understood");
+await ws.getByTestId("review-prompt").waitFor();
+check((await history()) === "从开局第一着开始", "按开始时的顺序：第 1 题");
+await wsMove("h2e2");
+await ws.getByTestId("review-result").waitFor();
+check(await isPrimary(ws.getByTestId("review-mark-understood")), "揭示后先突出建议的状态");
+let notice = await wsMark("understood");
 check(notice.includes("已理解") && notice.includes("3 天后再看"), `独立选对后标为已理解，间隔拉长：${notice}`);
-check((await dialog.getByTestId("review-due").innerText()) === "3 天后再看", "卡片上显示下一次复习的时间");
-check((await dialog.getByTestId("review-next").innerText()).includes("下一张（2 / 3）"), "练习中按顺序进入下一张");
-await dialog.getByTestId("review-next").click();
-await dialog.locator(`[data-review="${ids[1]}"].active`).waitFor();
+check((await ws.getByTestId("review-due").innerText()) === "3 天后再看", "卡片上显示下一次复习的时间");
+const next = ws.getByTestId("review-next");
+check((await next.innerText()).includes("下一题（2 / 3）") && (await isPrimary(next)) && !(await isPrimary(ws.getByTestId("review-mark-understood"))), "标记之后突出下一题");
+await next.click();
+await ws.getByTestId("review-history").filter({ hasText: "此前：炮二平五" }).waitFor();
 // 第 2 张：直接看答案后标为已理解
-await dialog.getByTestId("review-reveal").click();
-await dialog.getByTestId("review-result").waitFor();
-notice = await mark("understood");
+await ws.getByTestId("review-reveal").click();
+await ws.getByTestId("review-result").waitFor();
+notice = await wsMark("understood");
 check(notice.includes("明天再看"), `直接看答案后标为已理解：明天再看（${notice}）`);
-await dialog.getByTestId("review-next").click();
-await dialog.locator(`[data-review="${ids[2]}"].active`).waitFor();
+await next.click();
+await ws.getByTestId("review-history").filter({ hasText: "马8进7" }).waitFor();
 // 第 3 张（马二进三）：走了马八进七，标为需要再练
-await reviewMove("b0c2");
-await dialog.getByTestId("review-result").waitFor();
-notice = await mark("again");
+await wsMove("b0c2");
+await ws.getByTestId("review-result").waitFor();
+notice = await wsMark("again");
 check(notice.includes("需要再练") && notice.includes("明天再看"), `标为需要再练：${notice}`);
-check((await dialog.getByTestId("review-next").innerText()).includes("完成这组练习"), "最后一张之后完成这组练习");
-await dialog.getByTestId("review-next").click();
-const summary = await dialog.getByTestId("review-session-summary").innerText();
+check((await next.innerText()).includes("完成这组练习"), "最后一张之后完成这组练习");
+await next.click();
+const summary = await ws.getByTestId("review-session-summary").innerText();
 check(
   summary === "本次完成 3 张：1 张独立选对，1 张没有选对，1 张直接看了答案。安排：明天再看 2 张，3 天后再看 1 张。",
   `小结来自实际记录：${summary}`,
@@ -93,18 +117,24 @@ check(
   [daysUntil(c1), daysUntil(c2), daysUntil(c3)].join() === "3,1,1" && c1.stage === 1 && c3.status === "again",
   `后台保存的安排：${[daysUntil(c1), daysUntil(c2), daysUntil(c3)].join("、")} 天`,
 );
-check((await todayCount()) === 0 && (await dialog.getByTestId("review-filter-today").innerText()).includes("0"), "今天到期的都已练完");
-await dialog.getByTestId("review-close-summary").click();
+check((await todayCount()) === 0, "今天到期的都已练完");
+check((await bridge("current_practice")) === null, "完成后这组练习已经结束");
+await ws.getByTestId("review-close-summary").click();
+await ws.waitFor({ state: "detached" });
+await page.waitForSelector(".xq-board");
 // 只练需要再练的卡片
+await page.getByTestId("open-review").click();
 await dialog.getByTestId("review-start-again").click();
-await session.waitFor();
-check((await session.innerText()).includes("需要再练的卡片 · 第 1 / 1 张"), "只练需要再练的卡片");
-await dialog.locator(`[data-review="${ids[2]}"].active`).waitFor();
-await dialog.getByTestId("review-finish").click();
-check((await dialog.getByTestId("review-session-summary").innerText()) === "这组 1 张还没有复习。", "提前结束时如实说明");
-await dialog.getByTestId("review-close-summary").click();
-await page.keyboard.press("Escape");
-await dialog.waitFor({ state: "hidden" });
+await progress.waitFor();
+check(
+  (await ws.getByTestId("practice-label").innerText()) === "需要再练的卡片" && (await progress.innerText()).includes("第 1 / 1 题"),
+  "只练需要再练的卡片",
+);
+await ws.getByTestId("review-history").filter({ hasText: "马8进7" }).waitFor();
+await ws.getByTestId("review-finish").click();
+check((await ws.getByTestId("review-session-summary").innerText()) === "这组 1 张还没有复习。", "提前结束时如实说明");
+await ws.getByTestId("review-close-summary").click();
+await ws.waitFor({ state: "detached" });
 
 // ---------- C. 设置中的复习间隔 ----------
 const originalReview = (await bridge("app_status")).config.review;

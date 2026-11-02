@@ -84,12 +84,17 @@ await recommend.waitFor();
 check((await recommend.innerText()).includes("你有 2 张卡片标记了“没有注意保护关系”"), "同一个问题标记到两张卡片时推荐练习，并写明依据");
 await snap(page, "topics");
 await recommend.getByTestId("review-recommend-start").click();
-const progress = dialog.getByTestId("review-session-progress");
+const ws = page.getByTestId("practice-workspace");
+const progress = ws.getByTestId("practice-progress");
 await progress.waitFor();
-check((await progress.innerText()).includes("专题：我标记的：没有注意保护关系 · 第 1 / 2 张"), "练这一组标记了同一问题的卡片");
-await dialog.getByTestId("review-finish").click();
-await dialog.getByTestId("review-close-summary").click();
+check(
+  (await ws.getByTestId("practice-label").innerText()) === "专题：我标记的：没有注意保护关系" && (await progress.innerText()).includes("第 1 / 2 题"),
+  "练这一组标记了同一问题的卡片",
+);
+await ws.getByTestId("review-finish").click();
+await ws.getByTestId("review-close-summary").click();
 // 按程序建议的主题练一组
+await page.getByTestId("open-review").click();
 await dialog.getByTestId("review-topic").click();
 const option = page.locator(".n-base-select-option", { hasText: "保护关系变化" });
 await option.waitFor();
@@ -97,9 +102,9 @@ const optionText = await option.innerText();
 await option.click();
 await dialog.getByTestId("review-start-topic").click();
 await progress.waitFor();
-check((await progress.innerText()).startsWith("专题：保护关系变化"), `按主题练一组：${optionText}`);
-await page.keyboard.press("Escape");
-await dialog.waitFor({ state: "hidden" });
+check((await ws.getByTestId("practice-label").innerText()).startsWith("专题：保护关系变化"), `按主题练一组：${optionText}`);
+await ws.getByTestId("practice-exit").click();
+await ws.waitFor({ state: "detached" });
 
 // ---------- C. 报告属于打开时的那盘棋 ----------
 const otherName = `报告乙 ${Date.now() % 100000}`;

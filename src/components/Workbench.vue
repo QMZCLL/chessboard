@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // 学习工作台：按窗口宽度切换布局（见 state/layout.ts）。宽屏时三栏宽度可拖动调整。
+// 进行一组练习时，主区域换成专注练习工作区（见 PracticeWorkspace）。
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { NButton, NResult, NSpin, NTabPane, NTabs, useMessage } from "naive-ui";
 import BoardArea from "./BoardArea.vue";
 import CaptureDialog from "./CaptureDialog.vue";
 import CoachBatchDialog from "./CoachBatchDialog.vue";
 import ReviewDialog from "./ReviewDialog.vue";
+import PracticeWorkspace from "./PracticeWorkspace.vue";
 import GameReportDialog from "./GameReportDialog.vue";
 import ExplanationPanel from "./ExplanationPanel.vue";
 import MoveTree from "./MoveTree.vue";
@@ -128,8 +130,10 @@ onBeforeUnmount(stopResize);
   </n-result>
   <div v-else class="shell" :class="layout">
     <TopBar />
+    <!-- 一组练习：专注练习工作区 -->
+    <PracticeWorkspace v-if="wb.main === 'practice'" />
     <!-- 宽屏与中等宽度：分栏 -->
-    <main v-if="!study" class="columns solo">
+    <main v-else-if="!study" class="columns solo">
       <section class="col center">
         <div class="empty">
           <div class="seal-large" aria-hidden="true">弈</div>

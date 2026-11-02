@@ -61,7 +61,7 @@ function onMore(key: string) {
 <template>
   <header class="top" :class="layout">
     <n-button
-      v-if="layout === 'medium' && study"
+      v-if="layout === 'medium' && study && wb.main === 'board'"
       size="small"
       :type="ui.treeOpen ? 'primary' : 'default'"
       :secondary="ui.treeOpen"
@@ -74,17 +74,18 @@ function onMore(key: string) {
       <span class="seal" aria-hidden="true">弈</span>
       <span v-if="layout !== 'narrow'" class="brand-name">象棋学习助手</span>
     </div>
-    <span v-if="study && layout !== 'narrow'" class="sep" aria-hidden="true" />
+    <span v-if="study && layout !== 'narrow' && wb.main === 'board'" class="sep" aria-hidden="true" />
     <div class="title">
       <n-input v-if="editing" v-model:value="draft" size="small" autofocus style="width: 240px" @blur="commit" @keydown.enter="commit" />
-      <n-tooltip v-else-if="study">
+      <n-tooltip v-else-if="study && wb.main === 'board'">
         <template #trigger>
           <button type="button" class="name" @click="startEdit">{{ study.name }}</button>
         </template>
         点击修改名称
       </n-tooltip>
     </div>
-    <n-radio-group :value="wb.mode" size="small" aria-label="学习方式" class="modes" @update:value="setMode">
+    <!-- 学习方式只用于棋盘学习；练习工作区有自己的练习目标 -->
+    <n-radio-group v-if="wb.main === 'board'" :value="wb.mode" size="small" aria-label="学习方式" class="modes" @update:value="setMode">
       <n-tooltip>
         <template #trigger><n-radio-button value="auto">看谱学习</n-radio-button></template>
         选择着法后直接阅读讲解，适合看谱和理解残局

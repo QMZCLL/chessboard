@@ -166,6 +166,25 @@ export function outcomeOf(a: ReviewAttempt): AttemptOutcome {
   return "ungraded";
 }
 
+export type Tone = "ok" | "miss" | "neutral";
+
+/**
+ * 一次作答的结果标签：练习中的列表、反馈与小结用同样的文字与颜色。复现棋谱按是否与棋谱一致；
+ * 局面决策按这次比较是否支持这个选择，比较中与无法评价都是中性的，不当作选对或选错。
+ */
+export function outcomeBadge(a: ReviewAttempt): { text: string; tone: Tone } {
+  const o = outcomeOf(a);
+  if (o === "revealed") return { text: "直接看了答案", tone: "neutral" };
+  if (a.goal === "recall") return o === "independent" ? { text: "与棋谱一致", tone: "ok" } : { text: "与棋谱不同", tone: "miss" };
+  const DECISION: Record<Exclude<AttemptOutcome, "revealed">, { text: string; tone: Tone }> = {
+    independent: { text: "比较支持", tone: "ok" },
+    missed: { text: "比较不支持", tone: "miss" },
+    pending: { text: "比较中", tone: "neutral" },
+    ungraded: { text: "无法评价", tone: "neutral" },
+  };
+  return DECISION[o];
+}
+
 /** 已经按最近一次复习标记了状态，但这次的比较还没有结果：下一次复习的时间在结果出来后确定 */
 export function awaitingResult(card: ReviewCard): boolean {
   const last = card.attempts[card.attempts.length - 1];
@@ -178,6 +197,13 @@ export type EntryState = "todo" | "answered" | "skipped" | "missing";
 /** 这张卡片在这组练习中的作答，按时间先后 */
 export function practiceAttempts(card: Pick<ReviewCard, "attempts">, practiceId: string): ReviewAttempt[] {
   return card.attempts.filter((a) => a.practice === practiceId);
+}
+
+/** 一组练习中一道题的标签：作答过的按这组中的第一次作答 */
+export function entryBadge(session: Pick<PracticeSession, "id" | "skipped">, cardId: string, card: ReviewCard | undefined): { text: string; tone: Tone } {
+  const state = entryState(session, cardId, card);
+  if (state === "answered" && card) return outcomeBadge(practiceAttempts(card, session.id)[0]);
+  return { text: state === "missing" ? "卡片已删除" : state === "skipped" ? "已跳过" : "未作答", tone: "neutral" };
 }
 
 export function entryState(session: Pick<PracticeSession, "id" | "skipped">, cardId: string, card: ReviewCard | undefined): EntryState {
