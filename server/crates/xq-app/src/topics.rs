@@ -7,6 +7,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use ts_rs::TS;
 use xq_core::Board;
 use xq_core::Move;
 use xq_core::Square;
@@ -16,7 +17,8 @@ use xq_core::explain::facts;
 use xq_core::fen;
 
 /// 局面主题。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
     /// 应将与将帅安全。
@@ -39,7 +41,8 @@ pub struct ThemeTag {
 }
 
 /// 用户自己确认的问题。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[ts(export, rename = "ReviewIssue")]
 #[serde(rename_all = "snake_case")]
 pub enum Issue {
     /// 没有检查对方的直接威胁。

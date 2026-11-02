@@ -5,6 +5,7 @@ import type { ArchiveSummary, DecisionFeedback, ReviewAttempt, ReviewCard, Revie
 import {
   archivePreviewLines,
   attemptMark,
+  attemptNotesText,
   attemptText,
   counts,
   DAY_MS,
@@ -155,7 +156,7 @@ test("一组练习的小结只统计属于这组练习的作答，按第一次�
   const s = practiceSummary(session(["a", "b", "c", "d"]), cards, NOW);
   assert.deepEqual(
     { ...s, schedule: undefined },
-    { total: 4, done: 3, independent: 1, missed: 1, revealed: 1, pending: 0, ungraded: 0, skipped: 0, missing: 0, schedule: undefined },
+    { total: 4, done: 3, independent: 1, assisted: 0, missed: 1, revealed: 1, pending: 0, ungraded: 0, skipped: 0, missing: 0, schedule: undefined },
   );
   assert.deepEqual(s.schedule, [
     { text: "明天再看", count: 2 },
@@ -203,6 +204,18 @@ test("一组练习的小结只统计属于这组练习的作答，按第一次�
   const supported = { ...waiting, attempts: [{ ...decision("ready", "supported"), verdict: "reasonable" as const }] };
   assert.equal(practiceSummary(session(["e", "f"]), [supported, unclear], NOW).independent, 1);
   assert.deepEqual(outcomeBadge(supported.attempts[0]), { text: "比较支持", tone: "ok" });
+
+  // 看了提示之后选对：不算独立选对，标签与小结单独说明
+  const hinted = card("g", 1, [{ ...attempt(NOW, true, true), hints: 2, confidence: "unsure", elapsed_ms: 75_000 }]);
+  assert.equal(outcomeOf(hinted.attempts[0]), "assisted");
+  assert.deepEqual(outcomeBadge(hinted.attempts[0]), { text: "看了提示后选对", tone: "neutral" });
+  assert.equal(attemptNotesText(hinted.attempts[0]), "看了 2 级提示 · 选择时有些把握 · 用时 1 分 15 秒");
+  assert.equal(attemptNotesText({ hints: 0, confidence: null, elapsed_ms: null }), "");
+  const withHints = practiceSummary(session(["a", "g"]), [cards[0], hinted], NOW);
+  assert.deepEqual([withHints.independent, withHints.assisted], [1, 1]);
+  assert.ok(summaryText(withHints).includes("1 张看了提示后选对"), summaryText(withHints));
+  const hintedDecision = { ...decision("ready", "supported"), hints: 1 };
+  assert.equal(outcomeOf(hintedDecision), "assisted");
 });
 
 test("复习间隔的文字与导入预览", () => {

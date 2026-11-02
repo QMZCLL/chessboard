@@ -200,7 +200,12 @@ export const api = {
     intent: T.Intent | null,
     practice: string | null = null,
     request: string | null = null,
-  ) => call<T.ReviewItem>("review_attempt", { req: { id, choice, goal, intent, practice, request } }),
+    extra: { hints: number; elapsed_ms: number | null; confidence: T.Confidence | null } = { hints: 0, elapsed_ms: null, confidence: null },
+  ) => call<T.ReviewItem>("review_attempt", { req: { id, choice, goal, intent, practice, request, ...extra } }),
+  /** 复习这张卡片时的分级提示（与先想后讲相同的规则）；局面已经结束时为空 */
+  reviewHints: (id: string) => call<T.ThinkHints | null>("review_hints", { req: { id } }),
+  /** 全部学习事件 */
+  learningEvents: () => call<T.LearningEvent[]>("learning_events"),
   /** 开始一组练习：卡片按给出的顺序；之前还没有结束的一组记为结束 */
   startPractice: (req: { label: string; source: T.PracticeSource; topic: string | null; goal: T.PracticeGoal; cards: string[] }) =>
     call<T.PracticeSession>("start_practice", { req }),

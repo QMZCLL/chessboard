@@ -97,6 +97,8 @@ pub fn run() {
             commands::add_review,
             commands::list_reviews,
             commands::review_detail,
+            commands::review_hints,
+            commands::learning_events,
             commands::review_attempt,
             commands::update_review,
             commands::delete_review,

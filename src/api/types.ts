@@ -1,6 +1,6 @@
 // 与后端 serde 结构一一对应的类型。字段名保持后端的 snake_case。
 
-import type { Stability } from "./generated";
+import type { Confidence, Intent, PracticeGoal, ReviewIssue, Stability, StabilityLevel, Theme } from "./generated";
 
 // 由 Rust 结构生成的类型（ts-rs，见 .cargo/config.toml）：新增的共享结构都放在 generated 中，不在这里手写
 export type * from "./generated";
@@ -298,12 +298,6 @@ export interface ReviewBasis {
   explained_at: number;
 }
 
-/** 练习目标：recall 复现棋谱（看是否与棋谱一致）；decision 局面决策（与参考在同一次搜索中比较） */
-export type PracticeGoal = "recall" | "decision";
-
-/** 落子前选择的意图 */
-export type Intent = "develop" | "defend" | "capture" | "check" | "improve" | "other";
-
 /** 这一步实际改变了什么（规则事实），以及与意图的对照 */
 export interface Reflection {
   intent: Intent | null;
@@ -328,6 +322,8 @@ export interface DecisionFeedback {
   points: string[];
   conditions: string | null;
   error: string | null;
+  /** 比较搜索的稳定性；早期的记录与还没有结果时为空 */
+  stability?: StabilityLevel | null;
 }
 
 export interface ReviewAttempt {
@@ -343,6 +339,11 @@ export interface ReviewAttempt {
   practice: string | null;
   /** 界面为这次作答生成的请求编号（重复提交只记一次） */
   request: string | null;
+  /** 作答前看了几级提示（早期的记录为 0） */
+  hints: number;
+  /** 从显示局面到作答的时间（毫秒；只记录，不评分） */
+  elapsed_ms: number | null;
+  confidence: Confidence | null;
 }
 
 /** 练习批次的来源：今天到期、需要再练、某个专题 */
@@ -419,14 +420,10 @@ export interface ReviewItem {
   themes: ThemeTag[];
 }
 
-/** 局面主题：应将与将帅安全、受攻击棋子的处理、保护关系变化、炮架与线路变化、吃子后的回吃 */
-export type Theme = "king_safety" | "threatened" | "protection" | "lines" | "recapture";
 export interface ThemeTag {
   theme: Theme;
   why: string;
 }
-/** 用户自己确认的问题 */
-export type ReviewIssue = "missed_threat" | "missed_protection" | "missed_recapture" | "missed_lines" | "missed_reply";
 
 export interface KeyPosition {
   node_id: number;

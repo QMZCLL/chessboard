@@ -12,6 +12,7 @@ pub mod config;
 pub mod decision;
 pub mod engine;
 pub mod events;
+pub mod learning;
 pub mod llm;
 mod pipeline;
 pub mod practice;

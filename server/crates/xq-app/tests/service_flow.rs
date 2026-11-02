@@ -1541,3 +1541,128 @@ fn a_quick_analysis_whose_best_move_is_still_changing_is_deepened_once_in_the_ba
     assert!(gos[1].contains("depth 30"), "第二次是深入分析：{gos:?}");
     service.shutdown();
 }
+
+#[test]
+fn every_attempt_leaves_one_learning_event_that_follows_late_results_and_travels_with_the_archive() {
+    use xq_app::learning::Confidence;
+    use xq_app::learning::EventOutcome;
+    use xq_app::learning::EventSource;
+
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: Some("学习事件".into()), kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let second = service.apply_move(MoveRequest { study_id: sid.clone(), parent: first, mv: mv("h9g7"), variation: false }).unwrap().node_id.unwrap();
+    for node in [first, second] {
+        rec.wait("讲解完成", |e, v| e == "explanation_updated" && v["node_id"] == node && v["record"]["pending"] == false);
+    }
+    let id = service.add_review(NodeRef { study_id: sid.clone(), node_id: second }).unwrap().card.id;
+    let events = |s: &AppService| s.learning_events().unwrap();
+
+    // 复现棋谱：独立选对、看了提示之后选对、没有选对、直接看答案；耗时与信心随事件保存
+    let attempt = |choice: Option<&str>, hints: u8, request: &str| {
+        service
+            .review_attempt(ReviewAttemptRequest {
+                id: id.clone(),
+                choice: choice.map(mv),
+                hints,
+                elapsed_ms: Some(4_200),
+                confidence: Some(Confidence::Sure),
+                request: Some(request.into()),
+                ..Default::default()
+            })
+            .unwrap()
+    };
+    attempt(Some("h9g7"), 0, "r1");
+    attempt(Some("h9g7"), 0, "r1");
+    assert_eq!(events(&service).len(), 1, "同一个请求重复到达只记一条");
+    let e = &events(&service)[0];
+    assert_eq!((e.source, e.outcome, e.hints, e.elapsed_ms, e.confidence), (EventSource::Review, EventOutcome::Independent, 0, Some(4_200), Some(Confidence::Sure)));
+    assert_eq!((e.card.as_deref(), e.node_id), (Some(id.as_str()), second));
+    let assisted = attempt(Some("h9g7"), 2, "r2");
+    assert_eq!(assisted.card.attempts.last().unwrap().hints, 2);
+    attempt(Some("b9c7"), 0, "r3");
+    attempt(None, 0, "r4");
+    let outcomes: Vec<EventOutcome> = events(&service).iter().map(|e| e.outcome).collect();
+    assert_eq!(outcomes, [EventOutcome::Independent, EventOutcome::Assisted, EventOutcome::Missed, EventOutcome::Revealed]);
+    // 看了提示之后选对，标为已理解时不升档
+    let marked = service.update_review(ReviewUpdateRequest { id: id.clone(), status: Some(ReviewStatus::Understood), note: None, issues: None }).unwrap();
+    assert_eq!(marked.card.stage, 0);
+
+    // 局面决策：比较结果出来之前是“比较中”，结果出来后同一条事件随之更新
+    let script = "@go\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        info depth 5 seldepth 5 multipv 2 score cp 0 nodes 10 time 1 pv b9c7 h0g2\n\
+        bestmove h9g7\n\
+        @go\n\
+        sleep 300\n\
+        info depth 5 seldepth 5 multipv 1 score cp 10 nodes 10 time 1 pv h9g7 h0g2\n\
+        info depth 5 seldepth 5 multipv 2 score cp 0 nodes 10 time 1 pv b9c7 h0g2\n\
+        bestmove h9g7\n";
+    std::fs::write(dir.path().join("engine").join("mock-uci-script.txt"), script).unwrap();
+    service.restart_engine();
+    std::thread::sleep(Duration::from_millis(300));
+    wait_engine(&service);
+    rec.clear();
+    service
+        .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("b9c7")), goal: PracticeGoal::Decision, request: Some("r5".into()), ..Default::default() })
+        .unwrap();
+    let last = |s: &AppService| events(s).into_iter().max_by_key(|e| e.at).unwrap();
+    assert_eq!(last(&service).outcome, EventOutcome::Pending);
+    rec.wait("比较结果", |e, v| e == "review_updated" && v["card"]["attempts"].as_array().unwrap().iter().any(|a| a["decision"]["state"] == "ready"));
+    let decided = last(&service);
+    assert_eq!(decided.outcome, EventOutcome::Independent, "结果晚到后更新同一条事件");
+    assert!(decided.stability.is_some(), "记下比较搜索的稳定性");
+    assert_eq!(events(&service).len(), 5);
+
+    // 先想后讲的练习也记一条
+    service
+        .record_practice(PracticeRequest { study_id: sid.clone(), node_id: first, hints_used: 1, revealed_directly: false, first_choice: Some(mv("h2e2")), hints: None })
+        .unwrap();
+    let think = events(&service).into_iter().find(|e| e.source == EventSource::Think).unwrap();
+    assert_eq!((think.outcome, think.node_id, think.hints), (EventOutcome::Assisted, first, 1));
+    assert_eq!(events(&service).len(), 6);
+
+    // 学习档案带上学习事件；换一台设备导入后完整保留（耗时与信心也在）
+    let archive: Value = serde_json::from_str(&service.export_archive().unwrap()).unwrap();
+    assert_eq!((archive["version"].as_u64(), archive["events"].as_array().unwrap().len()), (Some(2), 6));
+    let other = tempfile::tempdir().unwrap();
+    let restored = start_with_mock(other.path(), "", rec.clone());
+    restored.import_archive(ArchiveSource::Text { text: archive.to_string() }).unwrap();
+    let imported = events(&restored);
+    assert_eq!(imported.len(), 6);
+    assert!(imported.iter().any(|e| e.elapsed_ms == Some(4_200) && e.confidence == Some(Confidence::Sure)));
+    restored.import_archive(ArchiveSource::Text { text: archive.to_string() }).unwrap();
+    assert_eq!(events(&restored).len(), 6, "再次导入不重复");
+    // 早期的档案没有学习事件：由其中的作答与练习记录补上（作答中记下的耗时与信心照样带上）
+    let mut old = archive.clone();
+    old["version"] = serde_json::json!(1);
+    old.as_object_mut().unwrap().remove("events");
+    let third = tempfile::tempdir().unwrap();
+    let fresh = start_with_mock(third.path(), "", rec.clone());
+    fresh.import_archive(ArchiveSource::Text { text: old.to_string() }).unwrap();
+    let derived = events(&fresh);
+    assert_eq!(derived.len(), 6, "{derived:?}");
+    assert_eq!(derived.iter().filter(|e| e.elapsed_ms == Some(4_200)).count(), 4, "复现棋谱的四次作答带着耗时");
+
+    // 早期的数据（还没有学习事件）：第一次启动时从作答补上，只补一次
+    let card = service.list_reviews().unwrap().pop().unwrap().card;
+    let fourth = tempfile::tempdir().unwrap();
+    {
+        let store = xq_app::storage::Store::open(&fourth.path().join("data").join("xqlink.redb")).unwrap();
+        store.insert_review(&card).unwrap();
+    }
+    let early = start_with_mock(fourth.path(), "", rec.clone());
+    assert_eq!(events(&early).len(), card.attempts.len());
+    early.shutdown();
+    drop(early);
+    let early = start_with_mock(fourth.path(), "", rec.clone());
+    assert_eq!(events(&early).len(), card.attempts.len(), "重新启动不重复补上");
+    for s in [service, restored, fresh, early] {
+        s.shutdown();
+    }
+}

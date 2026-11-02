@@ -1,7 +1,7 @@
 // 复习卡片的分组、计数与文字说明。只依赖数据，便于单独测试。
 // 列表与复习开始前都不显示棋谱中的着法、笔记等可能透露答案的内容。
 // “今天到期”按本机日期计算：下一次复习的时间在今天结束之前（含已经过期的）。
-import type { ArchiveSummary, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, PracticeSession, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
+import type { ArchiveSummary, Confidence, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, PracticeSession, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
 
 export const STATUS_LABEL: Record<ReviewStatus, string> = { due: "待复习", again: "需要再练", understood: "已理解" };
 
@@ -87,6 +87,23 @@ export const suggestedStatus = (matched: boolean): ReviewStatus => (matched ? "u
 
 export const GOAL_LABEL: Record<PracticeGoal, string> = { recall: "复现棋谱", decision: "局面决策" };
 
+
+/** 作答时的把握：只用于以后找出“很有把握却没有选对”的地方，不影响这次的安排 */
+export const CONFIDENCES = ["guess", "unsure", "sure"] as const satisfies readonly Confidence[];
+export const CONFIDENCE_LABEL: Record<Confidence, string> = { guess: "基本靠猜", unsure: "有些把握", sure: "很有把握" };
+
+/** 一次作答看了几级提示、选择的把握与用时（用时只记录，不评分）。 */
+export function attemptNotesText(a: Pick<ReviewAttempt, "hints" | "confidence" | "elapsed_ms">): string {
+  const parts: string[] = [];
+  if (a.hints) parts.push(`看了 ${a.hints} 级提示`);
+  if (a.confidence) parts.push(`选择时${CONFIDENCE_LABEL[a.confidence]}`);
+  if (a.elapsed_ms !== null && a.elapsed_ms !== undefined) {
+    const s = Math.round(a.elapsed_ms / 1000);
+    parts.push(s < 60 ? `用时 ${s} 秒` : `用时 ${Math.floor(s / 60)} 分 ${s % 60} 秒`);
+  }
+  return parts.join(" · ");
+}
+
 export const INTENT_LABEL: Record<Intent, string> = {
   develop: "出子",
   defend: "防守",
@@ -122,10 +139,11 @@ export function suggestionFor(a: ReviewAttempt): ReviewStatus | null {
 
 /** 最近几次复习中的一次：练习目标与结果的简短标记。 */
 export function attemptMark(a: ReviewAttempt): { text: string; tone: "ok" | "miss" | "neutral" } {
-  if (a.goal === "recall" || !a.choice) return a.matched ? { text: "✓", tone: "ok" } : { text: "✗", tone: "miss" };
+  // 看了提示之后选对：记号相同，颜色是中性的
+  if (a.goal === "recall" || !a.choice) return a.matched ? { text: "✓", tone: a.hints ? "neutral" : "ok" } : { text: "✗", tone: "miss" };
   // 局面决策按这次比较是否支持这个选择：与棋谱一致、但棋谱着法明显不如引擎参考时也是值得注意
   const s = a.decision?.support;
-  if (s === "supported") return { text: "○", tone: "ok" };
+  if (s === "supported") return { text: "○", tone: a.hints ? "neutral" : "ok" };
   if (s === "not_supported") return { text: "△", tone: "miss" };
   return { text: "·", tone: "neutral" };
 }
@@ -161,14 +179,16 @@ export function newerItem(existing: ReviewItem | undefined, incoming: ReviewItem
  * 一次复习的结果（与后台安排间隔的规则相同，见 xq-app schedule.rs）：局面决策按这次比较是否支持这个选择，
  * 比较还没有结果（pending）或无法评价（ungraded）时不折算成选对或选错。
  */
-export type AttemptOutcome = "independent" | "missed" | "revealed" | "pending" | "ungraded";
+export type AttemptOutcome = "independent" | "assisted" | "missed" | "revealed" | "pending" | "ungraded";
 
+/** 与后台安排复习间隔的分法相同（见 schedule::outcome_of）：用了提示之后选对不算独立选对。 */
 export function outcomeOf(a: ReviewAttempt): AttemptOutcome {
   if (!a.choice) return "revealed";
-  if (a.goal === "recall") return a.matched ? "independent" : "missed";
+  const correct = a.hints > 0 ? "assisted" : "independent";
+  if (a.goal === "recall") return a.matched ? correct : "missed";
   if (a.decision?.state === "pending") return "pending";
   const s = a.decision?.support;
-  if (s === "supported") return "independent";
+  if (s === "supported") return correct;
   if (s === "not_supported") return "missed";
   return "ungraded";
 }
@@ -182,8 +202,9 @@ export type Tone = "ok" | "miss" | "neutral";
 export function outcomeBadge(a: ReviewAttempt): { text: string; tone: Tone } {
   const o = outcomeOf(a);
   if (o === "revealed") return { text: "直接看了答案", tone: "neutral" };
+  if (o === "assisted") return { text: "看了提示后选对", tone: "neutral" };
   if (a.goal === "recall") return o === "independent" ? { text: "与棋谱一致", tone: "ok" } : { text: "与棋谱不同", tone: "miss" };
-  const DECISION: Record<Exclude<AttemptOutcome, "revealed">, { text: string; tone: Tone }> = {
+  const DECISION: Record<Exclude<AttemptOutcome, "revealed" | "assisted">, { text: string; tone: Tone }> = {
     independent: { text: "比较支持", tone: "ok" },
     missed: { text: "比较不支持", tone: "miss" },
     pending: { text: "比较中", tone: "neutral" },
@@ -231,6 +252,8 @@ export interface SessionSummary {
   /** 这组练习中作答过的张数 */
   done: number;
   independent: number;
+  /** 看了提示之后选对 */
+  assisted: number;
   missed: number;
   revealed: number;
   /** 局面决策的比较还没有结果 */
@@ -250,7 +273,7 @@ export interface SessionSummary {
  * （揭示之后的“再试一次”是后续练习，不改写第一次的表现）；安排按卡片的最新状态，比较结果晚到时随之更新。
  */
 export function practiceSummary(session: Pick<PracticeSession, "id" | "cards" | "skipped">, cards: ReviewCard[], now: number): SessionSummary {
-  const summary: SessionSummary = { total: session.cards.length, done: 0, independent: 0, missed: 0, revealed: 0, pending: 0, ungraded: 0, skipped: 0, missing: 0, schedule: [] };
+  const summary: SessionSummary = { total: session.cards.length, done: 0, independent: 0, assisted: 0, missed: 0, revealed: 0, pending: 0, ungraded: 0, skipped: 0, missing: 0, schedule: [] };
   const byId = new Map(cards.map((c) => [c.id, c]));
   const groups = new Map<string, { due: number; count: number }>();
   for (const id of session.cards) {
@@ -280,6 +303,7 @@ export function summaryText(s: SessionSummary): string {
   if (!s.done) return `这组 ${s.total} 张还没有复习${rest}。`;
   const parts = [
     `${s.independent} 张独立选对`,
+    `${s.assisted} 张看了提示后选对`,
     `${s.missed} 张没有选对`,
     `${s.revealed} 张直接看了答案`,
     `${s.pending} 张的比较还没有完成`,

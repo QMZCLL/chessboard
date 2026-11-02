@@ -24,6 +24,8 @@ use tracing::warn;
 use xq_core::study::Study;
 use xq_core::study::StudyLimits;
 
+use crate::learning;
+use crate::learning::LearningEvent;
 use crate::records::ExplanationRecord;
 use crate::decision;
 use crate::decision::DecisionState;
@@ -41,12 +43,14 @@ use crate::service::Inner;
 use crate::service::now_ms;
 
 const ARCHIVE_FORMAT: &str = "xqlink-archive";
-const ARCHIVE_VERSION: u32 = 1;
+/// 版本 2 起带有学习事件；版本 1 的档案照常导入，事件由其中的作答与练习记录补上。
+const ARCHIVE_VERSION: u32 = 2;
 const BACKUP_PREFIX: &str = "xqlink-archive-";
 /// 档案文件的大小上限（自动备份也是一份档案）。
 pub(crate) const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_STUDIES: usize = 5_000;
 const MAX_CARDS: usize = 100_000;
+const MAX_EVENTS: usize = 1_000_000;
 /// 不成立的内容最多列出几处。
 const MAX_PROBLEMS: usize = 5;
 
@@ -64,6 +68,8 @@ struct Archive {
     exported_at: i64,
     studies: Vec<ArchiveStudy>,
     reviews: Vec<ReviewCard>,
+    #[serde(default)]
+    events: Vec<LearningEvent>,
 }
 
 /// 档案的来源：桌面应用传文件路径，浏览器中传文件内容。
@@ -191,8 +197,10 @@ pub(crate) fn short(name: &str) -> String {
 
 /// 档案中的每个会话、每张卡片都要成立；有不成立的内容时整份不导入，列出前几处。
 fn check_archive(archive: &Archive) -> ApiResult<()> {
-    if archive.studies.len() > MAX_STUDIES || archive.reviews.len() > MAX_CARDS {
-        return Err(format!("学习档案中的会话（上限 {MAX_STUDIES}）或卡片（上限 {MAX_CARDS}）过多，不能导入").into());
+    if archive.studies.len() > MAX_STUDIES || archive.reviews.len() > MAX_CARDS || archive.events.len() > MAX_EVENTS {
+        return Err(
+            format!("学习档案中的会话（上限 {MAX_STUDIES}）、卡片（上限 {MAX_CARDS}）或学习记录（上限 {MAX_EVENTS}）过多，不能导入").into(),
+        );
     }
     let limits = StudyLimits::default();
     let mut problems = Vec::new();
@@ -215,6 +223,11 @@ fn check_archive(archive: &Archive) -> ApiResult<()> {
             problems.push(format!("“{name}”第 {} 回合的卡片出现了不止一次", card.turn));
         } else if let Err(e) = check_card(card, &limits) {
             problems.push(format!("“{name}”第 {} 回合的卡片：{e}", card.turn));
+        }
+    }
+    for e in &archive.events {
+        if let Err(reason) = learning::check_event(e) {
+            problems.push(format!("学习记录 {}：{reason}", short(&e.id)));
         }
     }
     if problems.is_empty() {
@@ -242,6 +255,7 @@ impl Inner {
             exported_at: now_ms(),
             studies,
             reviews: self.store.list_reviews()?,
+            events: self.store.list_events()?,
         })
     }
 
@@ -306,7 +320,11 @@ impl Inner {
             })
             .collect();
         let intervals = self.config_snapshot().review.intervals_days;
-        let stored = self.store.import_batch(&studies, &archive.reviews, |local, incoming| {
+        // 档案中的学习事件；早期的档案没有，由其中的作答与练习记录补上（同一编号已有时不覆盖）
+        let mut events = archive.events;
+        events.extend(archive.reviews.iter().flat_map(learning::from_card));
+        events.extend(studies.iter().flat_map(|(s, _)| learning::from_study(s)));
+        let stored = self.store.import_batch(&studies, &archive.reviews, &events, |local, incoming| {
             (!same_card(local, incoming)).then(|| merge_cards(local, incoming, &intervals))
         })?;
         // 导出时还没有完成的比较不会在本机继续：重新排队
@@ -449,6 +467,9 @@ mod tests {
                 decision: None,
                 practice: None,
                 request: None,
+                hints: 0,
+                elapsed_ms: None,
+                confidence: None,
             })
             .collect();
         c.reviewed_at = attempts.iter().max().copied();
@@ -503,6 +524,7 @@ mod tests {
                 points: vec![],
                 conditions: None,
                 error: None,
+                stability: None,
             });
             // 比较还没有结果时已经标为已理解：先按不升档安排
             c.status = ReviewStatus::Understood;

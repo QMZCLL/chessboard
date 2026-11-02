@@ -15,6 +15,7 @@ use crate::llm::CoachRecord;
 use crate::llm::CoachResult;
 use crate::llm::CoachState;
 use crate::llm::ask::AnswerRecord;
+use crate::learning::LearningEvent;
 use crate::practice::PracticeSession;
 use crate::records::AnalysisRecord;
 use crate::records::CloudRecord;
@@ -36,6 +37,10 @@ const COACH_ASK: TableDefinition<&str, &str> = TableDefinition::new("coach_ask")
 const REVIEWS: TableDefinition<&str, &str> = TableDefinition::new("reviews");
 /// 练习批次，键为批次编号（见 `practice`）。
 const PRACTICE: TableDefinition<&str, &str> = TableDefinition::new("practice");
+/// 学习事件，键为事件编号（见 `learning`）。只追加；局面决策的结果晚到时更新同一条。
+const EVENTS: TableDefinition<&str, &str> = TableDefinition::new("learning_events");
+/// 已经从早期的记录补上学习事件（见 `learning`）。
+const EVENTS_BACKFILLED: &str = "events_backfilled";
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -120,6 +125,7 @@ impl Store {
             tx.open_table(COACH_ASK)?;
             tx.open_table(REVIEWS)?;
             tx.open_table(PRACTICE)?;
+            tx.open_table(EVENTS)?;
         }
         tx.commit()?;
         Ok(Store { db })
@@ -327,8 +333,10 @@ impl Store {
     /// 本机已有同一编号的会话时保留本机的版本（连同它的讲解）。`merge(本机, 导入)` 返回合并后的卡片，
     /// 不需要改动时返回 `None`；写回时修改次数加一。返回每张卡片写入后的内容。
     /// 本机的卡片无法解析时按不存在处理（列表中已经读不到它），由导入的卡片代替。
+    ///
+    /// 学习事件同一编号已有时不覆盖。
     pub fn import_batch(
-        &self, studies: &[(Study, Vec<ExplanationRecord>)], cards: &[ReviewCard],
+        &self, studies: &[(Study, Vec<ExplanationRecord>)], cards: &[ReviewCard], events: &[LearningEvent],
         merge: impl Fn(&ReviewCard, &ReviewCard) -> Option<ReviewCard>,
     ) -> Result<Vec<ReviewCard>, StoreError> {
         let tx = self.db.begin_write()?;
@@ -367,6 +375,7 @@ impl Store {
                     None => out.extend(local),
                 }
             }
+            insert_events(&mut tx.open_table(EVENTS)?, events)?;
             out
         };
         tx.commit()?;
@@ -375,8 +384,11 @@ impl Store {
 
     /// 记一次作答：在同一写事务中读取最新的卡片与它所属的练习批次（给出 `practice` 时；不存在时为 `None`），
     /// 由 `f` 检查并修改卡片。`f` 返回 `Ok(false)` 时不写回，返回错误时什么都不写入。卡片不存在时为 `Unchanged`。
+    ///
+    /// 写回时 `event` 给出这次作答的学习事件，在同一个写事务中写入（同一编号已有时不覆盖）。
     pub fn update_review_in_practice(
         &self, id: &str, practice: Option<&str>, f: impl FnOnce(&mut ReviewCard, Option<&PracticeSession>) -> Result<bool, String>,
+        event: impl FnOnce(&ReviewCard) -> Option<LearningEvent>,
     ) -> Result<Checked<ReviewCard>, StoreError> {
         let tx = self.db.begin_write()?;
         let result = {
@@ -392,6 +404,9 @@ impl Store {
                     Ok(true) => {
                         card.revision += 1;
                         t.insert(id, serde_json::to_string(&card)?.as_str())?;
+                        if let Some(e) = event(&card) {
+                            insert_events(&mut tx.open_table(EVENTS)?, std::slice::from_ref(&e))?;
+                        }
                         Checked::Written(card)
                     }
                     Ok(false) => Checked::Unchanged,
@@ -404,6 +419,63 @@ impl Store {
     }
 
     pub fn load_review(&self, id: &str) -> Result<Option<ReviewCard>, StoreError> { self.get(REVIEWS, id) }
+
+    /// 与 `update_review_if` 相同；写回时在同一个写事务中用 `g` 更新编号为 `event_id` 的学习事件（存在时）。
+    pub fn update_review_and_event(
+        &self, id: &str, f: impl FnOnce(&mut ReviewCard) -> bool, event_id: &str, g: impl FnOnce(&ReviewCard, &mut LearningEvent),
+    ) -> Result<Option<ReviewCard>, StoreError> {
+        let tx = self.db.begin_write()?;
+        let updated = {
+            let mut t = tx.open_table(REVIEWS)?;
+            let current = t.get(id)?.map(|v| serde_json::from_str::<ReviewCard>(v.value())).transpose()?;
+            match current {
+                Some(mut card) => {
+                    if !f(&mut card) {
+                        return Ok(None);
+                    }
+                    card.revision += 1;
+                    t.insert(id, serde_json::to_string(&card)?.as_str())?;
+                    let mut events = tx.open_table(EVENTS)?;
+                    let event = events.get(event_id)?.map(|v| serde_json::from_str::<LearningEvent>(v.value())).transpose()?;
+                    if let Some(mut e) = event {
+                        g(&card, &mut e);
+                        events.insert(event_id, serde_json::to_string(&e)?.as_str())?;
+                    }
+                    Some(card)
+                }
+                None => None,
+            }
+        };
+        tx.commit()?;
+        Ok(updated)
+    }
+
+    /// 写入学习事件；同一编号已有时不覆盖。返回实际写入的条数。
+    pub fn insert_events(&self, events: &[LearningEvent]) -> Result<usize, StoreError> {
+        let tx = self.db.begin_write()?;
+        let n = insert_events(&mut tx.open_table(EVENTS)?, events)?;
+        tx.commit()?;
+        Ok(n)
+    }
+
+    pub fn list_events(&self) -> Result<Vec<LearningEvent>, StoreError> { self.list(EVENTS, "学习事件") }
+
+    pub fn load_event(&self, id: &str) -> Result<Option<LearningEvent>, StoreError> { self.get(EVENTS, id) }
+
+    /// 是否已经从早期的记录补上学习事件。
+    pub fn events_backfilled(&self) -> Result<bool, StoreError> {
+        let tx = self.db.begin_read()?;
+        Ok(tx.open_table(META)?.get(EVENTS_BACKFILLED)?.is_some())
+    }
+
+    /// 补上早期记录的学习事件并记下已经补过，在同一个写事务中完成。返回写入的条数。
+    pub fn backfill_events(&self, events: &[LearningEvent]) -> Result<usize, StoreError> {
+        let tx = self.db.begin_write()?;
+        let n = insert_events(&mut tx.open_table(EVENTS)?, events)?;
+        tx.open_table(META)?.insert(EVENTS_BACKFILLED, "1")?;
+        tx.commit()?;
+        Ok(n)
+    }
 
     pub fn list_reviews(&self) -> Result<Vec<ReviewCard>, StoreError> { self.list(REVIEWS, "复习卡片") }
 
@@ -540,6 +612,18 @@ impl Store {
         tx.commit()?;
         Ok(allowed)
     }
+}
+
+/// 写入学习事件，同一编号已有时不覆盖；返回写入的条数。
+fn insert_events(t: &mut redb::Table<&str, &str>, events: &[LearningEvent]) -> Result<usize, StoreError> {
+    let mut n = 0;
+    for e in events {
+        if t.get(e.id.as_str())?.is_none() {
+            t.insert(e.id.as_str(), serde_json::to_string(e)?.as_str())?;
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 fn parse_usage(value: &str, day: i64) -> u32 {

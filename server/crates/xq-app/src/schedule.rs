@@ -42,8 +42,10 @@ pub enum Outcome {
     Revealed,
     /// 走了，但没有独立选对。
     Missed,
-    /// 独立选对：复现棋谱与棋谱一致；局面决策中这次比较支持这个选择。
+    /// 独立选对：复现棋谱与棋谱一致；局面决策中这次比较支持这个选择。都要求没有用提示。
     Independent,
+    /// 用了提示之后选对：不算独立选对，按没有选对安排。
+    Assisted,
     /// 局面决策的比较还没有结果。
     Pending,
     /// 局面决策无法评价：分析不完整或没有得到结果。
@@ -52,14 +54,15 @@ pub enum Outcome {
 
 pub fn outcome_of(attempt: Option<&ReviewAttempt>) -> Outcome {
     let Some(a) = attempt.filter(|a| a.choice.is_some()) else { return Outcome::Revealed };
+    let correct = if a.hints > 0 { Outcome::Assisted } else { Outcome::Independent };
     match a.goal {
-        PracticeGoal::Recall if a.matched => Outcome::Independent,
+        PracticeGoal::Recall if a.matched => correct,
         PracticeGoal::Recall => Outcome::Missed,
         // 局面决策按这次比较是否支持这个选择，与是否与棋谱一致分开；不能把没有结果折算成选对或选错
         PracticeGoal::Decision => match &a.decision {
             Some(d) if d.state == DecisionState::Pending => Outcome::Pending,
             Some(d) => match d.resolved_support() {
-                DecisionSupport::Supported => Outcome::Independent,
+                DecisionSupport::Supported => correct,
                 DecisionSupport::NotSupported => Outcome::Missed,
                 DecisionSupport::Unknown | DecisionSupport::Legacy => Outcome::Ungraded,
             },
@@ -78,7 +81,7 @@ pub fn next_review(stage: u32, status: ReviewStatus, outcome: Outcome, intervals
         }
         // 无法评价或还没有结果：不升档也不降档
         (ReviewStatus::Understood, Outcome::Pending | Outcome::Ungraded) => (stage, days(stage)),
-        (ReviewStatus::Understood, Outcome::Revealed | Outcome::Missed) => (stage, days(0)),
+        (ReviewStatus::Understood, Outcome::Revealed | Outcome::Missed | Outcome::Assisted) => (stage, days(0)),
         (ReviewStatus::Again, _) => (0, days(0)),
         // 待复习：立即到期
         (ReviewStatus::Due, _) => (0, 0),
@@ -136,9 +139,13 @@ mod tests {
                 points: vec![],
                 conditions: None,
                 error: None,
+                stability: None,
             }),
             practice: None,
             request: None,
+            hints: 0,
+            elapsed_ms: None,
+            confidence: None,
         }
     }
 

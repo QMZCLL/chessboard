@@ -3,7 +3,8 @@
 // 再显示这次的结果、原来的思考与看过的提示、棋谱中的这一着与程序讲解，并记下自己的理解或疑问。
 // 复习开始前不显示棋谱中的着法和笔记，避免提前透露答案。
 // 练习目标：复现棋谱看是否与棋谱一致；局面决策把这次的选择与参考放在同一次搜索中比较。
-// 落子前可以选择意图，揭示后与这一步实际的规则事实对照。
+// 落子前可以选择意图，揭示后与这一步实际的规则事实对照；可以看分级提示（与先想后讲相同），
+// 可以选择这一步的把握程度。用了提示之后选对不算独立选对；作答用时只记录，不评分。
 // 每个阶段只突出一个主要操作：选择前是在棋盘上走子；揭示后先标记状态（有建议时），标记之后是下一题。
 // 揭示后的内容分成“你的选择”“比较结论”“具体原因”“下一次检查什么”；当前阶段的操作在底部，
 // 固定在可见区域内（讲解较长、窗口较窄时也不用在讲解中寻找）。
@@ -27,13 +28,17 @@ import {
   setIssues,
   setStatus,
   showNext,
+  showReviewHint,
   skipCard,
   submitChoice,
 } from "../state/review";
 import {
   attemptMark,
+  attemptNotesText,
   attemptText,
   awaitingResult,
+  CONFIDENCE_LABEL,
+  CONFIDENCES,
   decisionTitle,
   dueText,
   GOAL_LABEL,
@@ -76,6 +81,11 @@ const badge = computed(() => (attempt.value ? outcomeBadge(attempt.value) : null
 const GOAL_HINT = { recall: "回忆这盘棋当时怎样走，看是否与棋谱一致", decision: "作出自己的选择，与棋谱着法、引擎参考在同一次搜索中比较" } as const;
 const toggleIntent = (i: (typeof INTENTS)[number]) => (review.intent = review.intent === i ? null : i);
 const hints = computed(() => card.value?.thinking?.hints ?? null);
+/** 选择前看过的提示：二级提示在棋盘上标出相关的棋子与关系 */
+const hintMarks = computed(() => (review.hintData && review.hints >= 2 ? review.hintData.focus.squares : []));
+const hintArrows = computed(() => (review.hintData && review.hints >= 2 ? review.hintData.focus.arrows : []));
+/** 这次作答看了几级提示、选择的把握与用时 */
+const attemptNotes = computed(() => (attempt.value ? attemptNotesText(attempt.value) : ""));
 const recent = computed(() => (card.value?.attempts ?? []).slice(-8));
 /** 已经按这次作答标记了状态（安排依据的就是这次作答） */
 const marked = computed(() => {
@@ -160,7 +170,8 @@ async function mark(status: ReviewStatus) {
           :orientation="card.orientation"
           :legal-moves="revealed ? [] : current.legal_moves"
           :last-move="lastMove"
-          :arrows="answerArrows"
+          :arrows="revealed ? answerArrows : hintArrows"
+          :marks="revealed ? [] : hintMarks"
           :next-arrow="choiceArrow"
           :interactive="!revealed && !review.busy"
           @move="submitChoice"
@@ -192,6 +203,21 @@ async function mark(status: ReviewStatus) {
               {{ INTENT_LABEL[i] }}
             </n-button>
           </div>
+          <div class="confidence" data-testid="review-confidence">
+            <span class="muted">这一步的把握（可以不选）：</span>
+            <n-radio-group v-model:value="review.confidence" size="small">
+              <n-radio-button v-for="c in CONFIDENCES" :key="c" :value="c" :data-testid="`review-confidence-${c}`">{{ CONFIDENCE_LABEL[c] }}</n-radio-button>
+            </n-radio-group>
+          </div>
+          <!-- 分级提示：与先想后讲相同，只依据当前局面，不透露棋谱中的着法 -->
+          <section v-if="review.hints" class="review-hints" data-testid="review-hint-list">
+            <p v-if="review.hintData"><span class="hint-level">提示 1 · 局面需求</span>{{ review.hintData.observe }}</p>
+            <p v-if="review.hintData && review.hints >= 2"><span class="hint-level">提示 2 · 相关棋子</span>{{ review.hintData.focus.text }}</p>
+            <p v-if="review.hintData && review.hints >= 3 && review.hintData.moves.length">
+              <span class="hint-level">提示 3 · 可以考虑的着法</span>{{ review.hintData.moves.map((m) => m.notation).join("、") }}（不分先后）
+            </p>
+            <p class="muted">用了提示之后选对，记为“看了提示后选对”，不算独立选对。</p>
+          </section>
           <p v-if="card.attempts.length" class="muted">已经复习 {{ card.attempts.length }} 次。</p>
         </template>
 
@@ -202,6 +228,7 @@ async function mark(status: ReviewStatus) {
             <p class="result" :class="{ ok: attempt?.matched, neutral: attempt?.goal === 'decision' && !attempt?.matched }" data-testid="review-result">
               {{ attemptText(attempt?.choice ?? null, !!attempt?.matched, card.answer.notation) }}
             </p>
+            <p v-if="attemptNotes" class="muted" data-testid="review-attempt-notes">{{ attemptNotes }}</p>
             <p class="legend muted">棋盘上实线箭头是棋谱中的着法<template v-if="choiceArrow">，虚线是这次的选择</template>。</p>
             <!-- 原来的意图与这一步实际的变化（规则事实） -->
             <template v-if="attempt?.reflection">
@@ -339,6 +366,9 @@ async function mark(status: ReviewStatus) {
     <footer class="actions" data-testid="review-actions">
       <template v-if="!revealed">
         <n-button size="small" data-testid="review-reveal" :disabled="review.busy" @click="submitChoice(null)">不走子，直接看答案</n-button>
+        <n-button v-if="review.hints < 3" size="small" quaternary data-testid="review-hint" :disabled="review.busy" @click="showReviewHint">
+          {{ review.hints ? `再看一级提示（已看 ${review.hints} 级）` : "看提示" }}
+        </n-button>
         <!-- 跳过：没有作答就离开，与直接看答案分开记录 -->
         <n-button v-if="session" size="small" quaternary data-testid="review-skip" :disabled="review.busy" @click="skipCard">跳过这一题</n-button>
       </template>
@@ -362,6 +392,24 @@ async function mark(status: ReviewStatus) {
 </template>
 
 <style scoped>
+.confidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--sp-2);
+}
+.review-hints {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--panel-soft, var(--panel));
+  border: 1px solid var(--border);
+}
+.review-hints p {
+  margin: 4px 0;
+  line-height: 1.6;
+}
 .practice {
   min-width: 0;
 }

@@ -18,6 +18,8 @@ use xq_core::Move;
 use xq_core::explain::ExplainContext;
 use xq_core::explain::ExplainLevel;
 use xq_core::explain::Verdict;
+use xq_core::explain::hints;
+use xq_core::explain::hints::ThinkHints;
 use xq_core::explain::hints::UsedHints;
 use xq_core::fen;
 use xq_core::notation;
@@ -41,6 +43,8 @@ use crate::topics;
 use crate::topics::Issue;
 use crate::topics::ThemeTag;
 use crate::service::ApiError;
+use crate::learning;
+use crate::learning::Confidence;
 use crate::storage::Checked;
 use crate::service::ApiResult;
 use crate::service::Inner;
@@ -130,6 +134,15 @@ pub struct ReviewAttempt {
     /// 界面为这次作答生成的请求编号：同一个请求重复提交（重复点击、重试）时只记一次。
     #[serde(default)]
     pub request: Option<String>,
+    /// 这次作答前看了几级提示；早期的记录为 0。用了提示之后选对不算独立选对（见 `schedule`）。
+    #[serde(default)]
+    pub hints: u8,
+    /// 从显示局面到作答的时间（毫秒）；只记录，不评分。早期的记录为空。
+    #[serde(default)]
+    pub elapsed_ms: Option<u64>,
+    /// 作答时选择的信心（可以不选）。
+    #[serde(default)]
+    pub confidence: Option<Confidence>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -241,6 +254,13 @@ pub struct ReviewAttemptRequest {
     /// 请求编号：已经有同一编号的作答时不再记录，返回原来的卡片。
     #[serde(default)]
     pub request: Option<String>,
+    /// 作答前看了几级提示（0–3）。
+    #[serde(default)]
+    pub hints: u8,
+    #[serde(default)]
+    pub elapsed_ms: Option<u64>,
+    #[serde(default)]
+    pub confidence: Option<Confidence>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -285,6 +305,21 @@ pub(crate) fn turn_of(ply: u32, root_side: Color) -> u32 { (ply.saturating_sub(1
 
 fn source_available(study: Option<&Study>, card: &ReviewCard) -> bool {
     study.and_then(|s| s.nodes.get(&card.node_id)).is_some_and(|n| n.mv == Some(card.answer.mv))
+}
+
+impl Inner {
+    /// 复习中的分级提示：与先想后讲相同的规则（见 `hints`），只依据落子前局面，不引用棋谱中的着法；
+    /// 原会话中的这一着仍在时，三级提示使用这个局面已有的分析，否则给出与局面需求相关的着法。
+    pub(crate) fn review_hints(&self, id: &str) -> ApiResult<Option<ThinkHints>> {
+        let card = self.load_card(id)?;
+        let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
+        let study = self.store.load_study(&card.study_id).ok().flatten();
+        let engine = study
+            .as_ref()
+            .filter(|s| source_available(Some(s), &card))
+            .and_then(|s| s.nodes.get(&card.node_id).and_then(|n| n.parent).and_then(|p| self.cached_position_evidence(s, p)));
+        Ok(hints::think_hints(&pos, engine.as_ref()))
+    }
 }
 
 impl Inner {
@@ -467,7 +502,10 @@ impl Inner {
         let request = req.request.clone();
         // 同一写事务中：先认出重复到达的请求（即使之后换了题或这组练习已经结束，也只返回已经记下的那次），
         // 再确认这组练习还在进行、这张卡片是当前的题目
-        let written = self.store.update_review_in_practice(id, req.practice.as_deref(), |c, session| {
+        let written = self.store.update_review_in_practice(
+            id,
+            req.practice.as_deref(),
+            |c, session| {
             if request.is_some() && c.attempts.iter().any(|a| a.request == request) {
                 return Ok(false);
             }
@@ -488,6 +526,9 @@ impl Inner {
                 decision,
                 practice: req.practice.clone(),
                 request: request.clone(),
+                hints: req.hints.min(3),
+                elapsed_ms: req.elapsed_ms,
+                confidence: req.confidence,
             });
             if c.attempts.len() > MAX_ATTEMPTS {
                 c.attempts.drain(..c.attempts.len() - MAX_ATTEMPTS);
@@ -495,7 +536,9 @@ impl Inner {
             c.reviewed_at = Some(now);
             c.updated_at = now;
             Ok(true)
-        })?;
+            },
+            |c| c.attempts.last().map(|a| learning::from_attempt(c, a)),
+        )?;
         let card = match written {
             Checked::Written(card) => card,
             // 同一个请求已经记下（或卡片已经删除）

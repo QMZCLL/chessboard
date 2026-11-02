@@ -247,6 +247,21 @@ impl AppService {
             Ok(n) => tracing::info!("{n} 张复习卡片的局面决策比较在上次退出时中断"),
             Err(e) => warn!("整理中断的局面决策比较失败：{e}"),
         }
+        // 第一次启动时，从已有的作答与先想后讲的练习记录补上学习事件（只做一次）
+        if !store.events_backfilled().unwrap_or(true) {
+            // 读取失败时不记为已补上，下次启动再补
+            match (store.list_reviews(), store.list_studies()) {
+                (Ok(cards), Ok(studies)) => {
+                    let mut events: Vec<crate::learning::LearningEvent> = cards.iter().flat_map(crate::learning::from_card).collect();
+                    events.extend(studies.iter().flat_map(crate::learning::from_study));
+                    match store.backfill_events(&events) {
+                        Ok(n) => tracing::info!("从已有的记录补上 {n} 条学习事件"),
+                        Err(e) => warn!("补上学习事件失败：{e}"),
+                    }
+                }
+                (Err(e), _) | (_, Err(e)) => warn!("读取已有的记录失败，暂不补上学习事件：{e}"),
+            }
+        }
         match store.reset_interrupted_asks(now_ms()) {
             Ok(0) => {}
             Ok(n) => tracing::info!("{n} 个追问在上次退出时中断，已标为可重新提问"),
@@ -619,8 +634,18 @@ impl AppService {
             s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, req.hints, now_ms())?;
             Ok(s.clone())
         })?;
+        // 这次练习的学习事件（节点只保存最近一次练习，事件保留每一次）
+        if let Some(event) = study.node(req.node_id).ok().and_then(|n| crate::learning::from_practice(&study, n))
+            && let Err(e) = self.inner.store.insert_events(&[event])
+        {
+            warn!("保存学习事件失败：{e}");
+        }
         self.inner.study_view(&study)
     }
+
+    /// 全部学习事件（按编号排列），用于能力画像与检查。
+    pub fn learning_events(&self) -> ApiResult<Vec<crate::learning::LearningEvent>> { Ok(self.inner.store.list_events()?) }
+
 
     pub fn set_note(&self, req: NoteRequest) -> ApiResult<StudyView> {
         let study = self.inner.with_study(&req.study_id, |s| {
@@ -679,6 +704,9 @@ impl AppService {
     pub fn list_reviews(&self) -> ApiResult<Vec<ReviewItem>> { self.inner.list_reviews() }
 
     pub fn review_detail(&self, r: ReviewRef) -> ApiResult<ReviewDetail> { self.inner.review_detail(&r.id) }
+
+    /// 复习这张卡片时的分级提示（与先想后讲相同的规则）。
+    pub fn review_hints(&self, r: ReviewRef) -> ApiResult<Option<xq_core::explain::hints::ThinkHints>> { self.inner.review_hints(&r.id) }
 
     pub fn review_attempt(&self, req: ReviewAttemptRequest) -> ApiResult<ReviewItem> {
         self.inner.review_attempt(req)

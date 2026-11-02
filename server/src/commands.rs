@@ -18,6 +18,7 @@ use xq_app::compare::CompareView;
 use xq_app::capture::Snapshot;
 use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
+use xq_app::learning::LearningEvent;
 use xq_app::llm::CoachView;
 use xq_app::llm::ask::AnswerView;
 use xq_app::llm::ask::AnswersRequest;
@@ -31,6 +32,7 @@ use xq_app::review::ReviewDetail;
 use xq_app::review::ReviewItem;
 use xq_app::review::ReviewRef;
 use xq_app::review::ReviewUpdateRequest;
+use xq_core::explain::hints::ThinkHints;
 
 use crate::StartupError;
 
@@ -226,6 +228,18 @@ pub async fn list_reviews(state: State<'_, AppService>) -> ApiResult<Vec<ReviewI
 pub async fn review_detail(state: State<'_, AppService>, req: ReviewRef) -> ApiResult<ReviewDetail> {
     let s = service(&state);
     blocking(move || s.review_detail(req)).await
+}
+
+#[tauri::command]
+pub async fn review_hints(state: State<'_, AppService>, req: ReviewRef) -> ApiResult<Option<ThinkHints>> {
+    let s = service(&state);
+    blocking(move || s.review_hints(req)).await
+}
+
+#[tauri::command]
+pub async fn learning_events(state: State<'_, AppService>) -> ApiResult<Vec<LearningEvent>> {
+    let s = service(&state);
+    blocking(move || s.learning_events()).await
 }
 
 #[tauri::command]

@@ -14,6 +14,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use ts_rs::TS;
 use tracing::warn;
 use xq_core::Move;
 use xq_core::Position;
@@ -71,7 +72,8 @@ fn support_of(outcome: CompareOutcome, choice: &EngineLine, reference: &EngineLi
 }
 
 /// 这次复习的练习目标。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum PracticeGoal {
     /// 复现棋谱：回忆这盘棋当时怎样走，看是否与棋谱一致。
@@ -82,7 +84,8 @@ pub enum PracticeGoal {
 }
 
 /// 落子前选择的意图：这一步主要想做什么。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Intent {
     Develop,
@@ -167,6 +170,9 @@ pub struct DecisionFeedback {
     pub points: Vec<String>,
     pub conditions: Option<String>,
     pub error: Option<String>,
+    /// 比较这次选择的搜索的稳定性（见 `stability`）；早期的记录与还没有结果时为空。
+    #[serde(default)]
+    pub stability: Option<StabilityLevel>,
 }
 
 impl DecisionFeedback {
@@ -179,6 +185,7 @@ impl DecisionFeedback {
             points: Vec::new(),
             conditions: None,
             error: None,
+            stability: None,
         }
     }
 
@@ -294,6 +301,7 @@ pub fn judge_decision(
         points,
         conditions: None,
         error: None,
+        stability: None,
     };
     if !complete {
         // 与棋谱一致是事实，但棋谱着法的好坏也没有得到比较
@@ -415,10 +423,14 @@ impl Inner {
             inner.search(second, Priority::Interactive, group2, None, move |outcome| {
                 let Some(inner) = weak.upgrade() else { return };
                 let feedback = match outcome {
-                    SearchOutcome::Completed(r) => DecisionFeedback {
-                        conditions: Some(conditions),
-                        ..judge_decision(&pos, choice, answer, best, &r.lines, r.complete, Some(&stability::assess(&pos, &r.rounds, r.complete)))
-                    },
+                    SearchOutcome::Completed(r) => {
+                        let settled = stability::assess(&pos, &r.rounds, r.complete);
+                        DecisionFeedback {
+                            conditions: Some(conditions),
+                            stability: Some(settled.level),
+                            ..judge_decision(&pos, choice, answer, best, &r.lines, r.complete, Some(&settled))
+                        }
+                    }
                     SearchOutcome::Terminal(_) => DecisionFeedback::failed("这个局面已经结束，不能比较".to_string()),
                     SearchOutcome::Failed(e) => DecisionFeedback::failed(e),
                     SearchOutcome::Cancelled => DecisionFeedback::failed("搜索已取消".to_string()),
@@ -439,7 +451,15 @@ impl Inner {
     /// 按结果从同一个起点重新安排；之后又有了新的复习时不改动，留给新的复习安排。
     fn finish_decision(&self, id: &str, at: i64, feedback: DecisionFeedback) {
         let intervals = self.config_snapshot().review.intervals_days;
-        let updated = self.store.update_review_if(id, |c| {
+        // 比较结果与这次作答的学习事件在同一个写事务中更新
+        let event_id = crate::learning::review_event_id(id, at);
+        let refresh = |c: &crate::review::ReviewCard, e: &mut crate::learning::LearningEvent| {
+            if let Some(a) = c.attempts.iter().find(|a| a.at == at) {
+                e.outcome = crate::schedule::outcome_of(Some(a)).into();
+                e.stability = a.decision.as_ref().and_then(|d| d.stability);
+            }
+        };
+        let updated = self.store.update_review_and_event(id, |c| {
             let Some(a) = c.attempts.iter_mut().find(|a| a.at == at) else { return false };
             if progress(Some(&feedback)) <= progress(a.decision.as_ref()) {
                 return false;
@@ -452,7 +472,7 @@ impl Inner {
                 c.updated_at = now_ms();
             }
             true
-        });
+        }, &event_id, refresh);
         match updated {
             Ok(Some(card)) => events::emit(self.events.as_ref(), events::REVIEW_UPDATED, &self.review_item(card)),
             Ok(None) => {}

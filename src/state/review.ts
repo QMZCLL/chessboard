@@ -49,6 +49,14 @@ export const review = reactive({
   goal: (safeStorage("get", GOAL_KEY) === "decision" ? "decision" : "recall") as T.PracticeGoal,
   /** 落子前选择的意图（可以不选） */
   intent: null as T.Intent | null,
+  /** 这次作答已经看了几级提示（0–3）；用了提示之后选对不算独立选对 */
+  hints: 0,
+  /** 这张卡片的分级提示：第一次看提示时读取 */
+  hintData: null as T.ThinkHints | null,
+  /** 作答时选择的信心（可以不选） */
+  confidence: null as T.Confidence | null,
+  /** 这次作答开始的时刻：显示局面（或再试一次）时记下，作答时算出耗时，只记录不评分 */
+  shownAt: Date.now(),
   /** 这一次复习的时间：结果从当前卡片的复习记录中按它取出，局面决策的比较完成后随卡片更新 */
   attemptAt: null as number | null,
   /** 这一次作答的请求编号：每次进入选择时重新生成；同一次作答重复提交（重试）时后台只记一次 */
@@ -254,7 +262,7 @@ export async function showCard(id: string, restore: string | null = null) {
     review.phase = answered ? "revealed" : "choose";
     review.attemptAt = answered?.at ?? null;
     review.intent = null;
-    review.request = newRequestId();
+    resetAttempt();
     review.error = null;
     // 正在编辑或保存失败的草稿保留，其余按卡片中保存的内容显示
     const draft = review.notes[id];
@@ -278,7 +286,9 @@ export async function submitChoice(choice: T.Move | null) {
   review.busy = true;
   try {
     const { goal, intent } = review;
-    const send = () => queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request));
+    // 耗时只记录、不评分；离开很久的作答记为一小时
+    const extra = { hints: review.hints, elapsed_ms: Math.min(Date.now() - review.shownAt, 3_600_000), confidence: review.confidence };
+    const send = () => queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request, extra));
     // 这组练习的换题还在写回时，等写回之后再提交：后台只把当前题目的作答记入这组练习
     const item = await (practice ? queued(`practice:${practice}`, send) : send());
     upsert(item);
@@ -294,14 +304,42 @@ export async function submitChoice(choice: T.Move | null) {
   }
 }
 
+/** 开始一次新的作答：新的请求编号，提示、信心与计时从头开始 */
+function resetAttempt() {
+  review.request = newRequestId();
+  review.hints = 0;
+  review.hintData = null;
+  review.confidence = null;
+  review.shownAt = Date.now();
+}
+
+
 /** 再试一次：回到只显示局面 */
 export function retryCard() {
   view += 1;
   review.phase = "choose";
   review.attemptAt = null;
   review.intent = null;
-  review.request = newRequestId();
+  resetAttempt();
   review.busy = false;
+}
+
+/** 再看一级提示（最多三级）：第一次时读取这张卡片的提示，读取期间换了卡片时不采用 */
+export async function showReviewHint() {
+  const current = review.current;
+  if (!current || review.phase !== "choose" || review.hints >= 3) return;
+  if (!review.hintData) {
+    const v = view;
+    try {
+      const hints = await api.reviewHints(current.card.id);
+      if (v !== view) return;
+      review.hintData = hints;
+    } catch (e) {
+      if (v === view) review.error = errorMessage(e);
+      return;
+    }
+  }
+  if (review.hintData) review.hints = Math.min(3, review.hints + 1);
 }
 
 /**

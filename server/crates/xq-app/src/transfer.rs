@@ -114,7 +114,8 @@ impl AppService {
                 .map(|r| ExplanationRecord { study_id: study.id.clone(), pending: false, ..r })
                 .collect();
             let id = study.id.clone();
-            self.inner.store.import_batch(&[(study, records)], &[], |_, _| None)?;
+            // 单个学习数据是一份副本：其中的练习记录不另记学习事件，免得同一次练习在画像中算两次
+            self.inner.store.import_batch(&[(study, records)], &[], &[], |_, _| None)?;
             let view = self.load_study(&id)?;
             return Ok(ImportResponse { study: view, notes: vec!["已导入学习数据（含分支、标注与讲解）".into()], stopped: None });
         }
