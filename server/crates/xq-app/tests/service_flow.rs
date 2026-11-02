@@ -1385,8 +1385,10 @@ fn a_practice_session_keeps_its_order_and_position_across_restarts_and_records_e
     assert_eq!((again.attempts.len(), again.revision), (1, first.revision), "重复提交的请求不追加作答");
     let retry = service.review_attempt(attempt(&ids[1], "r2")).unwrap().card;
     assert_eq!(retry.attempts.len(), 2, "新的请求（再试一次）照常记录");
-    let outside = service.review_attempt(attempt(&ids[2], "r3")).unwrap_err();
+    let outside = service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[2], "r3") }).unwrap_err();
     assert!(outside.message.contains("没有这张卡片"), "{}", outside.message);
+    let not_current = service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r4") }).unwrap_err();
+    assert!(not_current.message.contains("不是这组练习当前的题目"), "{}", not_current.message);
 
     // 换到下一题、记下跳过、改练习目标；越界的位置不接受
     let moved = service
@@ -1400,6 +1402,9 @@ fn a_practice_session_keeps_its_order_and_position_across_restarts_and_records_e
         .unwrap();
     assert_eq!((moved.index, moved.skipped.clone(), moved.goal, moved.revision), (1, vec![ids[0].clone()], PracticeGoal::Decision, 1));
     assert!(service.update_practice(PracticeUpdateRequest { id: session.id.clone(), index: Some(2), ..Default::default() }).is_err());
+    // 换题之后：新的当前题目可以作答；上一题重复到达的请求仍只返回已经记下的那次
+    service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r5") }).unwrap();
+    assert_eq!(service.review_attempt(attempt(&ids[1], "r1")).unwrap().card.attempts.len(), 2);
 
     // 重新启动后继续：顺序、位置与跳过的题目不变
     service.shutdown();
@@ -1420,6 +1425,10 @@ fn a_practice_session_keeps_its_order_and_position_across_restarts_and_records_e
     assert_eq!(service.current_practice().unwrap().map(|s| s.id), Some(next.id.clone()));
     let refused = service.update_practice(PracticeUpdateRequest { id: session.id.clone(), index: Some(0), ..Default::default() }).unwrap_err();
     assert!(refused.message.contains("已经结束"), "{}", refused.message);
+    // 已经结束的一组不再记入新的作答；已经记下的请求重复到达时照样返回
+    let late = service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r6") }).unwrap_err();
+    assert!(late.message.contains("已经结束"), "{}", late.message);
+    assert_eq!(service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r5") }).unwrap().card.attempts.len(), 1);
     let done = service.update_practice(PracticeUpdateRequest { id: next.id.clone(), finish: true, ..Default::default() }).unwrap();
     let finished_at = done.finished_at.expect("已经结束");
     let twice = service.update_practice(PracticeUpdateRequest { id: next.id.clone(), finish: true, ..Default::default() }).unwrap();

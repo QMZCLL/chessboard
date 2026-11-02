@@ -278,7 +278,9 @@ export async function submitChoice(choice: T.Move | null) {
   review.busy = true;
   try {
     const { goal, intent } = review;
-    const item = await queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request));
+    const send = () => queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request));
+    // 这组练习的换题还在写回时，等写回之后再提交：后台只把当前题目的作答记入这组练习
+    const item = await (practice ? queued(`practice:${practice}`, send) : send());
     upsert(item);
     // 等待期间换了卡片（或再试一次）：这次的结果只记在它自己的卡片上
     if (v !== view || review.current?.card.id !== id) return;

@@ -160,13 +160,18 @@ impl Inner {
             (None, None) => Err("找不到这组练习".into()),
         }
     }
+}
 
-    /// 作答要记入的练习：这组练习存在，并且包含这张卡片。
-    pub(crate) fn check_practice(&self, practice: &str, card: &str) -> ApiResult<()> {
-        match self.store.load_practice(practice)? {
-            Some(s) if s.cards.iter().any(|c| c == card) => Ok(()),
-            Some(_) => Err("这组练习中没有这张卡片".into()),
-            None => Err("找不到这组练习".into()),
-        }
+/// 作答能否记入这组练习：这组练习还没有结束，而且这张卡片是它当前的题目
+/// （界面在换题写回之后才提交作答，见前端的 `submitChoice`）。
+pub(crate) fn attempt_allowed(session: Option<&PracticeSession>, card: &str) -> Result<(), String> {
+    let Some(s) = session else { return Err("找不到这组练习".into()) };
+    if s.finished_at.is_some() {
+        return Err("这组练习已经结束".into());
+    }
+    match s.cards.get(s.index) {
+        Some(c) if c == card => Ok(()),
+        _ if s.cards.iter().any(|c| c == card) => Err("这张卡片不是这组练习当前的题目".into()),
+        _ => Err("这组练习中没有这张卡片".into()),
     }
 }

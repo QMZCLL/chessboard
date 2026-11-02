@@ -68,6 +68,16 @@ pub struct Store {
     db: Database,
 }
 
+/// 带检查的修改的结果。
+#[derive(Debug)]
+pub enum Checked<T> {
+    Written(T),
+    /// 不需要写回（或记录不存在）。
+    Unchanged,
+    /// 检查没有通过，没有写入。
+    Rejected(String),
+}
+
 fn explanation_key(study: &str, node: NodeId) -> String { format!("{study}/{node:010}") }
 
 fn coach_cache_key(study: &str, node: NodeId, key: &str) -> String { format!("{study}/{node:010}/{key}") }
@@ -361,6 +371,36 @@ impl Store {
         };
         tx.commit()?;
         Ok(stored)
+    }
+
+    /// 记一次作答：在同一写事务中读取最新的卡片与它所属的练习批次（给出 `practice` 时；不存在时为 `None`），
+    /// 由 `f` 检查并修改卡片。`f` 返回 `Ok(false)` 时不写回，返回错误时什么都不写入。卡片不存在时为 `Unchanged`。
+    pub fn update_review_in_practice(
+        &self, id: &str, practice: Option<&str>, f: impl FnOnce(&mut ReviewCard, Option<&PracticeSession>) -> Result<bool, String>,
+    ) -> Result<Checked<ReviewCard>, StoreError> {
+        let tx = self.db.begin_write()?;
+        let result = {
+            let session = match practice {
+                Some(p) => tx.open_table(PRACTICE)?.get(p)?.map(|v| serde_json::from_str::<PracticeSession>(v.value())).transpose()?,
+                None => None,
+            };
+            let mut t = tx.open_table(REVIEWS)?;
+            let current = t.get(id)?.map(|v| serde_json::from_str::<ReviewCard>(v.value())).transpose()?;
+            match current {
+                None => Checked::Unchanged,
+                Some(mut card) => match f(&mut card, session.as_ref()) {
+                    Ok(true) => {
+                        card.revision += 1;
+                        t.insert(id, serde_json::to_string(&card)?.as_str())?;
+                        Checked::Written(card)
+                    }
+                    Ok(false) => Checked::Unchanged,
+                    Err(reason) => Checked::Rejected(reason),
+                },
+            }
+        };
+        tx.commit()?;
+        Ok(result)
     }
 
     pub fn load_review(&self, id: &str) -> Result<Option<ReviewCard>, StoreError> { self.get(REVIEWS, id) }

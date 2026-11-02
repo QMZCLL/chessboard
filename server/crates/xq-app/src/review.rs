@@ -41,6 +41,7 @@ use crate::topics;
 use crate::topics::Issue;
 use crate::topics::ThemeTag;
 use crate::service::ApiError;
+use crate::storage::Checked;
 use crate::service::ApiResult;
 use crate::service::Inner;
 use crate::service::now_ms;
@@ -448,9 +449,6 @@ impl Inner {
     /// 不再追加，也不再开始比较。
     pub(crate) fn review_attempt(&self, req: ReviewAttemptRequest) -> ApiResult<ReviewItem> {
         let id = req.id.as_str();
-        if let Some(p) = &req.practice {
-            self.check_practice(p, id)?;
-        }
         // 局面与棋谱着法在卡片建立后不再改变，可以先读出来检查着法
         let card = self.load_card(id)?;
         let pos = fen::parse_position(&card.fen).map_err(|e| ApiError::from(format!("卡片中的局面无法读取：{e}")))?;
@@ -467,9 +465,14 @@ impl Inner {
         let now = now_ms();
         let mut at = now;
         let request = req.request.clone();
-        let written = self.store.update_review_if(id, |c| {
+        // 同一写事务中：先认出重复到达的请求（即使之后换了题或这组练习已经结束，也只返回已经记下的那次），
+        // 再确认这组练习还在进行、这张卡片是当前的题目
+        let written = self.store.update_review_in_practice(id, req.practice.as_deref(), |c, session| {
             if request.is_some() && c.attempts.iter().any(|a| a.request == request) {
-                return false;
+                return Ok(false);
+            }
+            if req.practice.is_some() {
+                crate::practice::attempt_allowed(session, id)?;
             }
             let matched = choice.as_ref().is_some_and(|m| m.mv == c.answer.mv);
             // 同一毫秒内的两次复习也要能区分：比较结果按时间写回
@@ -491,11 +494,13 @@ impl Inner {
             }
             c.reviewed_at = Some(now);
             c.updated_at = now;
-            true
+            Ok(true)
         })?;
-        let Some(card) = written else {
+        let card = match written {
+            Checked::Written(card) => card,
             // 同一个请求已经记下（或卡片已经删除）
-            return Ok(self.review_item(self.load_card(id)?));
+            Checked::Unchanged => return Ok(self.review_item(self.load_card(id)?)),
+            Checked::Rejected(reason) => return Err(reason.into()),
         };
         if let (true, Some(m)) = (deciding, &choice) {
             self.review_decide(&card, at, m.mv);
