@@ -50,7 +50,7 @@ await move(page, "e1d1");
 await page.locator("[data-testid=board-context] .n-tag", { hasText: "已被将死" }).waitFor();
 check(true, "将死后棋盘提示“已被将死”");
 await page.locator(".n-tabs-tab", { hasText: "本步讲解" }).click();
-await page.locator(".panel .n-tag", { hasText: "引擎分析完整" }).waitFor({ timeout: 60000 });
+await page.locator(".panel .n-tag", { hasText: /引擎分析完整|深入分析完整/ }).waitFor({ timeout: 60000 });
 const mateSummary = await page.getByTestId("key-point").innerText();
 console.log(`  结论：${mateSummary}`);
 check(mateSummary.includes("将死对方"), "讲解说明将死");

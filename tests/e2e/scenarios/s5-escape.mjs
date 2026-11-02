@@ -10,7 +10,7 @@ await page.locator("[data-testid=board-context] .n-tag", { hasText: "正被将�
 await move(page, "e2c3");
 await page.locator(".move.active").waitFor();
 await page.getByTestId("key-point").waitFor();
-await page.locator(".panel .n-tag", { hasText: /引擎分析完整|分析不完整/ }).waitFor({ timeout: 60000 });
+await page.locator(".panel .n-tag", { hasText: /引擎分析完整|深入分析完整|分析不完整/ }).waitFor({ timeout: 60000 });
 const basis = await page.locator(".panel h3:has-text('为什么这样走') + .claims").innerText();
 console.log(`  依据：${basis.replace(/\n/g, " | ")}`);
 check(basis.includes("唯一的炮架"), "说明移开了唯一的炮架");

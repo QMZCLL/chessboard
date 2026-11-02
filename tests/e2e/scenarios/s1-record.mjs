@@ -14,7 +14,7 @@ check(true, "棋谱导入后出现 4 着");
 
 // 选中“马二进三”，等待详细讲解
 await page.locator(".move", { hasText: "马二进三" }).click();
-await page.locator(".panel .n-tag", { hasText: "引擎分析完整" }).waitFor({ timeout: 60000 });
+await page.locator(".panel .n-tag", { hasText: /引擎分析完整|深入分析完整/ }).waitFor({ timeout: 60000 });
 const summary = await page.getByTestId("key-point").innerText();
 console.log(`  要点：${summary}`);
 check((await page.getByTestId("move-name").innerText()) === "马二进三", "讲解标题是当前着法");
