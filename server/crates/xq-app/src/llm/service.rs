@@ -94,6 +94,8 @@ pub(crate) struct CoachJob {
 pub(crate) enum CoachTask {
     Explain(CoachJob),
     Ask(AskJob),
+    /// 退出：收到的工作线程结束（每个线程一条，见 `AppService::shutdown`）。
+    Stop,
 }
 
 /// 讲解线程与工作线程共用的运行状态。
@@ -136,6 +138,20 @@ impl CoachRuntime {
             slot_free: Condvar::new(),
         }
     }
+
+    /// 让 `n` 个工作线程结束：排在前面的请求不再发送（见 `worker`），每个线程收到一条 Stop 后结束。
+    pub(crate) fn stop_workers(&self, n: usize) {
+        {
+            let jobs = lock(&self.jobs);
+            for _ in 0..n {
+                let _ = jobs.send(CoachTask::Stop);
+            }
+        }
+        // 等待空位的线程重新检查（正在退出时不再等待）。持有计数的锁再通知：
+        // 线程要么还没检查（会看到正在退出），要么已经在等待（会收到通知），不会错过
+        let _active = lock(&self.active);
+        self.slot_free.notify_all();
+    }
 }
 
 /// 缓存键：证据版本（含规则事实生成版本与证据包结构版本）、提示词与输出结构版本、模型配置、
@@ -151,16 +167,17 @@ pub(crate) fn cache_key(bundle: &EvidenceBundle, settings: &ProviderSettings, au
     Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-pub(crate) fn spawn_workers(weak: Weak<Inner>, rx: Receiver<CoachTask>) -> Result<(), String> {
+pub(crate) fn spawn_workers(weak: Weak<Inner>, rx: Receiver<CoachTask>) -> Result<Vec<thread::JoinHandle<()>>, String> {
     let rx = Arc::new(Mutex::new(rx));
-    for i in 0..WORKERS {
-        let (weak, rx) = (weak.clone(), rx.clone());
-        thread::Builder::new()
-            .name(format!("coach-{i}"))
-            .spawn(move || worker(weak, rx))
-            .map_err(|e| format!("无法启动 AI 讲解线程：{e}"))?;
-    }
-    Ok(())
+    (0..WORKERS)
+        .map(|i| {
+            let (weak, rx) = (weak.clone(), rx.clone());
+            thread::Builder::new()
+                .name(format!("coach-{i}"))
+                .spawn(move || worker(weak, rx))
+                .map_err(|e| format!("无法启动 AI 讲解线程：{e}"))
+        })
+        .collect()
 }
 
 fn worker(weak: Weak<Inner>, rx: Arc<Mutex<Receiver<CoachTask>>>) {
@@ -170,7 +187,12 @@ fn worker(weak: Weak<Inner>, rx: Arc<Mutex<Receiver<CoachTask>>>) {
             Err(_) => return,
         };
         let Some(inner) = weak.upgrade() else { return };
+        // 正在退出：排队的请求不再发送（下次启动时标为中断，可以重新生成）
+        if inner.stopping.load(Ordering::SeqCst) && !matches!(task, CoachTask::Stop) {
+            continue;
+        }
         let job = match task {
+            CoachTask::Stop => return,
             CoachTask::Explain(job) => job,
             CoachTask::Ask(job) => {
                 inner.ask_run(job);
@@ -186,6 +208,10 @@ fn worker(weak: Weak<Inner>, rx: Arc<Mutex<Receiver<CoachTask>>>) {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_job(&inner, &job)))
             .unwrap_or_else(|_| Err("生成 AI 讲解时出错".to_string()));
         inner.coach_release();
+        // 退出时中断的请求不记为失败：保持生成中，下次启动时标为中断、可以重新生成
+        if outcome.is_err() && inner.stopping.load(Ordering::SeqCst) {
+            continue;
+        }
         inner.on_explain_thread(move |inner| inner.coach_commit(job, outcome));
     }
 }
@@ -338,7 +364,8 @@ impl Inner {
     /// 任务仍是节点最新的请求，且模型服务设置没有改变。
     fn coach_current(&self, job: &CoachJob) -> bool {
         let key = (job.request.study_id.clone(), job.request.node_id);
-        lock(&self.coach.inflight).get(&key).map(|(g, _)| *g) == Some(job.generation)
+        !self.stopping.load(Ordering::SeqCst)
+            && lock(&self.coach.inflight).get(&key).map(|(g, _)| *g) == Some(job.generation)
             && self.coach.config_rev.load(Ordering::SeqCst) == job.config_rev
     }
 
@@ -402,7 +429,7 @@ impl Inner {
 
     pub(super) fn coach_acquire(&self) {
         let mut active = lock(&self.coach.active);
-        while *active >= self.config_snapshot().coach.max_parallel_requests.max(1) as usize {
+        while *active >= self.config_snapshot().coach.max_parallel_requests.max(1) as usize && !self.stopping.load(Ordering::SeqCst) {
             active = self.coach.slot_free.wait(active).unwrap_or_else(|p| p.into_inner());
         }
         *active += 1;

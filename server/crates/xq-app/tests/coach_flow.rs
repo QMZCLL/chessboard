@@ -850,3 +850,31 @@ fn asking_about_a_comparison_answers_from_its_evidence_and_keeps_the_answer() {
     assert!(stale[0].record.as_ref().unwrap().result.is_some(), "过期的回答仍然保留");
     service.shutdown();
 }
+
+#[test]
+fn shutdown_lets_a_sent_request_finish_and_does_not_send_queued_ones() {
+    // 第 1 着的请求已经发出（1.5 秒后返回），第 2 着在排队
+    let dir = tempfile::tempdir().unwrap();
+    let (service, llm, rec, sid) = two_moves_with_slow_first_call(dir.path());
+    let started = Instant::now();
+    service.shutdown();
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(5), "退出等待在途请求的时间有上限：{took:?}");
+    // 等到第 1 次请求返回之后：不退出的话，排队的第 2 着这时已经发出
+    std::thread::sleep(Duration::from_millis(2_000).saturating_sub(started.elapsed()));
+    assert_eq!(llm.count(), 1, "排队的请求在退出时不再发送");
+    service.shutdown();
+    drop(service);
+
+    // 重新启动：在途的请求在退出前返回，结果已经保存；排队的那一着标为中断，可以重新生成
+    let script = format!("@go\n{ROUND}@go\n{BLACK_ROUND}");
+    let service = start(dir.path(), &script, &llm, rec.clone());
+    service.set_coach_credential(CoachCredentialRequest { key: Some("sk-old".into()) }).unwrap();
+    service.load_study(&sid).unwrap();
+    let first = service.coach_view(NodeRef { study_id: sid.clone(), node_id: 1 }).unwrap();
+    assert_eq!(first.status, CoachStatus::Ready, "{:?}", first.reason);
+    let second = service.coach_view(NodeRef { study_id: sid.clone(), node_id: 2 }).unwrap();
+    assert_eq!(second.status, CoachStatus::None, "{:?}", second.reason);
+    assert!(second.reason.unwrap_or_default().contains("没有完成"));
+    service.shutdown();
+}

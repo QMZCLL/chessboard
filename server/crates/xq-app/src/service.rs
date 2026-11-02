@@ -9,11 +9,15 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::RwLock;
 use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::thread::JoinHandle;
+use std::time::Duration;
+use std::time::Instant;
 
 use serde::Serialize;
 use tracing::error;
@@ -151,6 +155,29 @@ pub(crate) struct ExplainTask {
 pub(crate) enum ExplainMsg {
     Task(ExplainTask),
     Continue(Box<dyn FnOnce(&Inner) + Send>),
+    /// 退出：之前排队的结果处理完后结束讲解线程（见 `AppService::shutdown`）。
+    Stop,
+}
+
+/// 退出时等待在途的 AI 请求与讲解线程的最长时间；超过时不再等待（进程随后退出）。
+const COACH_GRACE: Duration = Duration::from_secs(3);
+const EXPLAIN_GRACE: Duration = Duration::from_secs(5);
+
+/// 在期限内等这些线程结束；返回没有结束的线程数（不再等待它们）。
+fn join_within(handles: Vec<JoinHandle<()>>, grace: Duration) -> usize {
+    let deadline = Instant::now() + grace;
+    while handles.iter().any(|h| !h.is_finished()) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let mut left = 0;
+    for h in handles {
+        if h.is_finished() {
+            let _ = h.join();
+        } else {
+            left += 1;
+        }
+    }
+    left
 }
 
 /// 测试用的钩子：讲解结果确认仍是最新请求、尚未写入时调用，参数为会话、节点与分析预算。
@@ -180,6 +207,10 @@ pub(crate) struct Inner {
     pub(crate) capture: Mutex<Option<CaptureSession>>,
     pub(crate) capture_state: Mutex<CaptureState>,
     pub(crate) weak: Weak<Inner>,
+    /// 正在退出：不再开始新的讲解与 AI 请求。
+    pub(crate) stopping: AtomicBool,
+    explain_worker: Mutex<Option<JoinHandle<()>>>,
+    coach_workers: Mutex<Vec<JoinHandle<()>>>,
 }
 
 /// 服务入口；可在多个线程间共享。
@@ -249,20 +280,27 @@ impl AppService {
             capture: Mutex::new(None),
             capture_state: Mutex::new(CaptureState::Idle),
             weak: weak.clone(),
+            stopping: AtomicBool::new(false),
+            explain_worker: Mutex::new(None),
+            coach_workers: Mutex::new(Vec::new()),
         });
         let weak = Arc::downgrade(&inner);
-        thread::Builder::new()
+        let explain = thread::Builder::new()
             .name("explain".into())
             .spawn(move || {
                 while let Ok(msg) = rx.recv() {
                     let Some(inner) = weak.upgrade() else { break };
                     let what = match &msg {
+                        ExplainMsg::Stop => break,
+                        // 正在退出：不再开始新的讲解；已经得到的结果照常处理（写入或丢弃）
+                        ExplainMsg::Task(_) if inner.stopping.load(Ordering::SeqCst) => continue,
                         ExplainMsg::Task(task) => format!("会话 {}，节点 {}", task.study_id, task.node_id),
                         ExplainMsg::Continue(_) => "处理引擎结果".to_string(),
                     };
                     let run = std::panic::AssertUnwindSafe(|| match msg {
                         ExplainMsg::Task(task) => inner.process_explain(task),
                         ExplainMsg::Continue(step) => step(&inner),
+                        ExplainMsg::Stop => {}
                     });
                     // 单个讲解任务出错时记录下来，讲解线程继续处理其他任务
                     if std::panic::catch_unwind(run).is_err() {
@@ -271,17 +309,37 @@ impl AppService {
                 }
             })
             .map_err(|e| format!("无法启动讲解线程：{e}"))?;
-        crate::llm::service::spawn_workers(Arc::downgrade(&inner), coach_rx)?;
+        *lock(&inner.explain_worker) = Some(explain);
+        *lock(&inner.coach_workers) = crate::llm::service::spawn_workers(Arc::downgrade(&inner), coach_rx)?;
         // 每天第一次启动时备份学习档案（当天已有备份时不再写入）
         inner.auto_backup();
         Ok(Self { inner })
     }
 
+    /// 退出：依次停止屏幕连接与引擎（未完成的搜索以取消结束，结果交给讲解线程）、
+    /// AI 讲解线程（排队的请求不再发送，在途的请求最多等 `COACH_GRACE`），最后是讲解线程
+    /// （处理完已经得到的结果后结束）。之后再调用不做任何事。
     pub fn shutdown(&self) {
-        if let Some(session) = lock(&self.inner.capture).take() {
+        let inner = &self.inner;
+        if inner.stopping.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(session) = lock(&inner.capture).take() {
             session.stop();
         }
-        self.inner.engine.shutdown();
+        inner.engine.shutdown();
+        let coach = std::mem::take(&mut *lock(&inner.coach_workers));
+        inner.coach.stop_workers(coach.len());
+        let left = join_within(coach, COACH_GRACE);
+        if left > 0 {
+            warn!("{left} 个 AI 讲解请求在退出时还没有结束，不再等待");
+        }
+        inner.send_explain(ExplainMsg::Stop);
+        if let Some(explain) = lock(&inner.explain_worker).take()
+            && join_within(vec![explain], EXPLAIN_GRACE) > 0
+        {
+            warn!("讲解线程在退出时还没有结束，不再等待");
+        }
     }
 
     pub fn status(&self) -> AppStatus {
@@ -741,7 +799,7 @@ impl Inner {
     }
 
     fn send_explain(&self, msg: ExplainMsg) {
-        if lock(&self.explain_tx).send(msg).is_err() {
+        if lock(&self.explain_tx).send(msg).is_err() && !self.stopping.load(Ordering::SeqCst) {
             error!("讲解线程已停止");
         }
     }
