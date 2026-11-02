@@ -305,6 +305,9 @@ impl AppService {
         let notes = cfg.normalize();
         config::save(&self.inner.config_path, &cfg).map_err(|e| format!("保存设置失败：{e}"))?;
         self.inner.engine.reconfigure(engine_spec(&self.inner.paths, &cfg));
+        if self.inner.config_snapshot().capture.model != cfg.capture.model {
+            self.inner.capture_backend.set_model(cfg.capture.model.clone());
+        }
         let old_coach = self.inner.config_snapshot().coach;
         let same_service = old_coach.same_service(&cfg.coach);
         let coach_changed = old_coach != cfg.coach;

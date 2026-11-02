@@ -83,6 +83,8 @@ pub trait CaptureBackend: Send + Sync {
     fn snapshot(&self, window_id: u32) -> Result<Snapshot, String>;
     /// 打开持续截图；`rect` 为截图坐标下的棋盘区域（按 9×10 等分后格心落在交叉点上）。
     fn open(&self, window_id: u32, rect: Rect) -> Result<Box<dyn FrameSource>, String>;
+    /// 设置中换了识别模型文件（`None` 为自带模型）：之后的截图使用新的模型。
+    fn set_model(&self, _path: Option<std::path::PathBuf>) {}
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

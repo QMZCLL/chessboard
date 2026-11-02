@@ -362,7 +362,7 @@ const engineText = computed(() => {
             <n-form-item label="置信度提示阈值">
               <n-input-number v-model:value="form.confidence_threshold" :min="0.3" :max="0.99" :step="0.05" :precision="2" />
             </n-form-item>
-            <n-form-item label="识别模型文件"><n-input v-model:value="form.model" placeholder="留空使用自带模型（修改后需重启）" /></n-form-item>
+            <n-form-item label="识别模型文件"><n-input v-model:value="form.model" placeholder="留空使用自带模型；指定的模型旁边需要一份 <文件名>.manifest.json" /></n-form-item>
           </n-form>
         </n-tab-pane>
 
