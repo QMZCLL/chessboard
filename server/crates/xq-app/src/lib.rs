@@ -16,6 +16,7 @@ pub mod learning;
 pub mod llm;
 mod pipeline;
 pub mod practice;
+pub mod profile;
 pub mod records;
 pub mod report;
 pub mod review;

@@ -646,6 +646,19 @@ impl AppService {
     /// 全部学习事件（按编号排列），用于能力画像与检查。
     pub fn learning_events(&self) -> ApiResult<Vec<crate::learning::LearningEvent>> { Ok(self.inner.store.list_events()?) }
 
+    /// 能力画像（见 `profile`）：由全部学习事件统计，推荐的主题要有复习卡片可练。
+    pub fn learning_profile(&self) -> ApiResult<crate::profile::LearningProfile> {
+        let events = self.inner.store.list_events()?;
+        let mut cards: HashMap<crate::topics::Theme, usize> = HashMap::new();
+        for card in self.inner.store.list_reviews()? {
+            let themes: std::collections::HashSet<_> =
+                crate::topics::card_themes(&card.fen, card.answer.mv).into_iter().map(|t| t.theme).collect();
+            for t in themes {
+                *cards.entry(t).or_default() += 1;
+            }
+        }
+        Ok(crate::profile::build(&events, &cards, now_ms()))
+    }
 
     pub fn set_note(&self, req: NoteRequest) -> ApiResult<StudyView> {
         let study = self.inner.with_study(&req.study_id, |s| {

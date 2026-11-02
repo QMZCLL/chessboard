@@ -33,6 +33,21 @@ pub enum Theme {
     Recapture,
 }
 
+impl Theme {
+    pub const ALL: [Theme; 5] = [Theme::KingSafety, Theme::Threatened, Theme::Protection, Theme::Lines, Theme::Recapture];
+
+    /// 界面与说明中的名称（与前端的 THEME_LABEL 相同）。
+    pub fn label(self) -> &'static str {
+        match self {
+            Theme::KingSafety => "应将与将帅安全",
+            Theme::Threatened => "受攻击棋子的处理",
+            Theme::Protection => "保护关系变化",
+            Theme::Lines => "炮架与线路变化",
+            Theme::Recapture => "吃子后的回吃关系",
+        }
+    }
+}
+
 /// 主题与它的依据（规则事实）。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ThemeTag {

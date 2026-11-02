@@ -109,6 +109,7 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         "review_detail" => to_value(service.review_detail(arg(args, "req")?)?),
         "review_hints" => to_value(service.review_hints(arg(args, "req")?)?),
         "learning_events" => to_value(service.learning_events()?),
+        "learning_profile" => to_value(service.learning_profile()?),
         "review_attempt" => to_value(service.review_attempt(arg(args, "req")?)?),
         "update_review" => to_value(service.update_review(arg(args, "req")?)?),
         "delete_review" => to_value(service.delete_review(arg(args, "req")?)?),

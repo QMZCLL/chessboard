@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 今日学习：打开软件时知道练什么。三块内容——继续上次的练习、今天到期的卡片、继续复盘最近的棋谱，
-// 下面是按自己确认的问题给出的专题推荐（写明依据）。主要操作随状态决定：有没有完成的练习时继续练习；
+// 下面是学习画像：最近反复错在哪里、今天最值得练什么、掌握了还是记住了答案，都由程序按学习事件统计，
+// 写明次数与依据，不显示百分比；作答还不多时如实说明。画像没有推荐时，按自己确认的问题给出专题推荐。主要操作随状态决定：有没有完成的练习时继续练习；
 // 否则有到期的卡片时开始今天的练习；还没有复习卡片时建立学习局面。
 import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NSelect, useMessage } from "naive-ui";
-import type { StudySummary } from "../api/types";
+import type { LearningProfile, StudySummary } from "../api/types";
 import { api, errorMessage } from "../api/backend";
 import { openPractice, openReviews, review, reviewCounts, startPractice } from "../state/review";
 import type { TopicKey } from "../state/reviewList";
@@ -22,6 +23,8 @@ const size = ref(5);
 const recent = ref<StudySummary[]>([]);
 const recentError = ref<string | null>(null);
 const positions = ref(lastPositions());
+const profile = ref<LearningProfile | null>(null);
+const profileError = ref<string | null>(null);
 
 async function loadRecent() {
   try {
@@ -31,7 +34,18 @@ async function loadRecent() {
   } catch (e) {
     recentError.value = errorMessage(e);
   }
+  try {
+    profile.value = await api.learningProfile();
+    profileError.value = null;
+  } catch (e) {
+    profileError.value = errorMessage(e);
+  }
 }
+
+/** 最近 30 天按阶段的作答 */
+const phaseText = computed(() =>
+  (profile.value?.phases ?? []).map((p) => `${p.label} ${p.recent.answered} 次（独立选对 ${p.recent.independent} 次）`).join(" · "),
+);
 onMounted(loadRecent);
 watch(
   () => wb.main,
@@ -51,7 +65,8 @@ const nextDue = computed(() => {
   const cards = review.items.map((i) => i.card).sort((a, b) => dueAt(a) - dueAt(b));
   return cards[0] ? dueText(cards[0], review.clock) : null;
 });
-const recommended = computed(() => recommendation(review.items));
+/** 按自己确认的问题给出的专题推荐：画像没有推荐时才显示 */
+const recommended = computed(() => (profile.value?.recommendation ? null : recommendation(review.items)));
 /** 这一页的主要操作 */
 const primary = computed(() => (session.value ? "resume" : reviewCounts.value.today ? "today" : review.items.length ? "recent" : "build"));
 
@@ -143,7 +158,36 @@ async function resumeStudy(s: StudySummary) {
       </section>
     </div>
 
-    <!-- 专题推荐：只按用户自己确认的问题，写明依据 -->
+    <!-- 学习画像：由学习事件统计，写明次数与依据 -->
+    <section class="profile surface" data-testid="home-profile">
+      <h2>学习画像</h2>
+      <p v-if="profileError" class="error">{{ profileError }}</p>
+      <p v-else-if="profile && !profile.enough" class="muted" data-testid="profile-note">{{ profile.note }}</p>
+      <template v-else-if="profile">
+        <h3>最近反复错在哪里</h3>
+        <ul v-if="profile.weaknesses.length" class="lines">
+          <li v-for="w in profile.weaknesses" :key="w.theme" data-testid="profile-weakness">
+            {{ w.text }}
+            <n-button v-if="w.examples.length" text size="small" type="primary" data-testid="profile-example" @click="openReviews(w.examples[0])">看一个例子</n-button>
+          </li>
+        </ul>
+        <p v-else class="muted">最近没有反复出错的主题（一个主题最近作答 4 次以上、一半以上没有独立选对时列在这里）。</p>
+        <h3>今天最值得练什么</h3>
+        <div v-if="profile.recommendation" class="row" data-testid="profile-recommendation">
+          <p>{{ profile.recommendation.text }}</p>
+          <n-button size="small" secondary data-testid="profile-start" @click="start(`theme:${profile.recommendation.theme}`, null)">练这一组</n-button>
+        </div>
+        <p v-else class="muted">没有需要集中练习的主题：按今天到期的卡片练习即可。</p>
+        <h3>掌握了，还是记住了答案</h3>
+        <ul v-if="profile.mastery.length" class="lines">
+          <li v-for="m in profile.mastery" :key="m.theme" data-testid="profile-mastery">{{ m.text }}</li>
+        </ul>
+        <p v-else class="muted">还没有在同一主题中独立选对两次以上的记录。</p>
+        <p class="muted phases" data-testid="profile-phases">最近 30 天按阶段（按子力粗分）：{{ phaseText }}</p>
+      </template>
+    </section>
+
+    <!-- 专题推荐：只按用户自己确认的问题，写明依据（画像没有推荐时） -->
     <section v-if="recommended" class="recommend surface" data-testid="home-recommend">
       <p>
         你有 {{ recommended.count }} 张卡片标记了“{{ ISSUE_LABEL[recommended.issue] }}”，可以集中练习这一组。
@@ -262,6 +306,35 @@ async function resumeStudy(s: StudySummary) {
   font-size: 12px;
   color: var(--accent-primary);
   font-weight: 600;
+}
+.profile {
+  max-width: 960px;
+  margin: var(--sp-3) auto 0;
+  padding: var(--sp-3) var(--sp-4);
+}
+.profile h2 {
+  margin: 0 0 var(--sp-2);
+  font-family: var(--font-serif);
+  font-size: 16px;
+}
+.profile h3 {
+  margin: var(--sp-3) 0 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.profile p {
+  margin: 0;
+  line-height: 1.7;
+}
+.lines {
+  margin: 0;
+  padding-left: 1.2em;
+  line-height: 1.7;
+}
+.phases {
+  margin-top: var(--sp-3) !important;
+  font-size: 12px;
 }
 .recommend {
   display: flex;

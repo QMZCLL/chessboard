@@ -206,6 +206,8 @@ export const api = {
   reviewHints: (id: string) => call<T.ThinkHints | null>("review_hints", { req: { id } }),
   /** 全部学习事件 */
   learningEvents: () => call<T.LearningEvent[]>("learning_events"),
+  /** 能力画像：最近反复出错的地方、今天最值得练的一组、掌握的依据（都写明次数与依据） */
+  learningProfile: () => call<T.LearningProfile>("learning_profile"),
   /** 开始一组练习：卡片按给出的顺序；之前还没有结束的一组记为结束 */
   startPractice: (req: { label: string; source: T.PracticeSource; topic: string | null; goal: T.PracticeGoal; cards: string[] }) =>
     call<T.PracticeSession>("start_practice", { req }),

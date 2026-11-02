@@ -19,6 +19,7 @@ use xq_app::capture::Snapshot;
 use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
 use xq_app::learning::LearningEvent;
+use xq_app::profile::LearningProfile;
 use xq_app::llm::CoachView;
 use xq_app::llm::ask::AnswerView;
 use xq_app::llm::ask::AnswersRequest;
@@ -234,6 +235,12 @@ pub async fn review_detail(state: State<'_, AppService>, req: ReviewRef) -> ApiR
 pub async fn review_hints(state: State<'_, AppService>, req: ReviewRef) -> ApiResult<Option<ThinkHints>> {
     let s = service(&state);
     blocking(move || s.review_hints(req)).await
+}
+
+#[tauri::command]
+pub async fn learning_profile(state: State<'_, AppService>) -> ApiResult<LearningProfile> {
+    let s = service(&state);
+    blocking(move || s.learning_profile()).await
 }
 
 #[tauri::command]
