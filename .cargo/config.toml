@@ -1,0 +1,6 @@
+# Rust 结构生成的 TypeScript 类型（ts-rs）：运行 `cargo test` 时写到前端的 src/api/generated，
+# 生成的文件提交到仓库，CI 检查它们与 Rust 代码一致。i64/u64 在界面中用 number（时间戳、计数都在安全范围内）。
+# 放在仓库根目录：Cargo 按当前目录查找配置，在根目录（CI）与 server 目录运行时都能找到。
+[env]
+TS_RS_EXPORT_DIR = { value = "src/api/generated", relative = true }
+TS_RS_LARGE_INT = "number"

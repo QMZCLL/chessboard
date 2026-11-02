@@ -10,6 +10,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::board::Position;
 use crate::notation;
@@ -27,7 +28,8 @@ pub struct RoundSummary {
 }
 
 /// 稳定性等级，按从弱到强排列。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum StabilityLevel {
     /// 候选比较没有完成一轮完整的搜索。
@@ -50,7 +52,9 @@ impl StabilityLevel {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// 搜索结论的稳定性：衡量这次搜索的结论还在不在变化，不是正确的概率。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Stability {
     pub level: StabilityLevel,
     /// 判断的依据，按重要程度排列。

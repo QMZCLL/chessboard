@@ -130,6 +130,9 @@ pnpm tauri dev                     # 桌面应用
 cargo test --manifest-path server/Cargo.toml -p xq-core -p xq-app   # 规则、讲解、引擎服务与流程测试
 ```
 
+前后端共享的部分结构由 Rust 生成 TypeScript 类型（ts-rs，见 `.cargo/config.toml`）：运行上面的 `cargo test` 时写到
+`src/api/generated`，生成的文件随代码提交，CI 检查它们是否最新；新增生成的类型时在 `src/api/generated/index.ts` 加一行。
+
 流程测试会运行仓库自带的 Pikafish，缺少引擎时测试失败而不是跳过；确实无法运行（如 CPU 不支持 BMI2）时，
 可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。引擎服务的异常情况（候选排名变化、部分更新、崩溃、设置变更）
 由可编排的模拟引擎 `xq-mock-uci` 稳定复现，不依赖真实引擎。

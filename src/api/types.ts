@@ -1,5 +1,10 @@
 // 与后端 serde 结构一一对应的类型。字段名保持后端的 snake_case。
 
+import type { Stability } from "./generated";
+
+// 由 Rust 结构生成的类型（ts-rs，见 .cargo/config.toml）：新增的共享结构都放在 generated 中，不在这里手写
+export type * from "./generated";
+
 export type Color = "red" | "black";
 export type Orientation = "red_bottom" | "black_bottom";
 /** ICCS 走法，如 "h2e2" */
@@ -154,17 +159,6 @@ export interface Verdict {
   label: string;
   delta: number | null;
   note: string;
-}
-
-/** 搜索结论的稳定性（见后台 stability）：衡量这次搜索的结论还在不在变化，不是正确的概率 */
-export type StabilityLevel = "incomplete" | "shifting" | "medium" | "high";
-
-export interface Stability {
-  level: StabilityLevel;
-  /** 判断的依据 */
-  reasons: string[];
-  /** 参与判断的深度范围 */
-  depths: [number, number] | null;
 }
 
 export interface MoveExplanation {
