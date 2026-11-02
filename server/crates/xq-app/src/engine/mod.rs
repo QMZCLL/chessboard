@@ -67,6 +67,8 @@ pub enum EngineState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Priority {
+    /// 只在没有其他任务时运行（例如自动补充的深入分析）；有其他任务到来时让出引擎，之后重新排队。
+    Idle,
     Background,
     Interactive,
 }

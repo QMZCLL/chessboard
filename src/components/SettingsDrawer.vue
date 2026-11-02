@@ -45,6 +45,7 @@ const form = reactive({
   repetition_rule: "ChineseRule",
   sixty_move_rule: true,
   auto_explain: true,
+  deepen_unsettled: true,
   interval_ms: 150,
   stable_frames: 3,
   unexplained_frames: 6,
@@ -124,6 +125,7 @@ function load(c: AppConfig) {
   form.repetition_rule = c.analysis.repetition_rule;
   form.sixty_move_rule = c.analysis.sixty_move_rule;
   form.auto_explain = c.analysis.auto_explain;
+  form.deepen_unsettled = c.analysis.deepen_unsettled;
   form.interval_ms = c.capture.interval_ms;
   form.stable_frames = c.capture.stable_frames;
   form.unexplained_frames = c.capture.unexplained_frames;
@@ -189,6 +191,7 @@ async function save() {
       repetition_rule: form.repetition_rule,
       sixty_move_rule: form.sixty_move_rule,
       auto_explain: form.auto_explain,
+      deepen_unsettled: form.deepen_unsettled,
     },
     capture: {
       interval_ms: form.interval_ms,
@@ -268,6 +271,8 @@ const engineText = computed(() => {
             </n-form-item>
             <p class="muted">主题只影响本机显示，选择后立即生效。</p>
             <n-form-item label="走子后自动讲解"><n-switch v-model:value="form.auto_explain" /></n-form-item>
+            <n-form-item label="补充深入分析"><n-switch v-model:value="form.deepen_unsettled" data-testid="settings-deepen" /></n-form-item>
+            <p class="muted">快速分析中最近几个深度首选还在变化时，在引擎空闲时补充一次深入分析；正在查看的着法优先。</p>
             <n-form-item label="学习水平"><n-select v-model:value="form.coach_audience" :options="AUDIENCES" /></n-form-item>
             <n-form-item label="AI 讲解篇幅"><n-select v-model:value="form.coach_detail" :options="DETAILS" /></n-form-item>
             <p class="muted">学习水平与篇幅用于 AI 讲解；修改后，已有的 AI 讲解会标为过期。</p>

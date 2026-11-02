@@ -450,6 +450,10 @@ fn explanation_reruns_after_settings_change() {
     let dir = tempfile::tempdir().unwrap();
     let rec = Arc::new(Recorder::default());
     let service = start(dir.path(), rec.clone(), Arc::new(SimBackend::new()));
+    // 关闭“首选仍在变化时自动深入分析”：之后的讲解都只是快速分析（深入分析会覆盖按新设置的快速分析）
+    let mut cfg = service.status().config;
+    cfg.analysis.deepen_unsettled = false;
+    service.update_config(cfg).unwrap();
     let created = service
         .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
         .unwrap();
@@ -1500,4 +1504,40 @@ fn imports_that_do_not_hold_together_are_rejected_without_writing_anything() {
     for s in [service, fresh] {
         s.shutdown();
     }
+}
+
+#[test]
+fn a_quick_analysis_whose_best_move_is_still_changing_is_deepened_once_in_the_background() {
+    // 快速分析：深度 1–3 首选是马二进三，深度 4 换成炮二平五（仍在变化）；随后的深入分析各个深度一致
+    let round = |depth: u32, first: &str, second: &str| {
+        format!(
+            "info depth {depth} seldepth {depth} multipv 1 score cp 30 nodes 10 time 1 pv {first}\n\
+             info depth {depth} seldepth {depth} multipv 2 score cp 25 nodes 10 time 1 pv {second}\n"
+        )
+    };
+    let quick: String = (1..=3).map(|d| round(d, "h0g2", "h2e2")).collect::<String>() + &round(4, "h2e2", "h0g2") + "bestmove h2e2\n";
+    let deep: String = (1..=5).map(|d| round(d, "h2e2", "h0g2")).collect::<String>() + "bestmove h2e2\n";
+    let script = format!("@go\n{quick}@go\n{deep}");
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), &script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h0g2"), variation: false }).unwrap().node_id.unwrap();
+    let first = rec.wait("快速分析的讲解", |e, v| e == "explanation_updated" && v["node_id"] == node && v["record"]["budget"] == "quick" && v["status"] == "detailed");
+    let expl = &first["record"]["explanation"];
+    assert_eq!(expl["stability"]["level"], "shifting", "{expl}");
+    assert_eq!(expl["verdict"]["tone"], "close", "差距很小的结论照常给出：{expl}");
+    assert!(expl["comparison"].to_string().contains("当前深度的首选是炮二平五"), "{expl}");
+    // 随后在后台补充一次深入分析，结果稳定
+    let deepened = rec.wait("补充的深入分析", |e, v| e == "explanation_updated" && v["node_id"] == node && v["record"]["budget"] == "deep" && !v["record"]["pending"].as_bool().unwrap_or(true));
+    let expl = &deepened["record"]["explanation"];
+    assert_eq!(expl["stability"]["level"], "high", "{expl}");
+    let log = std::fs::read_to_string(dir.path().join("engine").join("mock-uci-commands.log")).unwrap();
+    let gos: Vec<&str> = log.lines().filter(|l| l.starts_with("go")).collect();
+    assert_eq!(gos.len(), 2, "只补充一次：{gos:?}");
+    assert!(gos[1].contains("depth 30"), "第二次是深入分析：{gos:?}");
+    service.shutdown();
 }

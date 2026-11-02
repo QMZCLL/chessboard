@@ -72,6 +72,8 @@ const coachResult = computed(() => (coachBody.value ? (coachView.value?.record?.
 const aiLesson = computed(() => coachLesson(coachResult.value));
 /** 讲解不完整（部分分析或出错）时，补充分析是主要操作 */
 const needsRetry = computed(() => !record.value?.pending && (!!record.value?.error || expl.value?.level === "partial"));
+/** 快速分析的首选仍在变化，后台正在补充深入分析 */
+const deepening = computed(() => !!record.value?.pending && record.value.budget === "quick" && expl.value?.stability?.level === "shifting");
 const replyEvidence = computed(() => expl.value?.evidence.find((e) => e.topic === "reply" && canDemo(e)) ?? null);
 
 // 详细分析的展开状态在本机记住
@@ -278,7 +280,10 @@ function openThisReview() {
                 </header>
                 <!-- 2. 一句话要点 -->
                 <p class="key-point" data-testid="key-point">{{ keyPoint }}</p>
-                <div v-if="record?.pending" class="status-line"><n-spin :size="14" /> 引擎正在比较候选与主要应对，完成后自动补充</div>
+                <div v-if="record?.pending" class="status-line" data-testid="explain-pending">
+                  <n-spin :size="14" />
+                  {{ deepening ? "快速分析的首选仍在变化，正在补充深入分析，完成后自动更新" : "引擎正在比较候选与主要应对，完成后自动补充" }}
+                </div>
                 <!-- 分析不完整时，补充分析是这一区域的主要操作；已确认的事实照常显示 -->
                 <n-alert v-if="needsRetry" type="warning" :show-icon="false" class="alert" data-testid="partial-alert">
                   <div class="alert-row">

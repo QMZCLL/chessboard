@@ -1,0 +1,25 @@
+# 快速分析：深度 1–3 首选是马二进三，深度 4 换成炮二平五（排名仍在变化）
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h0g2
+info depth 1 seldepth 1 multipv 2 score cp 25 nodes 10 time 1 pv h2e2
+info depth 2 seldepth 2 multipv 1 score cp 30 nodes 20 time 2 pv h0g2
+info depth 2 seldepth 2 multipv 2 score cp 25 nodes 20 time 2 pv h2e2
+info depth 3 seldepth 3 multipv 1 score cp 30 nodes 30 time 3 pv h0g2
+info depth 3 seldepth 3 multipv 2 score cp 25 nodes 30 time 3 pv h2e2
+info depth 4 seldepth 4 multipv 1 score cp 30 nodes 40 time 4 pv h2e2
+info depth 4 seldepth 4 multipv 2 score cp 25 nodes 40 time 4 pv h0g2
+bestmove h2e2
+# 补充的深入分析：先停一会儿（界面先显示“排名仍在变化”与“正在补充深入分析”），之后各个深度一致
+@go
+sleep 4000
+info depth 1 seldepth 1 multipv 1 score cp 32 nodes 10 time 1 pv h2e2
+info depth 1 seldepth 1 multipv 2 score cp 26 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2
+info depth 2 seldepth 2 multipv 2 score cp 26 nodes 20 time 2 pv h0g2
+info depth 3 seldepth 3 multipv 1 score cp 32 nodes 30 time 3 pv h2e2
+info depth 3 seldepth 3 multipv 2 score cp 26 nodes 30 time 3 pv h0g2
+info depth 4 seldepth 4 multipv 1 score cp 32 nodes 40 time 4 pv h2e2
+info depth 4 seldepth 4 multipv 2 score cp 26 nodes 40 time 4 pv h0g2
+info depth 5 seldepth 5 multipv 1 score cp 32 nodes 50 time 5 pv h2e2
+info depth 5 seldepth 5 multipv 2 score cp 26 nodes 50 time 5 pv h0g2
+bestmove h2e2

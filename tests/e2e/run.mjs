@@ -26,6 +26,7 @@ const GROUPS = [
   },
   { name: "模拟引擎：不完整搜索与重试", engine: "engine-retry.txt", scenarios: ["s6-retry"] },
   { name: "模拟引擎：评分边界值", engine: "engine-bounds.txt", scenarios: ["s8-bounds"] },
+  { name: "模拟引擎：排名仍在变化", engine: "engine-shifting.txt", scenarios: ["s21-stability"] },
 ];
 // 打开 s1 建立的“导入的棋谱”继续检查
 const NEEDS = { "s2-endgame": ["s1-record"], "s4-layout": ["s1-record"] };

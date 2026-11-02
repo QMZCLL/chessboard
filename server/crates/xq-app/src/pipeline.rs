@@ -19,6 +19,7 @@ use xq_core::explain::CandidateView;
 use xq_core::explain::EngineEvidence;
 use xq_core::explain::ExplainContext;
 use xq_core::explain::PositionExplanation;
+use xq_core::explain::stability::StabilityLevel;
 use xq_core::study::NodeId;
 use xq_core::study::Study;
 
@@ -464,7 +465,11 @@ impl Inner {
                 }
                 // 实际走法不在候选中：相同预算下单独分析它
                 let single = AnalysisConditions { searchmoves: vec![job.mv], multipv: 1, ..cond.clone() };
-                let priority = self.priority_for(&job.study_id, job.node_id);
+                // 正在查看时提高到交互优先级；否则沿用这次任务的优先级（交互任务离开后降为后台，空闲任务仍是空闲）
+                let priority = match self.priority_for(&job.study_id, job.node_id) {
+                    Priority::Interactive => Priority::Interactive,
+                    _ => job.priority.min(Priority::Background),
+                };
                 let group = explain_group(&job.study_id, job.node_id);
                 let weak = self.weak.clone();
                 self.search(single, priority, group, None, move |outcome| {
@@ -515,8 +520,10 @@ impl Inner {
         stage_error: Option<String>,
     ) {
         let engine = evidence(result, single, cond);
+        let mut unsettled = false;
         self.commit(&job, |record| {
             if let Some(expl) = explain::explain_move(&job.before, job.mv, &job.ctx, Some(&engine)) {
+                unsettled = expl.stability.as_ref().is_some_and(|s| s.level == StabilityLevel::Shifting);
                 record.explanation = Some(expl);
                 record.budget = Some(job.budget);
                 record.conditions_key = Some(cond.key());
@@ -524,6 +531,12 @@ impl Inner {
             record.pending = false;
             record.error = stage_error;
         });
+        // 快速分析的首选仍在变化：在引擎空闲时补充一次深入分析。空闲优先级：其他讲解与分析到来时让出引擎，
+        // 正在查看这一着时提高为交互优先级；
+        // 深入分析的结果即使仍在变化也不再继续补充。结果被更新的请求取代（没有写入）时不补充
+        if unsettled && job.budget == Budget::Quick && self.config_snapshot().analysis.deepen_unsettled {
+            self.enqueue(&job.study_id, job.node_id, Budget::Deep, Priority::Idle, true);
+        }
     }
 
     /// 引擎任务没有完成：保留已有讲解，记录原因（取消时不算失败）。

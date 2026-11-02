@@ -296,6 +296,32 @@ fn cancel_and_preemption() {
 }
 
 #[test]
+fn mock_an_idle_job_yields_to_background_work_and_runs_again_afterwards() {
+    // 第 1 段：空闲任务开始后一直搜索，直到收到 stop；第 2 段：后台任务；第 3 段：空闲任务重新搜索
+    let script = [
+        "@go".to_string(),
+        info(1, 1, A, 30),
+        "wait-stop".to_string(),
+        format!("bestmove {A}"),
+        "@go".to_string(),
+        info(1, 1, B, 20),
+        format!("bestmove {B}"),
+        "@go".to_string(),
+        info(1, 1, A, 31),
+        format!("bestmove {A}"),
+    ]
+    .join("\n");
+    let (service, _dir) = mock_engine(&script);
+    let (_, idle) = submit(&service, Priority::Idle, request(START_FEN, 1, 4));
+    std::thread::sleep(Duration::from_millis(200));
+    let (_, bg) = submit(&service, Priority::Background, request(START_FEN, 1, 4));
+    assert_eq!(firsts(&completed(wait(&bg))), vec![B.to_string()], "后台任务先完成");
+    assert!(idle.try_recv().is_err(), "空闲任务让出引擎后重新排队");
+    let r = completed(wait(&idle));
+    assert_eq!(r.lines[0].score, xq_core::uci::Score::Cp(31), "空闲任务之后重新搜索");
+}
+
+#[test]
 fn missing_binary_reports_reason() {
     let service = start(PathBuf::from("/nonexistent/pikafish"), Vec::new());
     match service.state() {

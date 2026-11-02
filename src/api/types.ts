@@ -604,6 +604,8 @@ export interface AppConfig {
     repetition_rule: string;
     sixty_move_rule: boolean;
     auto_explain: boolean;
+    /** 快速分析的首选仍在变化时，在引擎空闲时补充一次深入分析 */
+    deepen_unsettled: boolean;
   };
   capture: {
     interval_ms: number;

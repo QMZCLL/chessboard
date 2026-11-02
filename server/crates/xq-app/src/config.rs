@@ -63,6 +63,8 @@ pub struct AnalysisConfig {
     pub sixty_move_rule: bool,
     /// 记录走子后自动在后台生成讲解。
     pub auto_explain: bool,
+    /// 快速分析的首选仍在变化时（见 `stability`），在引擎空闲时补充一次深入分析。
+    pub deepen_unsettled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -236,6 +238,7 @@ impl Default for AnalysisConfig {
             repetition_rule: "ChineseRule".into(),
             sixty_move_rule: true,
             auto_explain: true,
+            deepen_unsettled: true,
         }
     }
 }

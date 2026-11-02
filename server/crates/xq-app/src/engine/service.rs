@@ -256,11 +256,9 @@ impl Worker {
     fn handle(&mut self, msg: Msg) -> bool {
         match msg {
             Msg::Submit(job) => {
-                let interactive = job.spec.priority == Priority::Interactive;
+                let priority = job.spec.priority;
                 self.queue.push(job);
-                if interactive {
-                    self.preempt_background();
-                }
+                self.preempt_below(priority);
             }
             Msg::Cancel(id) => self.cancel_where(|job| job.id == id),
             Msg::CancelGroup(group) => self.cancel_where(|job| job.spec.group == group),
@@ -271,8 +269,8 @@ impl Worker {
                 if let Some(r) = self.running.as_mut().filter(|r| r.job.spec.group == group) {
                     r.job.spec.priority = priority;
                 }
-                if self.queue.iter().any(|j| j.spec.priority == Priority::Interactive) {
-                    self.preempt_background();
+                if let Some(top) = self.queue.iter().map(|j| j.spec.priority).max() {
+                    self.preempt_below(top);
                 }
             }
             Msg::Reconfigure(spec) => self.pending_spec = Some(spec),
@@ -322,10 +320,11 @@ impl Worker {
         }
     }
 
-    fn preempt_background(&mut self) {
+    /// 正在运行的任务优先级低于 `priority` 时让出引擎：停止搜索，结束后重新排队（交互任务不会被让出）。
+    fn preempt_below(&mut self, priority: Priority) {
         let mut stop = false;
         if let Some(r) = self.running.as_mut()
-            && r.job.spec.priority == Priority::Background
+            && r.job.spec.priority < priority
             && !r.cancelled
             && !r.preempted
         {

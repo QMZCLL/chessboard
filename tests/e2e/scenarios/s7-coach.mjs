@@ -22,7 +22,8 @@ await page.locator(".n-tabs-tab", { hasText: "棋谱" }).click();
 await page.getByPlaceholder("粘贴棋谱").fill("1. 炮二平五");
 await page.getByRole("button", { name: "导入棋谱" }).click();
 await page.locator(".move", { hasText: "炮二平五" }).click();
-await page.locator(".panel .n-tag", { hasText: "引擎分析完整" }).waitFor({ timeout: 30000 });
+// 快速分析的首选仍在变化时会补充深入分析（开局局面很快完成）：两种完整的分析都可以
+await page.locator(".panel .n-tag", { hasText: /引擎分析完整|深入分析完整/ }).waitFor({ timeout: 30000 });
 const card = page.getByTestId("coach-card");
 await card.waitFor();
 check((await page.getByTestId("coach-status").innerText()).includes("可开启 AI 讲解"), "未配置时 AI 讲解只占一行入口");
