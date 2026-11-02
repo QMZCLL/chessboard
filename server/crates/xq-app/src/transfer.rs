@@ -143,7 +143,10 @@ impl AppService {
         let cfg = &status.config;
         let engine = match &status.engine {
             EngineState::Ready { identity, notes, .. } => {
-                let mut s = format!("就绪 · {} · 网络 {} · 评分 {}", identity.name, identity.nnue, identity.score_type);
+                let mut s = format!(
+                    "就绪 · {} · 网络 {} · 评分 {} · 校验值 {}",
+                    identity.name, identity.nnue, identity.score_type, identity.fingerprint
+                );
                 if !notes.is_empty() {
                     s.push_str(&format!("（{}）", notes.join("；")));
                 }

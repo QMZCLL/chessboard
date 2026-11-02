@@ -131,6 +131,7 @@ impl Inner {
             movetime_ms,
             rules: cfg.rules(),
             engine: identity.name,
+            fingerprint: identity.fingerprint,
             nnue: identity.nnue,
             score_type: identity.score_type,
         })
@@ -163,6 +164,7 @@ impl Inner {
             searchmoves: conditions.searchmoves.clone(),
             expect: Some(EngineExpectation {
                 engine: conditions.engine.clone(),
+                fingerprint: conditions.fingerprint.clone(),
                 nnue: conditions.nnue.clone(),
                 score_type: conditions.score_type.clone(),
                 rules: conditions.rules.clone(),

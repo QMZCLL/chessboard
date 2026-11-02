@@ -3,8 +3,11 @@
 //! - 同一进程同时只执行一个搜索；新局面在上一次搜索结束（收到 bestmove）后才发送。
 //! - 进程输出带“代次”编号，重启前的旧输出不会混入新搜索。
 //! - 启动时完成 `uci`/`isready` 握手，只设置引擎实际支持的选项。
-//! - 停止无响应时结束进程并重启；进程退出（输出结束）会被检测并报告，而不是无限等待。
+//! - 停止无响应时结束进程并重启；进程退出（输出结束）会被检测并报告，而不是无限等待；
+//!   不可用时附上引擎最近的错误输出。
+//! - 引擎身份带有程序与网络文件内容的校验值（见 `fingerprint`），分析缓存据此区分原位替换的文件。
 
+mod fingerprint;
 mod process;
 mod service;
 
@@ -36,8 +39,12 @@ pub struct EngineSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EngineIdentity {
     pub name: String,
+    /// 网络文件的名称与大小（用于显示）。
     pub nnue: String,
     pub score_type: String,
+    /// 引擎程序与网络文件内容的校验值；早期记录没有这一项。
+    #[serde(default)]
+    pub fingerprint: String,
     pub generation: u64,
 }
 
@@ -81,6 +88,7 @@ pub struct SearchRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineExpectation {
     pub engine: String,
+    pub fingerprint: String,
     pub nnue: String,
     pub score_type: String,
     pub rules: RuleSet,

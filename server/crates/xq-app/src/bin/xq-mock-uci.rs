@@ -10,6 +10,11 @@
 //!
 //! 脚本段用完后，`go` 命令只输出 `bestmove (none)`。
 //!
+//! 握手部分以 `%` 开头的行是对模拟引擎自身的设置：
+//! - `%no-multipv`：不报告 MultiPV 选项（模拟不支持多候选的引擎）；
+//! - `%ready-hang`：收到 `isready` 后不回答（模拟卡在初始化中的引擎）；
+//! - `%fail <文字>`：收到 `uci` 后把文字写到错误输出并退出（模拟缺少网络文件等启动错误）。
+//!
 //! 收到的 `go` 与 `setoption` 命令追加写入当前目录下的 `mock-uci-commands.log`，测试据此检查引擎实际收到的条件。
 
 use std::collections::VecDeque;
@@ -21,6 +26,7 @@ fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "mock-uci-script.txt".to_string());
     let script = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("无法读取脚本 {path}：{e}"));
     let mut header = Vec::new();
+    let mut flags = Vec::new();
     let mut blocks: VecDeque<Vec<String>> = VecDeque::new();
     for line in script.lines() {
         let line = line.trim_end();
@@ -31,6 +37,8 @@ fn main() {
             blocks.push_back(Vec::new());
         } else if let Some(block) = blocks.back_mut() {
             block.push(line.to_string());
+        } else if let Some(flag) = line.strip_prefix('%') {
+            flags.push(flag.to_string());
         } else {
             header.push(line.to_string());
         }
@@ -53,10 +61,16 @@ fn main() {
         }
         match command.split_whitespace().next().unwrap_or("") {
             "uci" => {
+                if let Some(reason) = flags.iter().find_map(|f| f.strip_prefix("fail ")) {
+                    eprintln!("{reason}");
+                    std::process::exit(2);
+                }
                 say("id name MockUCI");
                 say("option name Threads type spin default 1 min 1 max 64");
                 say("option name Hash type spin default 16 min 1 max 1024");
-                say("option name MultiPV type spin default 1 min 1 max 128");
+                if !flags.iter().any(|f| f == "no-multipv") {
+                    say("option name MultiPV type spin default 1 min 1 max 128");
+                }
                 say("option name Repetition Rule type combo default AsianRule var AsianRule var ChineseRule");
                 say("option name Sixty Move Rule type check default true");
                 say("option name ScoreType type combo default Elo var Elo var PawnValueNormalized");
@@ -65,6 +79,7 @@ fn main() {
                 }
                 say("uciok");
             }
+            "isready" if flags.iter().any(|f| f == "ready-hang") => {}
             "isready" => say("readyok"),
             "quit" => return,
             "go" => {

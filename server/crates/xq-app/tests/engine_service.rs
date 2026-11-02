@@ -212,6 +212,7 @@ fn mock_stale_settings_are_rejected() {
     let EngineState::Ready { identity, .. } = service.state() else { panic!() };
     let current = EngineExpectation {
         engine: identity.name.clone(),
+        fingerprint: identity.fingerprint.clone(),
         nnue: identity.nnue.clone(),
         score_type: identity.score_type.clone(),
         rules: RuleSet::default(),
@@ -220,6 +221,11 @@ fn mock_stale_settings_are_rejected() {
     let old = EngineExpectation { rules: RuleSet { repetition_rule: "AsianRule".into(), sixty_move_rule: true }, ..current.clone() };
     let req = SearchRequest { expect: Some(old), ..request(START_FEN, 1, 4) };
     assert!(matches!(wait(&submit(&service, Priority::Interactive, req).1), SearchOutcome::Stale(_)));
+    // 同名、同样设置，但引擎程序或网络文件的内容不同（校验值不同）：同样不执行
+    let replaced = EngineExpectation { fingerprint: "0000000000000000".into(), ..current.clone() };
+    let req = SearchRequest { expect: Some(replaced), ..request(START_FEN, 1, 4) };
+    assert!(matches!(wait(&submit(&service, Priority::Interactive, req).1), SearchOutcome::Stale(_)));
+    assert_eq!(current.fingerprint.len(), 16);
     let req = SearchRequest { expect: Some(current), ..request(START_FEN, 1, 4) };
     assert!(matches!(wait(&submit(&service, Priority::Interactive, req).1), SearchOutcome::Completed(_)));
 }
@@ -294,6 +300,61 @@ fn missing_binary_reports_reason() {
     let service = start(PathBuf::from("/nonexistent/pikafish"), Vec::new());
     match service.state() {
         EngineState::Failed { reason } => assert!(reason.contains("无法启动引擎"), "{reason}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// 模拟引擎的服务，不等待就绪（握手可能不会完成）。
+fn mock_unready(script: &str) -> (EngineService, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("script.txt");
+    std::fs::write(&path, script).unwrap();
+    let spec = EngineSpec {
+        binary: PathBuf::from(env!("CARGO_BIN_EXE_xq-mock-uci")),
+        args: vec![path.display().to_string()],
+        nnue: None,
+        threads: 1,
+        hash_mb: 16,
+        rules: RuleSet::default(),
+    };
+    (EngineService::start(spec, Box::new(|_| {})).unwrap(), dir)
+}
+
+#[test]
+fn mock_without_multipv_gives_one_complete_candidate() {
+    // 不支持 MultiPV 的引擎每次只给出第一名；按一个候选判断完整，结果可以复用
+    let script = ["%no-multipv".to_string(), "@go".to_string(), info(1, 1, A, 30), info(2, 1, A, 28), format!("bestmove {A}")].join("\n");
+    let (service, _dir) = mock_engine(&script);
+    let EngineState::Ready { notes, applied, .. } = service.state() else { panic!() };
+    assert!(notes.iter().any(|n| n.contains("不支持 MultiPV")), "{notes:?}");
+    assert!(!applied.iter().any(|o| o.name == "MultiPV"), "不设置引擎不支持的选项");
+    let r = completed(wait(&submit(&service, Priority::Interactive, request(START_FEN, 3, 4)).1));
+    assert!(r.complete, "{:?}", r.notes);
+    assert_eq!((firsts(&r), r.depth), (vec![A.to_string()], 2));
+}
+
+#[test]
+fn mock_shutdown_does_not_wait_for_a_stalled_handshake() {
+    // 引擎卡在 isready（最长等 60 秒）：关闭时立即结束，握手期间提交的任务以取消结束
+    let (service, _dir) = mock_unready("%ready-hang");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(matches!(service.state(), EngineState::Starting), "{:?}", service.state());
+    let (_, pending) = submit(&service, Priority::Interactive, request(START_FEN, 1, 4));
+    let started = Instant::now();
+    service.shutdown();
+    assert!(started.elapsed() < Duration::from_secs(5), "关闭用了 {:?}", started.elapsed());
+    assert!(matches!(service.state(), EngineState::Stopped), "{:?}", service.state());
+    assert!(matches!(pending.recv_timeout(Duration::from_secs(1)), Ok(SearchOutcome::Cancelled)));
+}
+
+#[test]
+fn mock_startup_failure_shows_what_the_engine_wrote_to_stderr() {
+    let (service, _dir) = mock_unready("%fail 找不到网络文件 nn-test.nnue");
+    wait_ready(&service);
+    match service.state() {
+        EngineState::Failed { reason } => {
+            assert!(reason.contains("引擎握手失败") && reason.contains("引擎的错误输出：找不到网络文件 nn-test.nnue"), "{reason}");
+        }
         other => panic!("{other:?}"),
     }
 }

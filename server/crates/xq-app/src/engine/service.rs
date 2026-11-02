@@ -37,6 +37,7 @@ use super::SearchOutcome;
 use super::SearchProgress;
 use super::SearchRequest;
 use super::SearchResult;
+use super::fingerprint::engine_fingerprint;
 use super::process::EngineProcess;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -185,6 +186,8 @@ struct Worker {
     deferred: VecDeque<Msg>,
     crashes: Vec<Instant>,
     failure: Option<String>,
+    /// 已经收到 Shutdown：等待握手时收到也立即停止，不再重启或报告失败。
+    stopping: bool,
 }
 
 impl Worker {
@@ -208,6 +211,7 @@ impl Worker {
             deferred: VecDeque::new(),
             crashes: Vec::new(),
             failure: None,
+            stopping: false,
         }
     }
 
@@ -276,11 +280,19 @@ impl Worker {
                 self.boot();
             }
             Msg::Shutdown => {
+                self.stopping = true;
                 if let Some(r) = self.running.take() {
                     finish_job(r.job, SearchOutcome::Cancelled);
                 }
                 for job in self.queue.drain(..) {
                     finish_job(job, SearchOutcome::Cancelled);
+                }
+                // 还没有处理到的提交（例如握手期间延后的）也以取消结束，不让调用方一直等待
+                let rest: Vec<Msg> = self.deferred.drain(..).collect();
+                for msg in rest.into_iter().chain(self.rx.try_iter()) {
+                    if let Msg::Submit(job) = msg {
+                        finish_job(job, SearchOutcome::Cancelled);
+                    }
                 }
                 return false;
             }
@@ -455,6 +467,10 @@ impl Worker {
 
     /// 进程退出或无响应：结束当前任务，必要时自动重启。
     fn on_crash(&mut self, reason: &str) {
+        if self.stopping {
+            self.kill_process();
+            return;
+        }
         if let Some(r) = self.running.take() {
             if r.preempted {
                 self.queue.push(r.job);
@@ -464,15 +480,15 @@ impl Worker {
                 finish_job(r.job, SearchOutcome::Failed(format!("{reason}，本次分析未完成")));
             }
         }
-        self.kill_process();
+        let stderr = self.kill_with_stderr();
         let now = Instant::now();
         self.crashes.retain(|t| now.duration_since(*t) < Duration::from_secs(60));
         self.crashes.push(now);
         if self.crashes.len() <= 2 {
-            warn!("{reason}，自动重启引擎");
+            warn!("{reason}，自动重启引擎{stderr}");
             self.boot();
         } else {
-            let message = format!("{reason}；短时间内多次失败，已停止自动重启，可在界面中手动重启");
+            let message = format!("{reason}；短时间内多次失败，已停止自动重启，可在界面中手动重启{stderr}");
             self.fail(message);
         }
     }
@@ -494,7 +510,26 @@ impl Worker {
         self.generation += 1;
     }
 
-    /// 等待满足条件的引擎输出行；期间收到的其他消息延后处理。
+    /// 结束进程，返回附在原因后面的最近几行错误输出（没有时为空）。
+    fn kill_with_stderr(&mut self) -> String {
+        let lines = self.process.as_mut().map(EngineProcess::kill_and_stderr).unwrap_or_default();
+        self.kill_process();
+        let recent: Vec<&str> = lines.iter().rev().take(5).rev().map(String::as_str).collect();
+        if recent.is_empty() { String::new() } else { format!("；引擎的错误输出：{}", recent.join(" / ")) }
+    }
+
+    /// 启动或初始化失败：服务正在停止时只结束进程，否则报告不可用（附上错误输出）。
+    fn boot_failed(&mut self, reason: String) {
+        if self.stopping {
+            self.kill_process();
+            return;
+        }
+        let stderr = self.kill_with_stderr();
+        self.fail(format!("{reason}{stderr}"));
+    }
+
+    /// 等待满足条件的引擎输出行；期间收到的其他消息延后处理，Shutdown 除外：
+    /// 引擎卡在握手中时（`isready` 最长等 60 秒）退出不应被拖住，收到后立即停止等待。
     fn wait_for(&mut self, timeout: Duration, mut done: impl FnMut(&str) -> bool) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -510,6 +545,11 @@ impl Worker {
                 }
                 Ok(Msg::Eof(g)) if g == self.generation => return Err("引擎进程已退出".into()),
                 Ok(Msg::Line(..) | Msg::Eof(_)) => {}
+                Ok(Msg::Shutdown) => {
+                    self.stopping = true;
+                    self.deferred.push_front(Msg::Shutdown);
+                    return Err("引擎服务正在停止".into());
+                }
                 Ok(other) => self.deferred.push_back(other),
                 Err(RecvTimeoutError::Timeout) => return Err("等待引擎响应超时".into()),
                 Err(RecvTimeoutError::Disconnected) => return Err("引擎服务已停止".into()),
@@ -532,9 +572,7 @@ impl Worker {
         let mut name = String::from("未知引擎");
         let mut options = Vec::new();
         if !self.send("uci") {
-            self.kill_process();
-            self.fail("无法向引擎发送命令".into());
-            return;
+            return self.boot_failed("无法向引擎发送命令".into());
         }
         let handshake = self.wait_for(HANDSHAKE_TIMEOUT, |line| {
             if let Some(n) = line.strip_prefix("id name ") {
@@ -545,18 +583,14 @@ impl Worker {
             line == "uciok"
         });
         if let Err(e) = handshake {
-            self.kill_process();
-            self.fail(format!("引擎握手失败：{e}"));
-            return;
+            return self.boot_failed(format!("引擎握手失败：{e}"));
         }
         self.options = options;
         self.applied.clear();
         self.notes.clear();
         let score_type = self.configure();
         if let Err(e) = self.sync() {
-            self.kill_process();
-            self.fail(format!("引擎初始化失败：{e}"));
-            return;
+            return self.boot_failed(format!("引擎初始化失败：{e}"));
         }
         let nnue = match &self.spec.nnue {
             Some(path) => match std::fs::metadata(path) {
@@ -569,7 +603,8 @@ impl Worker {
             },
             None => "引擎默认".to_string(),
         };
-        let identity = EngineIdentity { name, nnue, score_type, generation: self.generation };
+        let fingerprint = engine_fingerprint(&self.spec.binary, self.spec.nnue.as_deref());
+        let identity = EngineIdentity { name, nnue, score_type, fingerprint, generation: self.generation };
         info!("引擎就绪：{} / {}", identity.name, identity.nnue);
         self.identity = Some(identity.clone());
         self.set_state(EngineState::Ready { identity, applied: self.applied.clone(), notes: self.notes.clone() });
@@ -615,6 +650,8 @@ impl Worker {
         }
         if self.option("MultiPV").is_some() {
             self.set_option("MultiPV", "1".into());
+        } else {
+            self.notes.push("引擎不支持 MultiPV，每次搜索只给出一个候选".into());
         }
         self.current_multipv = 1;
         let rule = self.spec.rules.repetition_rule.clone();
@@ -714,6 +751,7 @@ impl Worker {
         let expect = req.expect.as_ref()?;
         let identity = self.identity.as_ref()?;
         let same = expect.engine == identity.name
+            && expect.fingerprint == identity.fingerprint
             && expect.nnue == identity.nnue
             && expect.score_type == identity.score_type
             && expect.rules == self.spec.rules;
@@ -729,7 +767,9 @@ impl Worker {
             return;
         }
         let limit = if searchmoves.is_empty() { legal.len() } else { searchmoves.len() };
-        let multipv = req.multipv.clamp(1, limit.max(1) as u32);
+        // 不支持 MultiPV 的引擎只给出一个候选：按一个候选判断这一轮是否完整，
+        // 否则每次都等不到请求的候选数，结果总被当作不完整、不能复用
+        let multipv = if self.option("MultiPV").is_some() { req.multipv.clamp(1, limit.max(1) as u32) } else { 1 };
         if multipv != self.current_multipv && self.option("MultiPV").is_some() {
             self.set_option("MultiPV", multipv.to_string());
             self.current_multipv = multipv;
@@ -801,7 +841,7 @@ fn collect_round(
 }
 
 fn unknown_identity() -> EngineIdentity {
-    EngineIdentity { name: "未知引擎".into(), nnue: String::new(), score_type: String::new(), generation: 0 }
+    EngineIdentity { name: "未知引擎".into(), nnue: String::new(), score_type: String::new(), fingerprint: String::new(), generation: 0 }
 }
 
 /// 按请求重放出根局面，同时校验起始局面与历史着法。

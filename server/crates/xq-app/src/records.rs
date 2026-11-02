@@ -43,6 +43,10 @@ pub struct AnalysisConditions {
     pub movetime_ms: u64,
     pub rules: RuleSet,
     pub engine: String,
+    /// 引擎程序与网络文件内容的校验值（见 `EngineIdentity::fingerprint`）：名称与大小相同、内容不同的
+    /// 引擎或网络文件不复用彼此的结果。早期记录没有这一项（读作空），键也就与现在的不同。
+    #[serde(default)]
+    pub fingerprint: String,
     pub nnue: String,
     pub score_type: String,
 }

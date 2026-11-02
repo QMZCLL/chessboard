@@ -503,8 +503,11 @@ export interface ValidateResponse {
 
 export interface EngineIdentity {
   name: string;
+  /** 网络文件的名称与大小 */
   nnue: string;
   score_type: string;
+  /** 引擎程序与网络文件内容的校验值 */
+  fingerprint: string;
   generation: number;
 }
 
