@@ -646,6 +646,11 @@ impl AppService {
     /// 全部学习事件（按编号排列），用于能力画像与检查。
     pub fn learning_events(&self) -> ApiResult<Vec<crate::learning::LearningEvent>> { Ok(self.inner.store.list_events()?) }
 
+    /// 从这盘棋生成练习（见 `exercise`）：只用已经完成的讲解与规则事实，写明新增与跳过的原因。
+    pub fn generate_exercises(&self, r: crate::exercise::ExerciseRequest) -> ApiResult<crate::exercise::ExerciseSummary> {
+        self.inner.generate_exercises(&r.study_id)
+    }
+
     /// 能力画像（见 `profile`）：由全部学习事件统计，推荐的主题要有复习卡片可练。
     pub fn learning_profile(&self) -> ApiResult<crate::profile::LearningProfile> {
         let events = self.inner.store.list_events()?;

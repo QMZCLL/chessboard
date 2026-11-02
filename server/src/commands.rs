@@ -18,6 +18,8 @@ use xq_app::compare::CompareView;
 use xq_app::capture::Snapshot;
 use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
+use xq_app::exercise::ExerciseRequest;
+use xq_app::exercise::ExerciseSummary;
 use xq_app::learning::LearningEvent;
 use xq_app::profile::LearningProfile;
 use xq_app::llm::CoachView;
@@ -235,6 +237,12 @@ pub async fn review_detail(state: State<'_, AppService>, req: ReviewRef) -> ApiR
 pub async fn review_hints(state: State<'_, AppService>, req: ReviewRef) -> ApiResult<Option<ThinkHints>> {
     let s = service(&state);
     blocking(move || s.review_hints(req)).await
+}
+
+#[tauri::command]
+pub async fn generate_exercises(state: State<'_, AppService>, req: ExerciseRequest) -> ApiResult<ExerciseSummary> {
+    let s = service(&state);
+    blocking(move || s.generate_exercises(req)).await
 }
 
 #[tauri::command]

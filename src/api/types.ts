@@ -1,6 +1,6 @@
 // 与后端 serde 结构一一对应的类型。字段名保持后端的 snake_case。
 
-import type { Confidence, Intent, PracticeGoal, ReviewIssue, Stability, StabilityLevel, Theme } from "./generated";
+import type { CardKind, Confidence, Intent, PracticeGoal, ReviewIssue, Stability, StabilityLevel, Theme } from "./generated";
 
 // 由 Rust 结构生成的类型（ts-rs，见 .cargo/config.toml）：新增的共享结构都放在 generated 中，不在这里手写
 export type * from "./generated";
@@ -344,6 +344,8 @@ export interface ReviewAttempt {
   /** 从显示局面到作答的时间（毫秒；只记录，不评分） */
   elapsed_ms: number | null;
   confidence: Confidence | null;
+  /** 找威胁中点出的格子 */
+  marks: Square[];
 }
 
 /** 练习批次的来源：今天到期、需要再练、某个专题 */
@@ -408,6 +410,16 @@ export interface ReviewCard {
   schedule_base: { attempt_at: number | null; stage: number; at: number } | null;
   /** 用户自己确认的问题 */
   issues: ReviewIssue[];
+  /** 题型；早期的卡片都是棋谱中的一着 */
+  kind: CardKind;
+  /** 二选一的两个选项（按坐标排列，不按优劣） */
+  options: ReviewMove[];
+  /** 找威胁的答案：受到威胁的己方棋子与将军的棋子所在的格子 */
+  targets: Square[];
+  /** 当时在棋谱中走的着法（二选一、找更好的着法；这时 answer 是引擎首选） */
+  played: ReviewMove | null;
+  /** 生成的题目从哪里来、为什么入选 */
+  origin: string | null;
 }
 
 export interface ReviewItem {

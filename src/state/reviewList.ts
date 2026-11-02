@@ -1,7 +1,7 @@
 // 复习卡片的分组、计数与文字说明。只依赖数据，便于单独测试。
 // 列表与复习开始前都不显示棋谱中的着法、笔记等可能透露答案的内容。
 // “今天到期”按本机日期计算：下一次复习的时间在今天结束之前（含已经过期的）。
-import type { ArchiveSummary, Confidence, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, PracticeSession, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
+import type { ArchiveSummary, CardKind, Confidence, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, PracticeSession, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
 
 export const STATUS_LABEL: Record<ReviewStatus, string> = { due: "待复习", again: "需要再练", understood: "已理解" };
 
@@ -87,6 +87,24 @@ export const suggestedStatus = (matched: boolean): ReviewStatus => (matched ? "u
 
 export const GOAL_LABEL: Record<PracticeGoal, string> = { recall: "复现棋谱", decision: "局面决策" };
 
+/** 题型 */
+export const KIND_LABEL: Record<CardKind, string> = { move: "棋谱中的一着", threat: "找威胁", choice: "二选一", better: "找更好的着法" };
+
+/** 生成的题目揭示后的结果说明；棋谱中的一着用 attemptText。 */
+export function kindResultText(card: Pick<ReviewCard, "kind" | "targets" | "answer" | "played">, a: Pick<ReviewAttempt, "choice" | "marks" | "matched">): string {
+  if (card.kind === "threat") {
+    if (!a.marks?.length) return `这次没有点出格子，直接查看了答案：受到威胁的有 ${card.targets.length} 处。`;
+    const found = a.marks.filter((m) => card.targets.includes(m)).length;
+    const extra = a.marks.length - found;
+    if (a.matched) return `点出了全部 ${card.targets.length} 处受到威胁的棋子。`;
+    return `找到 ${found} / ${card.targets.length} 处${extra ? `，多点了 ${extra} 处` : ""}。`;
+  }
+  const played = card.played?.notation ?? "";
+  if (!a.choice) return `这次没有选择，直接查看了答案：引擎首选是 ${card.answer.notation}，当时走了 ${played}。`;
+  if (a.choice.notation === card.answer.notation) return `这次选了 ${a.choice.notation}，正是引擎首选（当时走了 ${played}）。`;
+  if (a.choice.notation === played) return `这次选了 ${played}，与当时一样；引擎首选是 ${card.answer.notation}。`;
+  return `这次走了 ${a.choice.notation}；引擎首选是 ${card.answer.notation}，当时走了 ${played}。`;
+}
 
 /** 作答时的把握：只用于以后找出“很有把握却没有选对”的地方，不影响这次的安排 */
 export const CONFIDENCES = ["guess", "unsure", "sure"] as const satisfies readonly Confidence[];
@@ -183,7 +201,8 @@ export type AttemptOutcome = "independent" | "assisted" | "missed" | "revealed" 
 
 /** 与后台安排复习间隔的分法相同（见 schedule::outcome_of）：用了提示之后选对不算独立选对。 */
 export function outcomeOf(a: ReviewAttempt): AttemptOutcome {
-  if (!a.choice) return "revealed";
+  // 没有走子、也没有点出格子（找威胁）：直接看了答案
+  if (!a.choice && !a.marks?.length) return "revealed";
   const correct = a.hints > 0 ? "assisted" : "independent";
   if (a.goal === "recall") return a.matched ? correct : "missed";
   if (a.decision?.state === "pending") return "pending";
@@ -199,10 +218,13 @@ export type Tone = "ok" | "miss" | "neutral";
  * 一次作答的结果标签：练习中的列表、反馈与小结用同样的文字与颜色。复现棋谱按是否与棋谱一致；
  * 局面决策按这次比较是否支持这个选择，比较中与无法评价都是中性的，不当作选对或选错。
  */
-export function outcomeBadge(a: ReviewAttempt): { text: string; tone: Tone } {
+export function outcomeBadge(a: ReviewAttempt, kind: CardKind = "move"): { text: string; tone: Tone } {
   const o = outcomeOf(a);
   if (o === "revealed") return { text: "直接看了答案", tone: "neutral" };
   if (o === "assisted") return { text: "看了提示后选对", tone: "neutral" };
+  // 生成的题目：找威胁看是否全部找到，二选一看是否选了更好的一步（找更好的着法按局面决策的比较）
+  if (kind === "threat") return o === "independent" ? { text: "全部找到", tone: "ok" } : { text: "没有全部找到", tone: "miss" };
+  if (kind === "choice") return o === "independent" ? { text: "选对了", tone: "ok" } : { text: "没有选对", tone: "miss" };
   if (a.goal === "recall") return o === "independent" ? { text: "与棋谱一致", tone: "ok" } : { text: "与棋谱不同", tone: "miss" };
   const DECISION: Record<Exclude<AttemptOutcome, "revealed" | "assisted">, { text: string; tone: Tone }> = {
     independent: { text: "比较支持", tone: "ok" },
@@ -230,7 +252,7 @@ export function practiceAttempts(card: Pick<ReviewCard, "attempts">, practiceId:
 /** 一组练习中一道题的标签：作答过的按这组中的第一次作答 */
 export function entryBadge(session: Pick<PracticeSession, "id" | "skipped">, cardId: string, card: ReviewCard | undefined): { text: string; tone: Tone } {
   const state = entryState(session, cardId, card);
-  if (state === "answered" && card) return outcomeBadge(practiceAttempts(card, session.id)[0]);
+  if (state === "answered" && card) return outcomeBadge(practiceAttempts(card, session.id)[0], card.kind);
   return { text: state === "missing" ? "卡片已删除" : state === "skipped" ? "已跳过" : "未作答", tone: "neutral" };
 }
 

@@ -21,6 +21,8 @@ const props = withDefaults(
     marks?: Square[];
     interactive?: boolean;
     editor?: boolean;
+    /** 点选格子（找威胁）：点击任意格子发出 pick，不走子 */
+    pick?: boolean;
   }>(),
   {
     legalMoves: () => [],
@@ -33,12 +35,14 @@ const props = withDefaults(
     marks: () => [],
     interactive: false,
     editor: false,
+    pick: false,
   },
 );
 
 const emit = defineEmits<{
   (e: "move", mv: Move): void;
   (e: "edit", sq: Square, erase: boolean): void;
+  (e: "pick", sq: Square): void;
 }>();
 
 const CELL = 60;
@@ -112,6 +116,10 @@ defineExpose({ clearSelection });
 function onSquare(sq: Square, ev: MouseEvent) {
   if (props.editor) {
     emit("edit", sq, ev.button === 2);
+    return;
+  }
+  if (props.pick) {
+    emit("pick", sq);
     return;
   }
   if (!props.interactive) return;

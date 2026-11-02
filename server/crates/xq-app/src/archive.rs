@@ -470,6 +470,7 @@ mod tests {
                 hints: 0,
                 elapsed_ms: None,
                 confidence: None,
+                marks: vec![],
             })
             .collect();
         c.reviewed_at = attempts.iter().max().copied();

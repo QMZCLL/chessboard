@@ -5,7 +5,7 @@ import { computed, ref, watch } from "vue";
 import { NButton, NModal, NSpin, NTag, useMessage } from "naive-ui";
 import { api, errorMessage } from "../api/backend";
 import type { GameReport, KeyPosition } from "../api/types";
-import { addToReview } from "../state/review";
+import { addToReview, loadReviews } from "../state/review";
 import { STATUS_LABEL } from "../state/reviewList";
 import { openStudy, selectNode, study, wb } from "../state/workbench";
 
@@ -67,6 +67,24 @@ async function add(studyId: string, k: KeyPosition): Promise<boolean> {
 }
 
 /** 全部加入：整批使用开始时这份报告的会话与关键局面，中途关闭报告、换了棋谱也不改用新的会话 */
+/** 从这盘棋生成练习（找威胁、二选一、找更好的着法），结果写明新增几道与没有出题的原因 */
+const generating = ref(false);
+const generated = ref<string | null>(null);
+async function generate() {
+  const s = report.value?.study_id;
+  if (!s || generating.value) return;
+  generating.value = true;
+  try {
+    const summary = await api.generateExercises(s);
+    generated.value = summary.text;
+    await loadReviews();
+  } catch (e) {
+    message.error(errorMessage(e));
+  } finally {
+    generating.value = false;
+  }
+}
+
 async function addAll() {
   const r = report.value;
   if (!r) return;
@@ -106,6 +124,11 @@ async function addAll() {
       <n-button v-if="notInReview.length > 1" size="small" type="primary" data-testid="report-add-all" @click="addAll">
         把这 {{ notInReview.length }} 处加入复习
       </n-button>
+      <div class="generate">
+        <n-button size="small" secondary :loading="generating" data-testid="report-generate" @click="generate">从这盘棋生成练习</n-button>
+        <span class="muted">按自己一方的着法出找威胁、二选一与找更好的着法；只用已经完成、结果稳定的分析</span>
+      </div>
+      <p v-if="generated" class="generated" data-testid="report-generated">{{ generated }}</p>
 
       <h4>值得保留的判断</h4>
       <ul v-if="report.good_choices.length" class="items" data-testid="report-good">
@@ -132,6 +155,17 @@ async function addAll() {
 </template>
 
 <style scoped>
+.generate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--sp-2);
+}
+.generated {
+  margin: 6px 0 0;
+  line-height: 1.6;
+}
 .report h4 {
   margin: var(--sp-4) 0 var(--sp-2);
   font-size: 14px;

@@ -18,6 +18,7 @@ use xq_core::study::Study;
 
 use crate::decision::Intent;
 use crate::decision::PracticeGoal;
+use crate::review::CardKind;
 use crate::review::ReviewAttempt;
 use crate::review::ReviewCard;
 use crate::schedule;
@@ -111,6 +112,9 @@ pub struct LearningEvent {
     pub stability: Option<StabilityLevel>,
     /// 所属的练习批次。
     pub practice: Option<String>,
+    /// 题型；早期的事件都是棋谱中的一着。
+    #[serde(default)]
+    pub kind: CardKind,
 }
 
 pub fn review_event_id(card: &str, at: i64) -> String { format!("{card}/{at:013}") }
@@ -129,7 +133,11 @@ pub fn from_attempt(card: &ReviewCard, a: &ReviewAttempt) -> LearningEvent {
         fen: card.fen.clone(),
         goal: a.goal,
         outcome: schedule::outcome_of(Some(a)).into(),
-        themes: topics::card_themes(&card.fen, card.answer.mv).into_iter().map(|t| t.theme).collect(),
+        // 找威胁练的就是处理受攻击的棋子；其他题型按答案这一着的规则主题
+        themes: match card.kind {
+            CardKind::Threat => vec![Theme::Threatened],
+            _ => topics::card_themes(&card.fen, card.answer.mv).into_iter().map(|t| t.theme).collect(),
+        },
         issues: card.issues.clone(),
         hints: a.hints,
         intent: a.intent,
@@ -137,6 +145,7 @@ pub fn from_attempt(card: &ReviewCard, a: &ReviewAttempt) -> LearningEvent {
         confidence: a.confidence,
         stability: a.decision.as_ref().and_then(|d| d.stability),
         practice: a.practice.clone(),
+        kind: card.kind,
     }
 }
 
@@ -175,6 +184,7 @@ pub fn from_practice(study: &Study, node: &Node) -> Option<LearningEvent> {
         confidence: None,
         stability: None,
         practice: None,
+        kind: CardKind::Move,
     })
 }
 

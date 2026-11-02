@@ -1666,3 +1666,100 @@ fn every_attempt_leaves_one_learning_event_that_follows_late_results_and_travels
         s.shutdown();
     }
 }
+
+#[test]
+fn exercises_come_from_own_mistakes_in_one_stable_search_and_are_graded_by_kind() {
+    use xq_app::exercise::ExerciseRequest;
+    use xq_app::learning::EventOutcome;
+    use xq_app::review::CardKind;
+
+    // 正被将军（炮隔着马将军），当时走了马五进七：同一次搜索中各个深度都是马五进三更好，差 200 分
+    let rounds: String = (1..=4)
+        .map(|d| {
+            format!(
+                "info depth {d} seldepth {d} multipv 1 score cp 50 nodes 10 time 1 pv e2g3\n\
+                 info depth {d} seldepth {d} multipv 2 score cp -150 nodes 10 time 1 pv e2c3\n"
+            )
+        })
+        .collect();
+    // 之后黑方走将 4 进 1（不出题），红方又走了马七进九：差距很大，但首选在最后一个深度才换过（不稳定，跳过）
+    let shifting: String = (1..=4)
+        .map(|d| {
+            let best = if d < 4 { "c3d5" } else { "c3b5" };
+            format!(
+                "info depth {d} seldepth {d} multipv 1 score cp 50 nodes 10 time 1 pv {best}\n\
+                 info depth {d} seldepth {d} multipv 2 score cp -400 nodes 10 time 1 pv c3a4\n"
+            )
+        })
+        .collect();
+    let script = format!("@go\n{rounds}bestmove e2g3\n@go\nbestmove (none)\n@go\n{shifting}bestmove c3b5\n");
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), &script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest {
+            name: Some("出题".into()),
+            kind: CreateKind::Fen { fen: "3k5/9/4c4/9/9/9/9/4N4/9/4K4 w".into(), side: None },
+            orientation: None,
+            user_side: None,
+        })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let node = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("e2c3"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("讲解完成", |e, v| e == "explanation_updated" && v["node_id"] == node && v["status"] == "detailed");
+    let black = service.apply_move(MoveRequest { study_id: sid.clone(), parent: node, mv: mv("d9d8"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("黑方讲解结束", |e, v| e == "explanation_updated" && v["node_id"] == black && v["record"]["pending"] == false);
+    let later = service.apply_move(MoveRequest { study_id: sid.clone(), parent: black, mv: mv("c3a4"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("第二着的讲解", |e, v| e == "explanation_updated" && v["node_id"] == later && v["status"] == "detailed");
+
+    let summary = service.generate_exercises(ExerciseRequest { study_id: sid.clone() }).unwrap();
+    assert_eq!((summary.threat, summary.choice, summary.better, summary.existing), (1, 1, 1, 0), "{}", summary.text);
+    assert_eq!(summary.skipped, ["第 2 回合马七进九：搜索结果还不够稳定"]);
+    assert_eq!(summary.text, "新增 3 道：找威胁 1、二选一 1、找更好的着法 1；1 处失误没有出唯一答案的题目（第 2 回合马七进九：搜索结果还不够稳定）。");
+    let card = |kind: CardKind| service.list_reviews().unwrap().into_iter().map(|i| i.card).find(|c| c.kind == kind).unwrap();
+    let threat = card(CardKind::Threat);
+    assert_eq!(threat.id, format!("{sid}/0000000001/threat"));
+    assert_eq!(threat.targets.iter().map(|s| s.to_string()).collect::<Vec<_>>(), ["e7"]);
+    let choice = card(CardKind::Choice);
+    assert_eq!(choice.options.iter().map(|o| o.mv.iccs()).collect::<Vec<_>>(), ["e2c3", "e2g3"], "按坐标排列，不按优劣");
+    assert_eq!((choice.answer.mv.iccs(), choice.played.as_ref().map(|m| m.mv.iccs())), ("e2g3".into(), Some("e2c3".into())));
+    assert!(choice.origin.as_deref().unwrap().contains("同一次搜索，高稳定"));
+    let better = card(CardKind::Better);
+    assert_eq!(better.answer.mv.iccs(), "e2g3");
+    // 再次生成不重复加入
+    let again = service.generate_exercises(ExerciseRequest { study_id: sid.clone() }).unwrap();
+    assert_eq!((again.threat + again.choice + again.better, again.existing), (0, 3));
+    // 生成的题目仍能打开原局面
+    assert!(service.list_reviews().unwrap().iter().all(|i| i.source_available));
+
+    // 找威胁：点出将军的炮就对了；多点、少点都不算；不能走子
+    let attempt = |id: &str, choice: Option<&str>, marks: &[&str]| {
+        service.review_attempt(ReviewAttemptRequest {
+            id: id.into(),
+            choice: choice.map(mv),
+            marks: marks.iter().map(|s| xq_core::Square::parse(s).unwrap()).collect(),
+            ..Default::default()
+        })
+    };
+    assert!(attempt(&threat.id, None, &["e7", "e2"]).unwrap().card.attempts.last().map(|a| !a.matched).unwrap());
+    assert!(attempt(&threat.id, None, &["e7"]).unwrap().card.attempts.last().unwrap().matched);
+    assert!(attempt(&threat.id, Some("e2g3"), &[]).is_err(), "找威胁不走子");
+    // 二选一：只能选两个选项之一
+    assert!(attempt(&choice.id, Some("e0f0"), &[]).is_err());
+    let picked = attempt(&choice.id, Some("e2c3"), &[]).unwrap().card;
+    assert!(!picked.attempts.last().unwrap().matched, "选了当时的着法");
+    // 学习事件记下题型与结果；找威胁算“受攻击棋子的处理”
+    let events = service.learning_events().unwrap();
+    let threat_events: Vec<_> = events.iter().filter(|e| e.kind == CardKind::Threat).collect();
+    assert_eq!(threat_events.iter().map(|e| e.outcome).collect::<Vec<_>>(), [EventOutcome::Missed, EventOutcome::Independent]);
+    assert!(threat_events.iter().all(|e| e.themes == [xq_app::topics::Theme::Threatened]));
+    // 学习档案带着生成的题目，导入时同样检查
+    let archive = service.export_archive().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let restored = start_with_mock(other.path(), "", rec.clone());
+    restored.import_archive(ArchiveSource::Text { text: archive }).unwrap();
+    assert_eq!(restored.list_reviews().unwrap().len(), 3);
+    for s in [service, restored] {
+        s.shutdown();
+    }
+}

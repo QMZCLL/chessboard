@@ -21,7 +21,7 @@ import {
   startPractice,
   starredNotInReview,
 } from "../state/review";
-import { dueText, ISSUE_LABEL, positionLabel, recommendation, STATUS_LABEL, topics, whenText, type TopicKey } from "../state/reviewList";
+import { dueText, ISSUE_LABEL, KIND_LABEL, positionLabel, recommendation, STATUS_LABEL, topics, whenText, type TopicKey } from "../state/reviewList";
 import { study, wb } from "../state/workbench";
 
 const message = useMessage();
@@ -112,6 +112,7 @@ onMounted(loadReviews);
             >
               <span class="item-top">
                 <span class="item-name">{{ item.study_name }}</span>
+                <n-tag v-if="item.card.kind !== 'move'" size="tiny" :bordered="false" data-testid="card-kind">{{ KIND_LABEL[item.card.kind] }}</n-tag>
                 <n-tag size="tiny" :type="STATUS_TYPE[item.card.status]" :bordered="false">{{ STATUS_LABEL[item.card.status] }}</n-tag>
               </span>
               <span class="item-sub" :title="whenText(item.card.reviewed_at)">{{ positionLabel(item.card) }} · {{ dueText(item.card, review.clock) }}</span>

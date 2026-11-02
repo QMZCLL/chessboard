@@ -1,0 +1,11 @@
+# 正被将军（炮隔着马将军），当时走了马五进七：各个深度都是马五进三更好，差 200 分（同一次搜索，高稳定）
+@go
+info depth 1 seldepth 1 multipv 1 score cp 50 nodes 10 time 1 pv e2g3
+info depth 1 seldepth 1 multipv 2 score cp -150 nodes 10 time 1 pv e2c3
+info depth 2 seldepth 2 multipv 1 score cp 50 nodes 20 time 2 pv e2g3
+info depth 2 seldepth 2 multipv 2 score cp -150 nodes 20 time 2 pv e2c3
+info depth 3 seldepth 3 multipv 1 score cp 50 nodes 30 time 3 pv e2g3
+info depth 3 seldepth 3 multipv 2 score cp -150 nodes 30 time 3 pv e2c3
+info depth 4 seldepth 4 multipv 1 score cp 50 nodes 40 time 4 pv e2g3
+info depth 4 seldepth 4 multipv 2 score cp -150 nodes 40 time 4 pv e2c3
+bestmove e2g3

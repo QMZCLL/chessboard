@@ -13,8 +13,10 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 use serde::Serialize;
+use ts_rs::TS;
 use xq_core::Color;
 use xq_core::Move;
+use xq_core::Square;
 use xq_core::explain::ExplainContext;
 use xq_core::explain::ExplainLevel;
 use xq_core::explain::Verdict;
@@ -143,6 +145,54 @@ pub struct ReviewAttempt {
     /// 作答时选择的信心（可以不选）。
     #[serde(default)]
     pub confidence: Option<Confidence>,
+    /// 找威胁中点出的格子。
+    #[serde(default)]
+    pub marks: Vec<Square>,
+}
+
+/// 卡片的题型。棋谱中的一着之外的题目由自己的棋局生成（见 `exercise`）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CardKind {
+    /// 棋谱中的一着：复现棋谱或局面决策。
+    #[default]
+    Move,
+    /// 找威胁：在棋盘上点出受到威胁的己方棋子（被将军时还有将军的棋子），不走子。
+    Threat,
+    /// 二选一：当时的着法与引擎首选，判断哪一步更好。
+    Choice,
+    /// 找更好的着法：当时的着法明显不如引擎首选，在这个局面中作出自己的选择（局面决策）。
+    Better,
+}
+
+impl CardKind {
+    /// 生成的题目在卡片编号后的后缀；棋谱中的一着没有后缀。
+    pub fn suffix(self) -> Option<&'static str> {
+        match self {
+            CardKind::Move => None,
+            CardKind::Threat => Some("threat"),
+            CardKind::Choice => Some("choice"),
+            CardKind::Better => Some("better"),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CardKind::Move => "棋谱中的一着",
+            CardKind::Threat => "找威胁",
+            CardKind::Choice => "二选一",
+            CardKind::Better => "找更好的着法",
+        }
+    }
+}
+
+/// 某个题型的卡片编号：棋谱中的一着为“会话/节点”，生成的题目再加上题型。
+pub fn kind_card_id(study_id: &str, node_id: NodeId, kind: CardKind) -> String {
+    match kind.suffix() {
+        Some(s) => format!("{}/{s}", card_id(study_id, node_id)),
+        None => card_id(study_id, node_id),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,6 +241,21 @@ pub struct ReviewCard {
     /// 用户自己确认的问题（见 `topics`）。
     #[serde(default)]
     pub issues: Vec<Issue>,
+    /// 题型；早期的卡片都是棋谱中的一着。
+    #[serde(default)]
+    pub kind: CardKind,
+    /// 二选一的两个选项（按坐标排列，不按优劣）。
+    #[serde(default)]
+    pub options: Vec<ReviewMove>,
+    /// 找威胁的答案：受到威胁的己方棋子与将军的棋子所在的格子。
+    #[serde(default)]
+    pub targets: Vec<Square>,
+    /// 当时在棋谱中走的着法（二选一、找更好的着法；这时 `answer` 是引擎首选）。
+    #[serde(default)]
+    pub played: Option<ReviewMove>,
+    /// 生成的题目从哪里来、为什么入选。
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 /// 保留的复习次数。
@@ -261,6 +326,9 @@ pub struct ReviewAttemptRequest {
     pub elapsed_ms: Option<u64>,
     #[serde(default)]
     pub confidence: Option<Confidence>,
+    /// 找威胁中点出的格子；为空且没有走子时表示直接看答案。
+    #[serde(default)]
+    pub marks: Vec<Square>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -278,7 +346,7 @@ pub fn card_id(study_id: &str, node_id: NodeId) -> String { format!("{study_id}/
 /// 导入的卡片是否成立。卡片是独立的快照，复习时直接使用其中的局面、棋谱着法与历次选择，
 /// 编号决定它与原局面的关联以及合并时对应哪张卡片。
 pub(crate) fn check_card(card: &ReviewCard, limits: &StudyLimits) -> Result<(), String> {
-    if !study::valid_id(&card.study_id) || card.id != card_id(&card.study_id, card.node_id) {
+    if !study::valid_id(&card.study_id) || card.id != kind_card_id(&card.study_id, card.node_id, card.kind) {
         return Err("卡片编号与所属的会话、节点不一致".into());
     }
     let pos = fen::parse_position(&card.fen).map_err(|e| format!("局面无法读取：{e}"))?;
@@ -303,8 +371,18 @@ pub(crate) fn check_card(card: &ReviewCard, limits: &StudyLimits) -> Result<(), 
 /// 回合数：根局面黑先时第一着就是第一回合的黑方。
 pub(crate) fn turn_of(ply: u32, root_side: Color) -> u32 { (ply.saturating_sub(1) + u32::from(root_side == Color::Black)) / 2 + 1 }
 
+/// 找威胁的答案（排好序，用来与点出的格子比较）。
+fn threat_answer(card: &ReviewCard) -> Vec<Square> {
+    let mut t = card.targets.clone();
+    t.sort();
+    t.dedup();
+    t
+}
+
+/// 原会话中的这一着仍在（生成的题目按当时走的着法对照）。
 fn source_available(study: Option<&Study>, card: &ReviewCard) -> bool {
-    study.and_then(|s| s.nodes.get(&card.node_id)).is_some_and(|n| n.mv == Some(card.answer.mv))
+    let played = card.played.as_ref().map_or(card.answer.mv, |m| m.mv);
+    study.and_then(|s| s.nodes.get(&card.node_id)).is_some_and(|n| n.mv == Some(played))
 }
 
 impl Inner {
@@ -344,7 +422,7 @@ impl Inner {
         })
     }
 
-    fn build_card(&self, study: &Study, node_id: NodeId) -> ApiResult<ReviewCard> {
+    pub(crate) fn build_card(&self, study: &Study, node_id: NodeId) -> ApiResult<ReviewCard> {
         let node = study.node(node_id)?;
         let (Some(answer), Some(parent)) = (node.mv, node.parent) else {
             return Err("起始局面和缺口没有着法，不能加入复习".into());
@@ -400,6 +478,11 @@ impl Inner {
             stage: 0,
             schedule_base: None,
             issues: Vec::new(),
+            kind: CardKind::Move,
+            options: Vec::new(),
+            targets: Vec::new(),
+            played: None,
+            origin: None,
         })
     }
 
@@ -494,9 +577,30 @@ impl Inner {
             Some(mv) => return Err(format!("{} 在这个局面中不合规则", mv.iccs()).into()),
             None => None,
         };
+        // 题型决定怎样判断：找威胁比较点出的格子；二选一只能选两个选项之一；找更好的着法总是局面决策
+        let mut marks: Vec<Square> = Vec::new();
+        let goal = match card.kind {
+            CardKind::Move => req.goal,
+            CardKind::Threat => {
+                if choice.is_some() {
+                    return Err("找威胁不走子：在棋盘上点出受到威胁的棋子".into());
+                }
+                marks = req.marks.clone();
+                marks.sort();
+                marks.dedup();
+                PracticeGoal::Recall
+            }
+            CardKind::Choice => {
+                if choice.as_ref().is_some_and(|m| !card.options.iter().any(|o| o.mv == m.mv)) {
+                    return Err("请在两个选项中选一个".into());
+                }
+                PracticeGoal::Recall
+            }
+            CardKind::Better => PracticeGoal::Decision,
+        };
         let ctx = ExplainContext { history_complete: card.history_complete, repetition_count: 1 };
         let reflection = choice.as_ref().map(|m| decision::reflect(&pos, m.mv, req.intent, &ctx));
-        let deciding = req.goal == PracticeGoal::Decision && choice.is_some();
+        let deciding = goal == PracticeGoal::Decision && choice.is_some();
         let now = now_ms();
         let mut at = now;
         let request = req.request.clone();
@@ -512,7 +616,10 @@ impl Inner {
             if req.practice.is_some() {
                 crate::practice::attempt_allowed(session, id)?;
             }
-            let matched = choice.as_ref().is_some_and(|m| m.mv == c.answer.mv);
+            let matched = match c.kind {
+                CardKind::Threat => !marks.is_empty() && marks == threat_answer(c),
+                _ => choice.as_ref().is_some_and(|m| m.mv == c.answer.mv),
+            };
             // 同一毫秒内的两次复习也要能区分：比较结果按时间写回
             at = c.attempts.last().map_or(now, |a| now.max(a.at + 1));
             let decision = deciding.then(decision::pending);
@@ -520,7 +627,7 @@ impl Inner {
                 at,
                 choice: choice.clone(),
                 matched,
-                goal: req.goal,
+                goal,
                 intent: req.intent,
                 reflection,
                 decision,
@@ -529,6 +636,7 @@ impl Inner {
                 hints: req.hints.min(3),
                 elapsed_ms: req.elapsed_ms,
                 confidence: req.confidence,
+                marks: marks.clone(),
             });
             if c.attempts.len() > MAX_ATTEMPTS {
                 c.attempts.drain(..c.attempts.len() - MAX_ATTEMPTS);

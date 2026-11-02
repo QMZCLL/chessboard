@@ -55,6 +55,8 @@ export const review = reactive({
   hintData: null as T.ThinkHints | null,
   /** 作答时选择的信心（可以不选） */
   confidence: null as T.Confidence | null,
+  /** 找威胁中点出的格子 */
+  marks: [] as T.Square[],
   /** 这次作答开始的时刻：显示局面（或再试一次）时记下，作答时算出耗时，只记录不评分 */
   shownAt: Date.now(),
   /** 这一次复习的时间：结果从当前卡片的复习记录中按它取出，局面决策的比较完成后随卡片更新 */
@@ -275,7 +277,7 @@ export async function showCard(id: string, restore: string | null = null) {
 }
 
 /** 在棋盘上重新选择；choice 为空表示不走子、直接看答案 */
-export async function submitChoice(choice: T.Move | null) {
+export async function submitChoice(choice: T.Move | null, revealOnly = false) {
   const current = review.current;
   if (!current || review.phase !== "choose" || review.busy) return;
   const v = view;
@@ -287,7 +289,9 @@ export async function submitChoice(choice: T.Move | null) {
   try {
     const { goal, intent } = review;
     // 耗时只记录、不评分；离开很久的作答记为一小时
-    const extra = { hints: review.hints, elapsed_ms: Math.min(Date.now() - review.shownAt, 3_600_000), confidence: review.confidence };
+    // 找威胁提交点出的格子；直接看答案（choice 为空且没有点出格子）时为空
+    const marks = choice === null && current.card.kind === "threat" && !revealOnly ? [...review.marks] : [];
+    const extra = { hints: review.hints, elapsed_ms: Math.min(Date.now() - review.shownAt, 3_600_000), confidence: review.confidence, marks };
     const send = () => queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request, extra));
     // 这组练习的换题还在写回时，等写回之后再提交：后台只把当前题目的作答记入这组练习
     const item = await (practice ? queued(`practice:${practice}`, send) : send());
@@ -310,9 +314,15 @@ function resetAttempt() {
   review.hints = 0;
   review.hintData = null;
   review.confidence = null;
+  review.marks = [];
   review.shownAt = Date.now();
 }
 
+/** 找威胁：点出或取消一个格子 */
+export function toggleMark(sq: T.Square) {
+  if (review.phase !== "choose" || review.busy) return;
+  review.marks = review.marks.includes(sq) ? review.marks.filter((m) => m !== sq) : [...review.marks, sq];
+}
 
 /** 再试一次：回到只显示局面 */
 export function retryCard() {

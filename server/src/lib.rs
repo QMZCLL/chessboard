@@ -100,6 +100,7 @@ pub fn run() {
             commands::review_hints,
             commands::learning_events,
             commands::learning_profile,
+            commands::generate_exercises,
             commands::review_attempt,
             commands::update_review,
             commands::delete_review,

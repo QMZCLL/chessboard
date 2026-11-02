@@ -53,7 +53,8 @@ pub enum Outcome {
 }
 
 pub fn outcome_of(attempt: Option<&ReviewAttempt>) -> Outcome {
-    let Some(a) = attempt.filter(|a| a.choice.is_some()) else { return Outcome::Revealed };
+    // 没有走子、也没有点出格子（找威胁）：直接看了答案
+    let Some(a) = attempt.filter(|a| a.choice.is_some() || !a.marks.is_empty()) else { return Outcome::Revealed };
     let correct = if a.hints > 0 { Outcome::Assisted } else { Outcome::Independent };
     match a.goal {
         PracticeGoal::Recall if a.matched => correct,
@@ -146,6 +147,7 @@ mod tests {
             hints: 0,
             elapsed_ms: None,
             confidence: None,
+            marks: vec![],
         }
     }
 

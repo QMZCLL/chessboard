@@ -9,6 +9,7 @@ pub mod capture;
 mod capture_glue;
 pub mod compare;
 pub mod config;
+pub mod exercise;
 pub mod decision;
 pub mod engine;
 pub mod events;

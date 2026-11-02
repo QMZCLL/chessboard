@@ -375,6 +375,7 @@ mod tests {
             confidence: None,
             stability: None,
             practice: None,
+            kind: crate::review::CardKind::Move,
         }
     }
 
