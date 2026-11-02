@@ -313,6 +313,56 @@ impl Store {
         })
     }
 
+    /// 导入：在同一写事务中写入本机还没有的会话及其讲解，再写入或合并卡片；任何一步失败时什么都不写入。
+    /// 本机已有同一编号的会话时保留本机的版本（连同它的讲解）。`merge(本机, 导入)` 返回合并后的卡片，
+    /// 不需要改动时返回 `None`；写回时修改次数加一。返回每张卡片写入后的内容。
+    /// 本机的卡片无法解析时按不存在处理（列表中已经读不到它），由导入的卡片代替。
+    pub fn import_batch(
+        &self, studies: &[(Study, Vec<ExplanationRecord>)], cards: &[ReviewCard],
+        merge: impl Fn(&ReviewCard, &ReviewCard) -> Option<ReviewCard>,
+    ) -> Result<Vec<ReviewCard>, StoreError> {
+        let tx = self.db.begin_write()?;
+        let stored = {
+            let mut saved = tx.open_table(STUDIES)?;
+            let mut explanations = tx.open_table(EXPLANATIONS)?;
+            for (study, records) in studies {
+                if saved.get(study.id.as_str())?.is_some() {
+                    continue;
+                }
+                saved.insert(study.id.as_str(), serde_json::to_string(study)?.as_str())?;
+                for r in records {
+                    explanations.insert(explanation_key(&r.study_id, r.node_id).as_str(), serde_json::to_string(r)?.as_str())?;
+                }
+            }
+            let mut reviews = tx.open_table(REVIEWS)?;
+            let mut out = Vec::with_capacity(cards.len());
+            for card in cards {
+                let local = match reviews.get(card.id.as_str())?.map(|v| serde_json::from_str::<ReviewCard>(v.value())) {
+                    Some(Ok(c)) => Some(c),
+                    Some(Err(e)) => {
+                        tracing::warn!("本机的卡片 {} 无法解析，由导入的卡片代替：{e}", card.id);
+                        None
+                    }
+                    None => None,
+                };
+                let write = match &local {
+                    None => Some(card.clone()),
+                    Some(l) => merge(l, card).map(|m| ReviewCard { revision: l.revision + 1, ..m }),
+                };
+                match write {
+                    Some(c) => {
+                        reviews.insert(c.id.as_str(), serde_json::to_string(&c)?.as_str())?;
+                        out.push(c);
+                    }
+                    None => out.extend(local),
+                }
+            }
+            out
+        };
+        tx.commit()?;
+        Ok(stored)
+    }
+
     pub fn load_review(&self, id: &str) -> Result<Option<ReviewCard>, StoreError> { self.get(REVIEWS, id) }
 
     pub fn list_reviews(&self) -> Result<Vec<ReviewCard>, StoreError> { self.list(REVIEWS, "复习卡片") }

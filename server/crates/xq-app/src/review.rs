@@ -23,8 +23,11 @@ use xq_core::fen;
 use xq_core::notation;
 use xq_core::rules;
 use xq_core::study::NodeId;
+use xq_core::study;
 use xq_core::study::Orientation;
 use xq_core::study::Study;
+use xq_core::study::StudyLimits;
+use xq_core::validate;
 
 use crate::decision;
 use crate::decision::DecisionFeedback;
@@ -250,6 +253,31 @@ pub struct ReviewUpdateRequest {
 }
 
 pub fn card_id(study_id: &str, node_id: NodeId) -> String { format!("{study_id}/{node_id:010}") }
+
+/// 导入的卡片是否成立。卡片是独立的快照，复习时直接使用其中的局面、棋谱着法与历次选择，
+/// 编号决定它与原局面的关联以及合并时对应哪张卡片。
+pub(crate) fn check_card(card: &ReviewCard, limits: &StudyLimits) -> Result<(), String> {
+    if !study::valid_id(&card.study_id) || card.id != card_id(&card.study_id, card.node_id) {
+        return Err("卡片编号与所属的会话、节点不一致".into());
+    }
+    let pos = fen::parse_position(&card.fen).map_err(|e| format!("局面无法读取：{e}"))?;
+    if !validate::validate_position(&pos).ok || pos.side != card.side {
+        return Err("局面不成立，或行棋方与局面不一致".into());
+    }
+    if !rules::is_legal(&pos, card.answer.mv) {
+        return Err(format!("棋谱着法 {} 不合规则", card.answer.mv));
+    }
+    if let Some(m) = card.attempts.iter().filter_map(|a| a.choice.as_ref()).find(|m| !rules::is_legal(&pos, m.mv)) {
+        return Err(format!("复习记录中的选择 {} 不合规则", m.mv));
+    }
+    if card.attempts.len() > MAX_ATTEMPTS || card.history.len() > limits.max_nodes {
+        return Err("复习记录或此前的着法过多".into());
+    }
+    if card.study_name.chars().count() > limits.max_label || card.note.chars().count() > limits.max_note {
+        return Err("会话名称或笔记过长".into());
+    }
+    Ok(())
+}
 
 /// 回合数：根局面黑先时第一着就是第一回合的黑方。
 pub(crate) fn turn_of(ply: u32, root_side: Color) -> u32 { (ply.saturating_sub(1) + u32::from(root_side == Color::Black)) / 2 + 1 }

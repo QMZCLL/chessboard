@@ -1427,3 +1427,68 @@ fn a_practice_session_keeps_its_order_and_position_across_restarts_and_records_e
     assert_eq!(service.current_practice().unwrap(), None);
     service.shutdown();
 }
+
+#[test]
+fn imports_that_do_not_hold_together_are_rejected_without_writing_anything() {
+    let rec = Arc::new(Recorder::default());
+    let home = tempfile::tempdir().unwrap();
+    let service = start_with_mock(home.path(), "", rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest { name: Some("完整性".into()), kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    let second = service.apply_move(MoveRequest { study_id: sid.clone(), parent: first, mv: mv("h9g7"), variation: false }).unwrap().node_id.unwrap();
+    service.add_review(NodeRef { study_id: sid.clone(), node_id: second }).unwrap();
+    let exported: Value = serde_json::from_str(&service.export_study(&sid).unwrap()).unwrap();
+    let count = |s: &AppService| (s.list_studies().unwrap().len(), s.list_reviews().unwrap().len());
+
+    // 单个学习数据：两个节点互为父节点（不能从起始局面到达），或编号与下一个编号冲突
+    let tamper = |f: &dyn Fn(&mut Value)| {
+        let mut v = exported.clone();
+        f(&mut v["study"]);
+        service.import_text(&v.to_string(), None).map(|_| ()).unwrap_err().message
+    };
+    let cycle = tamper(&|s| {
+        s["nodes"]["0"]["children"] = serde_json::json!([]);
+        s["nodes"]["1"]["parent"] = serde_json::json!(2);
+        s["nodes"]["1"]["children"] = serde_json::json!([2]);
+        s["nodes"]["2"]["children"] = serde_json::json!([1]);
+    });
+    assert!(cycle.contains("不能从起始局面到达"), "{cycle}");
+    assert!(tamper(&|s| s["next_id"] = serde_json::json!(1)).contains("编号不小于下一个编号"));
+    assert!(tamper(&|s| s["nodes"]["2"]["mv"] = serde_json::json!("b9c7")).contains("走这一着之后"));
+    assert_eq!(count(&service), (1, 1), "不成立的学习数据没有写入");
+    service.import_text(&exported.to_string(), Some("副本".into())).unwrap();
+    assert_eq!(count(&service).0, 2, "成立的学习数据照常导入");
+
+    // 学习档案：一个会话或一张卡片不成立时，预览与导入都给出原因，什么都不写入
+    let archive: Value = serde_json::from_str(&service.export_archive().unwrap()).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let fresh = start_with_mock(other.path(), "", rec.clone());
+    let broken = |f: &dyn Fn(&mut Value)| {
+        let mut v = archive.clone();
+        f(&mut v);
+        let source = || ArchiveSource::Text { text: v.to_string() };
+        let preview = fresh.preview_archive(source()).unwrap_err().message;
+        let import = fresh.import_archive(source()).unwrap_err().message;
+        assert_eq!(preview, import);
+        assert_eq!(count(&fresh), (0, 0), "{import}");
+        import
+    };
+    let bad_study = broken(&|v| v["studies"][1]["study"]["nodes"]["2"]["parent"] = serde_json::json!(9));
+    assert!(bad_study.contains("没有导入任何内容") && bad_study.contains("父节点"), "{bad_study}");
+    assert!(broken(&|v| v["studies"][0]["study"]["id"] = serde_json::json!("a/b")).contains("会话编号"));
+    assert!(broken(&|v| v["reviews"][0]["answer"]["mv"] = serde_json::json!("a0a5")).contains("棋谱着法"));
+    assert!(broken(&|v| v["reviews"][0]["id"] = serde_json::json!("别的卡片")).contains("编号"));
+    let dup = broken(&|v| {
+        let first = v["studies"][0].clone();
+        v["studies"].as_array_mut().unwrap().push(first);
+    });
+    assert!(dup.contains("出现了不止一次"), "{dup}");
+    fresh.import_archive(ArchiveSource::Text { text: archive.to_string() }).unwrap();
+    assert_eq!(count(&fresh), (2, 1), "成立的档案照常导入");
+    for s in [service, fresh] {
+        s.shutdown();
+    }
+}

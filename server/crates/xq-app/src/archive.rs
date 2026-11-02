@@ -8,6 +8,8 @@
 //! - 同一次复习按它自己的比较结果合并（已完成的优先于进行中的），不依赖整张卡片的更新时间：
 //!   比较结果写回时不改卡片的更新时间，同一时刻导出的两份档案可能只差在比较是否完成；
 //! - 导入后仍在进行中的比较（导出时还没有完成）在本机重新排队；
+//! - 预览与导入前先检查档案是否成立（会话的棋谱树、卡片的局面与着法、数量与大小的上限），
+//!   有不成立的内容时不导入任何内容；导入在同一个数据库写事务中完成，中途失败时不会留下导入了一半的数据；
 //! - 每天第一次启动时自动备份一份（日期按 UTC），保留的份数见设置；也可以立即备份（覆盖当天的一份）。
 
 use std::collections::BTreeMap;
@@ -20,6 +22,7 @@ use serde::Serialize;
 use tracing::info;
 use tracing::warn;
 use xq_core::study::Study;
+use xq_core::study::StudyLimits;
 
 use crate::records::ExplanationRecord;
 use crate::decision;
@@ -28,6 +31,7 @@ use crate::review::MAX_ATTEMPTS;
 use crate::review::ReviewAttempt;
 use crate::review::ReviewCard;
 use crate::review::ReviewStatus;
+use crate::review::check_card;
 use crate::schedule;
 use crate::service::APP_VERSION;
 use crate::service::ApiError;
@@ -39,6 +43,12 @@ use crate::service::now_ms;
 const ARCHIVE_FORMAT: &str = "xqlink-archive";
 const ARCHIVE_VERSION: u32 = 1;
 const BACKUP_PREFIX: &str = "xqlink-archive-";
+/// 档案文件的大小上限（自动备份也是一份档案）。
+pub(crate) const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_STUDIES: usize = 5_000;
+const MAX_CARDS: usize = 100_000;
+/// 不成立的内容最多列出几处。
+const MAX_PROBLEMS: usize = 5;
 
 #[derive(Serialize, Deserialize)]
 struct ArchiveStudy {
@@ -154,6 +164,9 @@ fn backup_name(now: i64) -> String {
 }
 
 fn parse_archive(text: &str) -> ApiResult<Archive> {
+    if text.len() as u64 > MAX_ARCHIVE_BYTES {
+        return Err(too_large("学习档案", MAX_ARCHIVE_BYTES));
+    }
     let archive: Archive = serde_json::from_str(text.trim()).map_err(|e| format!("学习档案无法解析：{e}"))?;
     if archive.format != ARCHIVE_FORMAT {
         return Err("不是本应用导出的学习档案".into());
@@ -161,7 +174,55 @@ fn parse_archive(text: &str) -> ApiResult<Archive> {
     if archive.version > ARCHIVE_VERSION {
         return Err("学习档案来自更新的版本，请升级应用后再导入".into());
     }
+    check_archive(&archive)?;
     Ok(archive)
+}
+
+pub(crate) fn too_large(what: &str, limit: u64) -> ApiError { format!("{what}超过 {} MB，不能导入", limit / 1024 / 1024).into() }
+
+/// 名称只取开头，说明问题时不至于过长。
+pub(crate) fn short(name: &str) -> String {
+    let mut s: String = name.chars().take(24).collect();
+    if name.chars().count() > 24 {
+        s.push('…');
+    }
+    s
+}
+
+/// 档案中的每个会话、每张卡片都要成立；有不成立的内容时整份不导入，列出前几处。
+fn check_archive(archive: &Archive) -> ApiResult<()> {
+    if archive.studies.len() > MAX_STUDIES || archive.reviews.len() > MAX_CARDS {
+        return Err(format!("学习档案中的会话（上限 {MAX_STUDIES}）或卡片（上限 {MAX_CARDS}）过多，不能导入").into());
+    }
+    let limits = StudyLimits::default();
+    let mut problems = Vec::new();
+    let mut ids = HashSet::new();
+    for ArchiveStudy { study, explanations } in &archive.studies {
+        let name = short(&study.name);
+        if !ids.insert(study.id.as_str()) {
+            problems.push(format!("会话“{name}”出现了不止一次"));
+        } else if let Err(issues) = study.check_integrity(&limits) {
+            let list: Vec<String> = issues.iter().map(ToString::to_string).collect();
+            problems.push(format!("会话“{name}”：{}", list.join("；")));
+        } else if explanations.len() > study.nodes.len() {
+            problems.push(format!("会话“{name}”的讲解记录多于节点"));
+        }
+    }
+    let mut cards = HashSet::new();
+    for card in &archive.reviews {
+        let name = short(&card.study_name);
+        if !cards.insert(card.id.as_str()) {
+            problems.push(format!("“{name}”第 {} 回合的卡片出现了不止一次", card.turn));
+        } else if let Err(e) = check_card(card, &limits) {
+            problems.push(format!("“{name}”第 {} 回合的卡片：{e}", card.turn));
+        }
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    let more = if problems.len() > MAX_PROBLEMS { format!("；另有 {} 处", problems.len() - MAX_PROBLEMS) } else { String::new() };
+    problems.truncate(MAX_PROBLEMS);
+    Err(format!("学习档案中有不成立的内容，没有导入任何内容：{}{more}", problems.join("；")).into())
 }
 
 impl Inner {
@@ -192,6 +253,10 @@ impl Inner {
         match source {
             ArchiveSource::Text { text } => parse_archive(&text),
             ArchiveSource::File { path } => {
+                let size = std::fs::metadata(&path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?.len();
+                if size > MAX_ARCHIVE_BYTES {
+                    return Err(too_large("学习档案", MAX_ARCHIVE_BYTES));
+                }
                 let text = std::fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
                 parse_archive(&text)
             }
@@ -224,36 +289,33 @@ impl Inner {
         Ok(summary)
     }
 
+    /// 档案已经检查过（见 `parse_archive`）：会话、讲解与卡片在同一个写事务中写入。
     fn import(&self, archive: Archive) -> ApiResult<ArchiveSummary> {
         let summary = self.plan(&archive)?;
-        for ArchiveStudy { study, explanations } in archive.studies {
-            if self.store.load_study(&study.id)?.is_some() {
-                continue;
-            }
-            let mut study = study;
-            study.live_node = None;
-            self.store.save_study(&study)?;
-            for mut record in explanations {
-                if record.study_id == study.id && study.nodes.contains_key(&record.node_id) {
-                    record.pending = false;
-                    self.store.save_explanation(&record)?;
-                }
-            }
-        }
+        let studies: Vec<(Study, Vec<ExplanationRecord>)> = archive
+            .studies
+            .into_iter()
+            .map(|ArchiveStudy { mut study, explanations }| {
+                study.live_node = None;
+                let records = explanations
+                    .into_iter()
+                    .filter(|r| r.study_id == study.id && study.nodes.contains_key(&r.node_id))
+                    .map(|r| ExplanationRecord { pending: false, ..r })
+                    .collect();
+                (study, records)
+            })
+            .collect();
         let intervals = self.config_snapshot().review.intervals_days;
-        for card in archive.reviews {
-            let mut stored = self.store.insert_review(&card)?;
-            if !same_card(&stored, &card)
-                && let Some(merged) = self.store.update_review(&card.id, |c| *c = merge_cards(c, &card, &intervals))?
-            {
-                stored = merged;
-            }
-            // 导出时还没有完成的比较不会在本机继续：重新排队
-            for a in &stored.attempts {
+        let stored = self.store.import_batch(&studies, &archive.reviews, |local, incoming| {
+            (!same_card(local, incoming)).then(|| merge_cards(local, incoming, &intervals))
+        })?;
+        // 导出时还没有完成的比较不会在本机继续：重新排队
+        for card in &stored {
+            for a in &card.attempts {
                 if let (Some(choice), Some(d)) = (&a.choice, &a.decision)
                     && d.state == DecisionState::Pending
                 {
-                    self.review_decide(&stored, a.at, choice.mv);
+                    self.review_decide(card, a.at, choice.mv);
                 }
             }
         }

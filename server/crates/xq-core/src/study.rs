@@ -5,6 +5,7 @@
 //! 它没有走法，此前历史视为未知。
 
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -136,6 +137,8 @@ pub enum StudyError {
     NoSuchNode(NodeId),
     Illegal(IllegalMove),
     CannotDeleteRoot,
+    /// 保存的数据不成立（例如父节点成环）；导入时已经检查（见 `check_integrity`），这里防止损坏的记录让遍历不能结束。
+    Broken(String),
 }
 
 impl std::fmt::Display for StudyError {
@@ -148,6 +151,7 @@ impl std::fmt::Display for StudyError {
             StudyError::NoSuchNode(id) => write!(f, "棋谱中没有节点 {id}"),
             StudyError::Illegal(i) => write!(f, "{}", i.message),
             StudyError::CannotDeleteRoot => write!(f, "不能删除起始局面"),
+            StudyError::Broken(reason) => write!(f, "棋谱数据不成立：{reason}"),
         }
     }
 }
@@ -312,6 +316,9 @@ impl Study {
         let mut path = vec![id];
         let mut cur = self.node(id)?;
         while let Some(parent) = cur.parent {
+            if path.len() > self.nodes.len() {
+                return Err(StudyError::Broken(format!("节点 {id} 的父节点成环")));
+            }
             path.push(parent);
             cur = self.node(parent)?;
         }
@@ -353,6 +360,10 @@ impl Study {
         let mut line = vec![ROOT];
         let mut cur = ROOT;
         while let Some(next) = self.nodes.get(&cur).and_then(|n| n.children.first().copied()) {
+            // 损坏的数据中子节点成环时也会结束
+            if line.len() > self.nodes.len() {
+                break;
+            }
             line.push(next);
             cur = next;
         }
@@ -422,6 +433,192 @@ impl Study {
     }
 
     pub fn move_nodes(&self) -> impl Iterator<Item = &Node> { self.nodes.values().filter(|n| n.is_move()) }
+
+    /// 检查导入的会话是否成立。本模块生成的会话总是成立；导入的文件可能被改动或损坏：
+    /// 父子关系不一致、有环或不能从起始局面到达的节点会让沿父节点向上的遍历（`path`）不能结束，
+    /// 编号不小于 `next_id` 会让之后的走子覆盖已有节点，局面与走法不一致会让讲解与引擎分析基于错误的局面。
+    /// 发现问题时最多返回 `MAX_ISSUES` 条。
+    pub fn check_integrity(&self, limits: &StudyLimits) -> Result<(), Vec<IntegrityIssue>> {
+        let mut out = Issues(Vec::new());
+        self.check_structure(limits, &mut out);
+        // 结构成立之后才检查内容：内容检查要沿父节点读取上一局面
+        if out.0.is_empty() {
+            self.check_content(&mut out);
+        }
+        if out.0.is_empty() { Ok(()) } else { Err(out.0) }
+    }
+
+    fn check_structure(&self, limits: &StudyLimits, out: &mut Issues) {
+        if self.format_version == 0 || self.format_version > STUDY_FORMAT_VERSION {
+            return out.add(None, format!("数据格式版本 {} 不受支持", self.format_version));
+        }
+        if !valid_id(&self.id) {
+            out.add(None, "会话编号只能由字母、数字、“-”与“_”组成，最长 64 个字符");
+        }
+        if self.name.chars().count() > limits.max_label {
+            out.add(None, format!("名称超过 {} 个字", limits.max_label));
+        }
+        if self.nodes.len() > limits.max_nodes {
+            return out.add(None, format!("有 {} 个节点，超过上限 {}", self.nodes.len(), limits.max_nodes));
+        }
+        let Some(root) = self.nodes.get(&ROOT) else { return out.add(None, "缺少起始局面") };
+        if root.parent.is_some() || root.mv.is_some() || root.gap {
+            out.add(Some(ROOT), "起始局面不能有父节点、走法或缺口");
+        }
+        if root.fen != self.root_fen {
+            out.add(Some(ROOT), "起始局面与会话记录的起始 FEN 不一致");
+        }
+        for (key, node) in &self.nodes {
+            if *key != node.id {
+                out.add(Some(*key), format!("记录的编号是 {}", node.id));
+            }
+            if node.id >= self.next_id {
+                out.add(Some(node.id), format!("编号不小于下一个编号 {}", self.next_id));
+            }
+            let labels = [node.notation.as_deref(), node.gap_reason.as_deref()];
+            if labels.iter().flatten().any(|t| t.chars().count() > limits.max_label) {
+                out.add(Some(node.id), format!("记谱或缺口说明超过 {} 个字", limits.max_label));
+            }
+            if node.note.chars().count() > limits.max_note {
+                out.add(Some(node.id), format!("笔记超过 {} 个字", limits.max_note));
+            }
+            let mut seen = HashSet::new();
+            for child in &node.children {
+                if !seen.insert(*child) {
+                    out.add(Some(node.id), format!("子节点 {child} 重复出现"));
+                } else if self.nodes.get(child).is_none_or(|c| c.parent != Some(node.id)) {
+                    out.add(Some(node.id), format!("子节点 {child} 不存在，或它的父节点不是这个节点"));
+                }
+            }
+            if node.id != ROOT {
+                let listed = node.parent.and_then(|p| self.nodes.get(&p)).is_some_and(|p| p.children.contains(&node.id));
+                if !listed {
+                    out.add(Some(node.id), "父节点不存在，或父节点没有列出这个节点");
+                }
+            }
+            if out.full() {
+                return;
+            }
+        }
+        if !out.0.is_empty() {
+            return;
+        }
+        // 父子关系一致时，从根沿子节点恰好经过每个节点一次；到达不了的节点（例如自成一个环）说明数据不成立
+        let mut reached = HashSet::new();
+        let mut stack = vec![ROOT];
+        while let Some(n) = stack.pop() {
+            if reached.insert(n)
+                && let Some(node) = self.nodes.get(&n)
+            {
+                stack.extend(node.children.iter().copied());
+            }
+        }
+        if reached.len() != self.nodes.len() {
+            out.add(None, format!("{} 个节点不能从起始局面到达", self.nodes.len() - reached.len()));
+        }
+        if let Some(live) = self.live_node
+            && !self.nodes.contains_key(&live)
+        {
+            out.add(None, format!("实际对局的最新节点 {live} 不存在"));
+        }
+    }
+
+    fn check_content(&self, out: &mut Issues) {
+        let mut positions: BTreeMap<NodeId, Position> = BTreeMap::new();
+        for node in self.nodes.values() {
+            match fen::parse_position(&node.fen) {
+                Ok(pos) => {
+                    if pos.side != node.side_to_move {
+                        out.add(Some(node.id), "行棋方与局面不一致");
+                    }
+                    positions.insert(node.id, pos);
+                }
+                Err(e) => out.add(Some(node.id), format!("局面无法读取：{e}")),
+            }
+        }
+        if !out.0.is_empty() {
+            return;
+        }
+        if !validate::validate_position(&positions[&ROOT]).ok {
+            out.add(Some(ROOT), "起始局面不成立");
+        }
+        for node in self.nodes.values().filter(|n| n.id != ROOT) {
+            let before = &positions[&node.parent.expect("结构检查已确认非根节点有父节点")];
+            match (node.mv, node.gap) {
+                (Some(mv), false) => {
+                    if !rules::is_legal(before, mv) {
+                        out.add(Some(node.id), format!("走法 {mv} 在上一局面中不合规则"));
+                    } else if fen::position_fen(&before.after(mv)) != node.fen {
+                        out.add(Some(node.id), "局面不是上一局面走这一着之后的局面");
+                    }
+                    if let Some(first) = node.practice.as_ref().and_then(|p| p.first_choice)
+                        && !rules::is_legal(before, first)
+                    {
+                        out.add(Some(node.id), format!("练习记录中的第一步 {first} 不合规则"));
+                    }
+                }
+                (None, true) => {
+                    if !validate::validate_position(&positions[&node.id]).ok {
+                        out.add(Some(node.id), "缺口之后的局面不成立");
+                    }
+                }
+                _ => out.add(Some(node.id), "节点必须是一着走法或一个缺口"),
+            }
+            if out.full() {
+                return;
+            }
+        }
+    }
+}
+
+/// 导入数据的上限：异常的文件不应占用过多内存与时间。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StudyLimits {
+    pub max_nodes: usize,
+    /// 名称、记谱与缺口说明的最大字数。
+    pub max_label: usize,
+    /// 一着笔记的最大字数。
+    pub max_note: usize,
+}
+
+impl Default for StudyLimits {
+    fn default() -> Self { Self { max_nodes: 20_000, max_label: 200, max_note: 20_000 } }
+}
+
+/// 导入的会话中不成立的地方。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IntegrityIssue {
+    pub node: Option<NodeId>,
+    pub message: String,
+}
+
+impl std::fmt::Display for IntegrityIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.node {
+            Some(n) => write!(f, "节点 {n}：{}", self.message),
+            None => write!(f, "{}", self.message),
+        }
+    }
+}
+
+/// 一次检查最多列出的问题数。
+pub const MAX_ISSUES: usize = 8;
+
+struct Issues(Vec<IntegrityIssue>);
+
+impl Issues {
+    fn add(&mut self, node: Option<NodeId>, message: impl Into<String>) {
+        if !self.full() {
+            self.0.push(IntegrityIssue { node, message: message.into() });
+        }
+    }
+
+    fn full(&self) -> bool { self.0.len() >= MAX_ISSUES }
+}
+
+/// 会话编号：数据库的键以“会话/节点”组成，编号中不能有“/”，否则删除一个会话时会删到另一个会话的记录。
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 #[cfg(test)]
@@ -541,6 +738,55 @@ mod tests {
         assert_eq!(base, "3k5/9/9/9/9/9/9/9/4R4/4K4 w - - 30 55");
         assert_eq!(moves.len(), 4);
         assert_eq!(s.repetition_count(cur).unwrap(), 2, "根节点带计数字段时仍能识别重复局面");
+    }
+
+    #[test]
+    fn integrity_check_accepts_generated_studies_and_names_what_is_broken() {
+        let limits = StudyLimits::default();
+        let mut s = study(Position::startpos());
+        let a = s.apply_move(ROOT, mv("h2e2"), MoveSource::User, 1).unwrap().node;
+        let b = s.apply_move(a, mv("h9g7"), MoveSource::User, 2).unwrap().node;
+        s.apply_move(ROOT, mv("h0g2"), MoveSource::Variation, 3).unwrap();
+        s.record_practice(b, 1, false, Some(mv("b9c7")), None, 4).unwrap();
+        let gap_pos = fen::parse_position("3k5/9/9/9/9/9/9/9/4R4/4K4 b").unwrap();
+        let gap = s.add_gap(b, &gap_pos, "漏帧", 5).unwrap();
+        s.apply_move(gap, mv("d9d8"), MoveSource::Capture, 6).unwrap();
+        assert_eq!(s.check_integrity(&limits), Ok(()));
+        let broken = |f: &dyn Fn(&mut Study)| {
+            let mut copy = s.clone();
+            f(&mut copy);
+            copy.check_integrity(&limits).unwrap_err().iter().map(ToString::to_string).collect::<Vec<_>>().join("；")
+        };
+        // 两个节点互为父节点、自成一个环：不能从根到达，检查本身也会结束
+        let cycle = broken(&|c| {
+            let (x, y) = (c.next_id, c.next_id + 1);
+            let mut node = c.nodes[&a].clone();
+            node.children.clear();
+            for (id, parent) in [(x, y), (y, x)] {
+                c.nodes.insert(id, Node { id, parent: Some(parent), children: vec![parent], ..node.clone() });
+            }
+            c.next_id += 2;
+        });
+        assert!(cycle.contains("2 个节点不能从起始局面到达"), "{cycle}");
+        // 保存的数据损坏、父节点成环时，沿父节点向上的遍历也会结束
+        let mut looped = s.clone();
+        looped.nodes.get_mut(&a).unwrap().parent = Some(b);
+        assert!(matches!(looped.path(b), Err(StudyError::Broken(_))));
+        assert!(broken(&|c| c.next_id = a).contains("编号不小于下一个编号"));
+        assert!(broken(&|c| c.nodes.get_mut(&ROOT).unwrap().children.retain(|n| *n != a)).contains("父节点没有列出这个节点"));
+        assert!(broken(&|c| c.nodes.get_mut(&a).unwrap().children.push(a)).contains("子节点"));
+        assert!(broken(&|c| c.nodes.get_mut(&b).unwrap().mv = Some(mv("b9c7"))).contains("局面不是上一局面走这一着之后的局面"));
+        assert!(broken(&|c| c.nodes.get_mut(&b).unwrap().mv = Some(mv("h2e2"))).contains("不合规则"));
+        assert!(broken(&|c| c.nodes.get_mut(&b).unwrap().fen = "坏的局面".into()).contains("局面无法读取"));
+        assert!(broken(&|c| c.nodes.get_mut(&b).unwrap().side_to_move = Color::Black).contains("行棋方与局面不一致"));
+        assert!(broken(&|c| c.nodes.get_mut(&b).unwrap().mv = None).contains("一着走法或一个缺口"));
+        assert!(broken(&|c| {
+            c.nodes.remove(&ROOT);
+        }).contains("缺少起始局面"));
+        assert!(broken(&|c| c.id = "a/b".into()).contains("会话编号"));
+        assert!(broken(&|c| c.format_version = 99).contains("数据格式版本 99"));
+        let tight = StudyLimits { max_nodes: 3, ..limits };
+        assert!(s.check_integrity(&tight).unwrap_err()[0].message.contains("超过上限 3"));
     }
 
     #[test]

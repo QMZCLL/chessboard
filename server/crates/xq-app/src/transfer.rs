@@ -10,11 +10,14 @@ use xq_core::cloud::CloudOutcome;
 use xq_core::fen;
 use xq_core::notation;
 use xq_core::study::Study;
+use xq_core::study::StudyLimits;
 
 use crate::api::CreateKind;
 use crate::api::CreateStudyRequest;
 use crate::api::ImportResponse;
 use crate::api::NodeRef;
+use crate::archive::short;
+use crate::archive::too_large;
 use crate::capture::CaptureState;
 use crate::engine::EngineState;
 use crate::events;
@@ -28,6 +31,8 @@ use crate::service::now_ms;
 const EXPORT_FORMAT: &str = "xqlink-study";
 const EXPORT_VERSION: u32 = 1;
 const CLOUD_URL: &str = "https://www.chessdb.cn/chessdb.php";
+/// 导入的单个文件（学习数据、FEN 或棋谱）的大小上限。
+const MAX_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
 
 /// 完整学习数据：棋谱树、分支、标注与讲解。
 #[derive(Serialize, Deserialize)]
@@ -73,8 +78,11 @@ impl AppService {
         std::fs::write(path, text).map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
     }
 
-    /// 导入文本：学习数据文件、FEN 或棋谱。
+    /// 导入文本：学习数据文件、FEN 或棋谱。学习数据先检查棋谱树是否成立，会话与讲解在同一个写事务中写入。
     pub fn import_text(&self, text: &str, name: Option<String>) -> ApiResult<ImportResponse> {
+        if text.len() as u64 > MAX_IMPORT_BYTES {
+            return Err(too_large("导入的内容", MAX_IMPORT_BYTES));
+        }
         let trimmed = text.trim();
         if trimmed.starts_with('{') {
             let export: StudyExport =
@@ -92,15 +100,22 @@ impl AppService {
                 study.name = n;
             }
             study.live_node = None;
-            self.inner.store.save_study(&study)?;
-            for mut record in export.explanations {
-                if study.nodes.contains_key(&record.node_id) {
-                    record.study_id = study.id.clone();
-                    record.pending = false;
-                    self.inner.store.save_explanation(&record)?;
-                }
+            if let Err(issues) = study.check_integrity(&StudyLimits::default()) {
+                let list: Vec<String> = issues.iter().map(ToString::to_string).collect();
+                return Err(format!("学习数据“{}”不成立，没有导入：{}", short(&study.name), list.join("；")).into());
             }
-            let view = self.load_study(&study.id)?;
+            if export.explanations.len() > study.nodes.len() {
+                return Err("学习数据中的讲解记录多于节点，没有导入".into());
+            }
+            let records: Vec<ExplanationRecord> = export
+                .explanations
+                .into_iter()
+                .filter(|r| study.nodes.contains_key(&r.node_id))
+                .map(|r| ExplanationRecord { study_id: study.id.clone(), pending: false, ..r })
+                .collect();
+            let id = study.id.clone();
+            self.inner.store.import_batch(&[(study, records)], &[], |_, _| None)?;
+            let view = self.load_study(&id)?;
             return Ok(ImportResponse { study: view, notes: vec!["已导入学习数据（含分支、标注与讲解）".into()], stopped: None });
         }
         let kind = if looks_like_bare_fen(trimmed) {
@@ -112,6 +127,10 @@ impl AppService {
     }
 
     pub fn import_file(&self, path: &Path) -> ApiResult<ImportResponse> {
+        let size = std::fs::metadata(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?.len();
+        if size > MAX_IMPORT_BYTES {
+            return Err(too_large("文件", MAX_IMPORT_BYTES));
+        }
         let bytes = std::fs::read(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
         let text = String::from_utf8(bytes).map_err(|_| "文件不是 UTF-8 文本，请先转换编码后再导入")?;
         let name = path.file_stem().map(|s| s.to_string_lossy().to_string());
