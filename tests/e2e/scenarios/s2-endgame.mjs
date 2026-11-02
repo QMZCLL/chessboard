@@ -55,8 +55,10 @@ const mateSummary = await page.getByTestId("key-point").innerText();
 console.log(`  结论：${mateSummary}`);
 check(mateSummary.includes("将死对方"), "讲解说明将死");
 check(await page.locator(".panel .n-tag", { hasText: "当前分析的首选" }).count() === 1, "将死着法被评为首选");
-await page.waitForTimeout(500);
-const treeStats = await page.locator(".stats").first().innerText();
+// 本步讲解先显示候选比较；实际着法的分析在同一个讲解任务中稍后完成，棋谱统计随讲解完成更新（不按固定时间读取）
+const stats = page.locator(".stats").first();
+await stats.filter({ hasText: "讲解 1/1" }).waitFor({ timeout: 30000 }).catch(() => undefined);
+const treeStats = await stats.innerText();
 check(treeStats.includes("讲解 1/1") && !treeStats.includes("进行中"), `棋谱统计与讲解一致：${treeStats}`);
 check(await page.locator(".move .dot.detailed").count() === 1, "棋谱中该着显示为已完成详细讲解");
 await snap(page, "checkmate");

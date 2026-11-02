@@ -19,8 +19,15 @@ function startOfDay(ts: number): number {
 /** 卡片下一次复习的时间（后台总会给出；没有时按加入时到期） */
 export const dueAt = (card: Pick<ReviewCard, "due_at" | "created_at">) => card.due_at ?? card.created_at;
 
+/** 本机日期的下一个零点。夏令时切换的那天不是 24 小时，不能用零点加一天计算 */
+function endOfDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(24, 0, 0, 0);
+  return d.getTime();
+}
+
 /** 今天到期：下一次复习的时间在本机今天结束之前 */
-export const isDue = (card: Pick<ReviewCard, "due_at" | "created_at">, now: number) => dueAt(card) < startOfDay(now) + DAY_MS;
+export const isDue = (card: Pick<ReviewCard, "due_at" | "created_at">, now: number) => dueAt(card) < endOfDay(now);
 
 /** 下一次复习的说明（按本机日期）。 */
 export function dueText(card: Pick<ReviewCard, "due_at" | "created_at">, now: number): string {

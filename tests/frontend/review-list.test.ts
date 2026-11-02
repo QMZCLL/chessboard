@@ -65,6 +65,22 @@ test("今天到期按下一次复习的时间（含已经过期的），需要�
   assert.equal(filterItems([tonight], "today", NOW).length, 1);
 });
 
+test("夏令时结束的那天有 25 小时：当天最后一小时加入的卡片仍是今天到期", () => {
+  const tz = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    // 2026-11-01 洛杉矶 02:00 时钟拨回 01:00；23:30 时零点加 24 小时已经是 23:00
+    const now = Date.parse("2026-11-01T23:30:00-08:00");
+    const card = (at: string) => ({ ...item("a", "due").card, due_at: Date.parse(at) });
+    assert.equal(filterItems([{ ...item("a", "due"), card: card("2026-11-01T23:25:00-08:00") }], "today", now).length, 1);
+    assert.equal(filterItems([{ ...item("a", "due"), card: card("2026-11-02T00:10:00-08:00") }], "today", now).length, 0, "明天的不算");
+    assert.equal(dueText(card("2026-11-02T09:00:00-08:00"), now), "明天再看");
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+});
+
 test("下一次复习的说明按本机日期", () => {
   const at = (days: number) => item("a", "due", [], true, days).card;
   assert.equal(dueText(at(0), NOW), "今天到期");
