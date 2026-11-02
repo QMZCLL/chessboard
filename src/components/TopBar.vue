@@ -97,6 +97,16 @@ function onMore(key: string) {
     </n-radio-group>
     <div class="actions">
       <!-- 全局入口保持中性，最明显的强调留给学习区中正在进行的操作 -->
+      <n-button
+        size="small"
+        :quaternary="wb.main !== 'home'"
+        :secondary="wb.main === 'home'"
+        :aria-current="wb.main === 'home' ? 'page' : undefined"
+        data-testid="open-home"
+        @click="wb.main = 'home'"
+      >
+        <template #icon><Icon name="home" /></template>今日学习
+      </n-button>
       <n-button size="small" secondary @click="wb.dialogs.newStudy = true">
         <template #icon><Icon name="plus" /></template>新建 / 打开
       </n-button>

@@ -87,8 +87,11 @@ export const wb = reactive({
   capture: { state: "idle" } as T.CaptureState,
   followLive: true,
   dialogs: { newStudy: false, capture: false, settings: false, studies: false, coachBatch: false, review: false, report: false },
-  /** 主区域：棋盘学习，或一组练习的专注练习工作区（练习保存在后台，退出后可以继续） */
-  main: "board" as "board" | "practice",
+  /**
+   * 主区域：棋盘学习、今日学习首页，或一组练习的专注练习工作区（练习保存在后台，退出后可以继续）。
+   * 还没有打开学习局面时显示首页。
+   */
+  main: "board" as "board" | "home" | "practice",
   /** 下次打开设置时显示的分组（从其他位置跳转到某项设置时使用） */
   settingsTab: null as SettingsTab | null,
 });
@@ -527,7 +530,30 @@ export async function openStudy(id: string, select?: number) {
   setView(view);
   wb.main = "board";
   safeStorage("set", "xq-last-study", id);
-  await selectNode(select ?? view.study.live_node ?? lastMainline(view));
+  // 指定的着法已经删除时（例如记住的上次位置），打开默认的位置
+  const wanted = select !== undefined && view.study.nodes[select] ? select : undefined;
+  await selectNode(wanted ?? view.study.live_node ?? lastMainline(view));
+}
+
+const POSITIONS_KEY = "xq-study-positions";
+const POSITIONS_KEEP = 20;
+
+/** 每个学习会话上次看到的着法（只在本机记住，最近的若干个） */
+export function lastPositions(): Record<string, { node: number; ply: number; at: number }> {
+  try {
+    const v = JSON.parse(safeStorage("get", POSITIONS_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberPosition(studyId: string, node: number, ply: number) {
+  const all = { ...lastPositions(), [studyId]: { node, ply, at: Date.now() } };
+  const kept = Object.entries(all)
+    .sort((a, b) => b[1].at - a[1].at)
+    .slice(0, POSITIONS_KEEP);
+  safeStorage("set", POSITIONS_KEY, JSON.stringify(Object.fromEntries(kept)));
 }
 
 /**
@@ -644,6 +670,7 @@ export async function selectNode(id: number) {
   if (!s || !nodeOf(id)) return;
   const changed = wb.selected !== id;
   wb.selected = id;
+  rememberPosition(s.id, id, nodeOf(id)?.ply ?? 0);
   wb.preview = null;
   wb.highlight = null;
   wb.focus = null;

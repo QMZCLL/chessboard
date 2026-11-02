@@ -40,9 +40,9 @@ await page.getByRole("button", { name: "新建 / 打开" }).click();
 await page.locator(".n-tabs-tab", { hasText: "FEN" }).click();
 await page.getByPlaceholder("粘贴 FEN，如 3k5/9/9/9/9/9/9/9/4R4/4K4 w").fill("3k5/9/9/9/9/9/9/9/4R4/4K4");
 await waitText(page, "FEN 没有写明行棋方");
-check(await page.getByRole("button", { name: "导入" }).isDisabled(), "未选行棋方时不能导入");
+check(await page.getByRole("button", { name: "导入", exact: true }).isDisabled(), "未选行棋方时不能导入");
 await page.locator(".n-modal .n-radio-button", { hasText: "红走" }).first().click();
-await page.getByRole("button", { name: "导入" }).click();
+await page.getByRole("button", { name: "导入", exact: true }).click();
 await page.locator("[data-testid=board-context] .side.red").waitFor();
 
 // 4. 车五平六将死，终局局面不再导致崩溃
@@ -68,7 +68,7 @@ check(mated.includes("已被将死"), `终局局面说明：${mated}`);
 await page.getByRole("button", { name: "新建 / 打开" }).click();
 await page.locator(".n-tabs-tab", { hasText: "FEN" }).click();
 await page.getByPlaceholder("粘贴 FEN，如 3k5/9/9/9/9/9/9/9/4R4/4K4 w").fill("3k5/4R4/4R4/9/9/9/9/9/9/4K4 b");
-await page.getByRole("button", { name: "导入" }).click();
+await page.getByRole("button", { name: "导入", exact: true }).click();
 await page.locator("[data-testid=board-context] .n-tag", { hasText: "困毙" }).waitFor();
 check(!(await page.getByTestId("board-context").innerText()).includes("走子"), "终局局面不再提示走子");
 check(await page.getByTestId("start-intro").count() === 0, "终局局面不显示“开始学习”的引导");

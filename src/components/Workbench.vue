@@ -1,13 +1,14 @@
 <script setup lang="ts">
 // 学习工作台：按窗口宽度切换布局（见 state/layout.ts）。宽屏时三栏宽度可拖动调整。
-// 进行一组练习时，主区域换成专注练习工作区（见 PracticeWorkspace）。
+// 进行一组练习时，主区域换成专注练习工作区（见 PracticeWorkspace）；还没有打开学习局面、或从顶栏回到首页时显示今日学习（见 HomeView）。
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { NButton, NResult, NSpin, NTabPane, NTabs, useMessage } from "naive-ui";
+import { NResult, NSpin, NTabPane, NTabs, useMessage } from "naive-ui";
 import BoardArea from "./BoardArea.vue";
 import CaptureDialog from "./CaptureDialog.vue";
 import CoachBatchDialog from "./CoachBatchDialog.vue";
 import ReviewDialog from "./ReviewDialog.vue";
 import PracticeWorkspace from "./PracticeWorkspace.vue";
+import HomeView from "./HomeView.vue";
 import GameReportDialog from "./GameReportDialog.vue";
 import ExplanationPanel from "./ExplanationPanel.vue";
 import MoveTree from "./MoveTree.vue";
@@ -132,17 +133,9 @@ onBeforeUnmount(stopResize);
     <TopBar />
     <!-- 一组练习：专注练习工作区 -->
     <PracticeWorkspace v-if="wb.main === 'practice'" />
+    <!-- 今日学习 -->
+    <HomeView v-else-if="wb.main === 'home' || !study" />
     <!-- 宽屏与中等宽度：分栏 -->
-    <main v-else-if="!study" class="columns solo">
-      <section class="col center">
-        <div class="empty">
-          <div class="seal-large" aria-hidden="true">弈</div>
-          <p class="empty-title">还没有打开学习局面</p>
-          <p class="muted">导入棋谱、摆一个残局，或从标准开局开始。</p>
-          <n-button type="primary" @click="wb.dialogs.newStudy = true">建立学习局面</n-button>
-        </div>
-      </section>
-    </main>
     <main v-else-if="layout !== 'narrow'" class="columns" :style="{ gridTemplateColumns: columns }">
       <template v-if="layout === 'wide'">
         <aside id="pane-tree" class="col surface" aria-label="棋谱"><MoveTree /></aside>
@@ -232,9 +225,6 @@ onBeforeUnmount(stopResize);
   min-height: 0;
   display: grid;
   padding: var(--gutter);
-}
-.columns.solo {
-  grid-template-columns: 1fr;
 }
 .col {
   min-width: 0;
@@ -336,39 +326,6 @@ onBeforeUnmount(stopResize);
   flex: 1;
   min-height: 0;
   padding: 0;
-}
-.empty {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  color: var(--text-muted);
-}
-.empty p {
-  margin: 0;
-}
-.empty .n-button {
-  margin-top: var(--sp-3);
-}
-.empty-title {
-  font-family: var(--font-serif);
-  font-size: 20px;
-  color: var(--text-primary);
-}
-.seal-large {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-  margin-bottom: var(--sp-2);
-  border-radius: 10px;
-  background: var(--seal);
-  color: #fff6ee;
-  font-family: var(--piece-font);
-  font-size: 40px;
-  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.18), var(--shadow-2);
 }
 .boot {
   height: 100vh;

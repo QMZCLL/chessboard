@@ -5,7 +5,7 @@ await page.goto(BASE);
 await waitText(page, "建立学习局面");
 await page.locator(".n-tabs-tab", { hasText: "FEN" }).click();
 await page.getByPlaceholder("粘贴 FEN，如 3k5/9/9/9/9/9/9/9/4R4/4K4 w").fill("3k5/9/4c4/9/9/9/9/4N4/9/4K4 w");
-await page.getByRole("button", { name: "导入" }).click();
+await page.getByRole("button", { name: "导入", exact: true }).click();
 await page.locator("[data-testid=board-context] .n-tag", { hasText: "正被将军" }).waitFor();
 await move(page, "e2c3");
 await page.locator(".move.active").waitFor();

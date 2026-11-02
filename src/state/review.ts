@@ -40,6 +40,8 @@ export const review = reactive({
   finished: null as T.PracticeSession | null,
   /** 练习中的说明（例如这组中有卡片已经删除、已跳过） */
   notice: null as string | null,
+  /** 进入练习工作区之前的主区域：保存退出、完成后回到这里 */
+  returnTo: "board" as "board" | "home",
   current: null as T.ReviewDetail | null,
   /** choose：在棋盘上重新选择；revealed：已经选择或直接看了答案 */
   phase: "choose" as "choose" | "revealed",
@@ -432,6 +434,7 @@ async function startSession(kind: "today" | "again" | TopicKey, size: number | n
 }
 
 function enterWorkspace() {
+  if (wb.main !== "practice") review.returnTo = wb.main;
   wb.dialogs.review = false;
   wb.main = "practice";
 }
@@ -450,12 +453,12 @@ export async function startPractice(kind: "today" | "again" | TopicKey, size: nu
   return started;
 }
 
-/** 保存退出：这组练习的位置已经写回，之后可以从原处继续 */
+/** 保存退出：这组练习的位置已经写回，之后可以从原处继续；回到进入练习之前的位置 */
 export async function exitPractice() {
   await saveNote();
   review.finished = null;
   review.notice = null;
-  wb.main = "board";
+  wb.main = review.returnTo;
 }
 
 /** 结束这组练习，给出小结（只统计属于这组练习的作答）。 */
