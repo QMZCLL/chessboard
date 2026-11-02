@@ -19,6 +19,7 @@ pub use service::EngineService;
 pub use service::JobSpec;
 use xq_core::Move;
 use xq_core::explain::EngineLine;
+use xq_core::explain::stability::RoundSummary;
 use xq_core::rules::GameStatus;
 use xq_core::study::RuleSet;
 
@@ -107,6 +108,9 @@ pub struct SearchProgress {
 pub struct SearchResult {
     /// 一轮完整搜索的候选（按名次）；没有完整一轮时为最后一轮的部分结果。
     pub lines: Vec<EngineLine>,
+    /// 最近几个深度完整一轮的摘要（按深度升序），用于判断结论是否还在变化；早期记录没有这一项。
+    #[serde(default)]
+    pub rounds: Vec<RoundSummary>,
     pub bestmove: Option<Move>,
     pub depth: u32,
     pub nodes: u64,

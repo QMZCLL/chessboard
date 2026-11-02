@@ -83,8 +83,8 @@ pub enum AnalysisOutcome {
 }
 
 /// 分析记录的格式版本。结果结构或完整性判断改变时递增：旧格式的记录既不复用也不展示，
-/// 下次搜索时被覆盖。版本 1 起结果带有完整性信息。
-pub const ANALYSIS_FORMAT: u32 = 1;
+/// 下次搜索时被覆盖。版本 1 起结果带有完整性信息，版本 2 起带有各个深度的完整一轮（判断稳定性）。
+pub const ANALYSIS_FORMAT: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisRecord {

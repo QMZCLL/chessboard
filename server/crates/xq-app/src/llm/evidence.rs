@@ -16,13 +16,15 @@ use xq_core::explain::LineBase;
 use xq_core::explain::LineRef;
 use xq_core::explain::VerdictTone;
 use xq_core::explain::score_label;
+use xq_core::explain::stability::Stability;
+use xq_core::explain::stability::StabilityLevel;
 use xq_core::study::NodeId;
 use xq_core::study::Study;
 
 use crate::records::ExplanationRecord;
 
 /// 证据包结构版本；字段或生成方式改变时递增。
-pub const PACK_VERSION: u32 = 1;
+pub const PACK_VERSION: u32 = 2;
 /// 证据包中最多列出的历史着法数（更早的只计数）。
 const HISTORY_LIMIT: usize = 60;
 
@@ -68,6 +70,16 @@ pub struct PackAnalysis {
     pub error: Option<String>,
     /// 按证据质量允许表达的范围。
     pub allowed_scope: Vec<String>,
+    /// 候选比较的稳定性：等级与依据（见 `stability`）。
+    pub stability: Option<PackStability>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PackStability {
+    pub level: StabilityLevel,
+    /// 高稳定、中等稳定、仍在变化、分析不完整。
+    pub label: String,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -148,7 +160,7 @@ pub(crate) fn weakest(evidence: &[Evidence], ids: &[String]) -> Certainty {
         .unwrap_or(Certainty::Tentative)
 }
 
-fn allowed_scope(level: ExplainLevel, history_complete: bool) -> Vec<String> {
+fn allowed_scope(level: ExplainLevel, history_complete: bool, stability: Option<&Stability>) -> Vec<String> {
     let mut scope = vec![
         "只能使用 claims 中的结论；不得新增输入中没有的走法、变化、评分、胜率或将杀步数".to_string(),
         "评分只代表当前搜索条件下的评估，不能换算成胜率".to_string(),
@@ -165,6 +177,11 @@ fn allowed_scope(level: ExplainLevel, history_complete: bool) -> Vec<String> {
     );
     if !history_complete {
         scope.push("此前的着法历史不完整：不得断言长将、长捉或重复局面的判罚".to_string());
+    }
+    if stability.is_some_and(|s| s.restrains()) && level == ExplainLevel::Detailed {
+        scope.push(
+            "最近几个深度首选仍在变化：不得说哪一着是首选或更好，只能说明这几个候选都值得考虑；verdict 已经写明暂不评价".to_string(),
+        );
     }
     scope
 }
@@ -304,7 +321,11 @@ pub fn build(study: &Study, node_id: NodeId, record: &ExplanationRecord) -> Resu
             complete,
             conditions: expl.conditions.clone(),
             error: record.error.clone(),
-            allowed_scope: allowed_scope(expl.level, history_complete),
+            allowed_scope: allowed_scope(expl.level, history_complete, expl.stability.as_ref()),
+            stability: expl
+                .stability
+                .as_ref()
+                .map(|s| PackStability { level: s.level, label: s.level.label().to_string(), reasons: s.reasons.clone() }),
         },
         verdict: expl.verdict.as_ref().map(|v| PackVerdict {
             tone: v.tone,
@@ -357,6 +378,7 @@ mod tests {
             conditions: "测试".into(),
             complete: true,
             notes: vec![],
+        rounds: vec![],
         };
         let detailed = build(&study, 3, &record(&study, 3, Some(&engine))).unwrap();
         assert_ne!(detailed.revision, basic.revision);

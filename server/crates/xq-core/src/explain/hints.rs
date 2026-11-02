@@ -220,7 +220,7 @@ mod tests {
     }
 
     fn engine(lines: Vec<EngineLine>) -> EngineEvidence {
-        EngineEvidence { candidates: lines, actual: None, conditions: "测试".into(), complete: true, notes: vec![] }
+        EngineEvidence { candidates: lines, actual: None, conditions: "测试".into(), complete: true, notes: vec![], rounds: vec![] }
     }
 
     #[test]

@@ -6,7 +6,8 @@
 //! - 反馈只有四种：与棋谱一致；与棋谱不同，但与参考评分接近；留下了值得注意的问题；分析尚不充分。
 //!   “与棋谱一致”只陈述匹配的事实；这次比较是否支持这个选择另外记录（`DecisionSupport`），
 //!   与其他选择用同一套判断（`support_of`）：走了棋谱着法时与引擎参考比较，棋谱着法没有被换掉不能说明它好。
-//!   评分、边界与将杀分沿用试走对比的判断（`judge_pair`），不完整的搜索、无法比较的边界分不评价优劣。
+//!   评分、边界与将杀分沿用试走对比的判断（`judge_pair`），不完整的搜索、无法比较的边界分不评价优劣；
+//!   最近几个深度中先后仍在变化时（见 `stability`）同样不评价，也不改用引擎参考对照。
 //!   对比中“略逊”的分差（见 `NOTEWORTHY_GAP`）在练习中仍算与参考接近：快速搜索里这样的差距不足以说明选择有问题。
 //! - 意图对照只用规则事实（吃子、将军、出子、受攻击的棋子、保护关系），不推测用户的想法。
 //! - 搜索在后台进行，完成后写回这次复习并推送 `review_updated`；卡片的局面与着法建立后不再改变。
@@ -27,6 +28,9 @@ use xq_core::explain::explain_move;
 use xq_core::explain::facts;
 use xq_core::explain::facts::Development;
 use xq_core::explain::line_is_legal;
+use xq_core::explain::stability;
+use xq_core::explain::stability::Stability;
+use xq_core::explain::stability::StabilityLevel;
 use xq_core::fen;
 use xq_core::notation;
 use xq_core::rules;
@@ -274,10 +278,12 @@ fn name(pos: &Position, mv: Move) -> String { notation::move_to_chinese(pos, mv)
 fn review_move(pos: &Position, mv: Move) -> ReviewMove { ReviewMove { mv, notation: name(pos, mv) } }
 
 /// 按同一次搜索的结果给出反馈。`best` 是多候选搜索的首位（没有结果时为空），
-/// `lines` 来自对这次的选择、棋谱着法与引擎参考的同一次搜索。
+/// `lines` 来自对这次的选择、棋谱着法与引擎参考的同一次搜索，`stability` 是这次搜索的稳定性。
 pub fn judge_decision(
     before: &Position, choice: Move, answer: Move, best: Option<Move>, lines: &[EngineLine], complete: bool,
+    stability: Option<&Stability>,
 ) -> DecisionFeedback {
+    let shifting = stability.is_some_and(|s| s.level == StabilityLevel::Shifting);
     let same = choice == answer;
     let line = |mv: Move| lines.iter().find(|l| l.mv == mv && l.pv.first() == Some(&mv) && line_is_legal(before, &l.pv));
     let ready = |verdict: DecisionVerdict, support: DecisionSupport, reference: Move, points: Vec<String>| DecisionFeedback {
@@ -299,7 +305,7 @@ pub fn judge_decision(
     let engine = best.filter(|b| *b != answer);
     // 对照着法：棋谱中的着法；引擎参考在同一次搜索中明显好于它时改用引擎参考
     let mut reference = answer;
-    if let Some(b) = engine
+    if let Some(b) = engine.filter(|_| !shifting)
         && let (Some(lb), Some(la)) = (line(b), line(answer))
         && let (CompareOutcome::MineBetter, text) = judge_pair(lb, la, &name(before, b), &name(before, answer))
     {
@@ -334,6 +340,14 @@ pub fn judge_decision(
     };
     let choice_name = name(before, choice);
     let (outcome, text) = judge_pair(lc, lr, &choice_name, &name(before, lr.mv));
+    // 最近几个深度中先后仍在变化：不评价优劣
+    let (outcome, text) = match outcome {
+        CompareOutcome::MineBetter | CompareOutcome::ReferenceBetter if shifting => {
+            let reasons = stability.map(|s| s.reasons.join("；")).unwrap_or_default();
+            (CompareOutcome::Unclear, format!("两步的先后在最近几个深度中仍在变化（{reasons}）"))
+        }
+        _ => (outcome, text),
+    };
     let support = support_of(outcome, lc, lr);
     // 换用引擎参考时已经写明了棋谱着法与它的比较；“与棋谱一致”的标题不说明无法评价，在说明中补上
     if !(same && reference != answer) {
@@ -403,7 +417,7 @@ impl Inner {
                 let feedback = match outcome {
                     SearchOutcome::Completed(r) => DecisionFeedback {
                         conditions: Some(conditions),
-                        ..judge_decision(&pos, choice, answer, best, &r.lines, r.complete)
+                        ..judge_decision(&pos, choice, answer, best, &r.lines, r.complete, Some(&stability::assess(&pos, &r.rounds, r.complete)))
                     },
                     SearchOutcome::Terminal(_) => DecisionFeedback::failed("这个局面已经结束，不能比较".to_string()),
                     SearchOutcome::Failed(e) => DecisionFeedback::failed(e),
@@ -480,17 +494,17 @@ mod tests {
         // 棋谱：炮二平五；这次的选择：马二进三（接近）或兵三进一（明显低）
         let lines = [line("h2e2", 30, &["h2e2", "h9g7"]), line("h0g2", 20, &["h0g2", "b9c7"]), line("g3g4", -60, &["g3g4", "h7e7"])];
         // 走了棋谱着法，它也是多候选搜索的首位
-        let same = judge_decision(&start, mv("h2e2"), mv("h2e2"), Some(mv("h2e2")), &lines, true);
+        let same = judge_decision(&start, mv("h2e2"), mv("h2e2"), Some(mv("h2e2")), &lines, true, None);
         assert_eq!((same.verdict, same.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::Supported));
-        let close = judge_decision(&start, mv("h0g2"), mv("h2e2"), None, &lines, true);
+        let close = judge_decision(&start, mv("h0g2"), mv("h2e2"), None, &lines, true, None);
         assert_eq!(close.verdict, Some(DecisionVerdict::Reasonable));
         assert!(close.points[0].contains("评分接近"), "{:?}", close.points);
         // 略逊（不超过 80 分）仍算接近，说明中写明分差
         let slight = [line("h2e2", 30, &["h2e2"]), line("b0c2", -40, &["b0c2"])];
-        let slightly = judge_decision(&start, mv("b0c2"), mv("h2e2"), None, &slight, true);
+        let slightly = judge_decision(&start, mv("b0c2"), mv("h2e2"), None, &slight, true, None);
         assert_eq!(slightly.verdict, Some(DecisionVerdict::Reasonable));
         assert!(slightly.points[0].contains("低约 70 分（略逊）"), "{:?}", slightly.points);
-        let worse = judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &lines, true);
+        let worse = judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &lines, true, None);
         assert_eq!((worse.verdict, worse.support), (Some(DecisionVerdict::Noteworthy), DecisionSupport::NotSupported));
         assert!(worse.points[0].contains("兵三进一比炮二平五低约 90 分"), "{:?}", worse.points);
         assert_eq!(worse.points[1], "走兵三进一之后，对方最值得关注的回应是炮8平5");
@@ -498,18 +512,38 @@ mod tests {
     }
 
     #[test]
+    fn an_order_that_is_still_changing_is_not_judged_and_does_not_replace_the_record() {
+        let start = Position::startpos();
+        let lines = [line("h2e2", 30, &["h2e2", "h9g7"]), line("h0g2", 20, &["h0g2", "b9c7"]), line("g3g4", -60, &["g3g4", "h7e7"])];
+        let shifting = Stability {
+            level: StabilityLevel::Shifting,
+            reasons: vec!["深度 10–12 中首选在炮二平五、兵三进一之间变化了 2 次".into()],
+            depths: Some((10, 12)),
+        };
+        // 稳定时明显低的选择是“值得注意”；仍在变化时不评价
+        let worse = judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &lines, true, Some(&shifting));
+        assert_eq!((worse.verdict, worse.support), (Some(DecisionVerdict::Unclear), DecisionSupport::Unknown));
+        assert!(worse.points[0].contains("仍在变化"), "{:?}", worse.points);
+        // 引擎参考明显好于棋谱着法，但先后仍在变化：不改用引擎参考
+        let record = [line("h2e2", 30, &["h2e2"]), line("g3g4", -80, &["g3g4"])];
+        let kept = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &record, true, Some(&shifting));
+        assert_eq!(kept.reference.unwrap().notation, "兵三进一");
+        assert_eq!(kept.support, DecisionSupport::Unknown);
+    }
+
+    #[test]
     fn a_clearly_better_engine_move_replaces_the_record_as_the_reference() {
         let start = Position::startpos();
         // 棋谱：兵三进一（明显低于引擎参考炮二平五）
         let lines = [line("h2e2", 30, &["h2e2", "h9g7"]), line("g3g4", -60, &["g3g4"]), line("h0g2", 25, &["h0g2"])];
-        let close_to_best = judge_decision(&start, mv("h0g2"), mv("g3g4"), Some(mv("h2e2")), &lines, true);
+        let close_to_best = judge_decision(&start, mv("h0g2"), mv("g3g4"), Some(mv("h2e2")), &lines, true, None);
         assert_eq!(close_to_best.reference.as_ref().unwrap().notation, "炮二平五");
         assert!(close_to_best.points[0].contains("不一定是最好的参考"), "{:?}", close_to_best.points);
         assert_eq!(close_to_best.verdict, Some(DecisionVerdict::Reasonable));
         // 走了引擎参考本身
-        assert_eq!(judge_decision(&start, mv("h2e2"), mv("g3g4"), Some(mv("h2e2")), &lines, true).verdict, Some(DecisionVerdict::Reasonable));
+        assert_eq!(judge_decision(&start, mv("h2e2"), mv("g3g4"), Some(mv("h2e2")), &lines, true, None).verdict, Some(DecisionVerdict::Reasonable));
         // 与棋谱一致，但棋谱着法明显不如引擎参考：仍陈述“与棋谱一致”，但这次比较不支持这个选择
-        let same = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &lines, true);
+        let same = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &lines, true, None);
         assert_eq!((same.verdict, same.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::NotSupported));
         assert!(same.points[0].contains("不一定是最好的参考"));
         // 早期的记录没有这一项：评分接近、值得注意按结论推算；“与棋谱一致”不说明质量
@@ -525,8 +559,8 @@ mod tests {
         let start = Position::startpos();
         // 引擎参考炮二平五 +30；棋谱着法兵三进一与另一候选马八进七都低 70 分（略逊）
         let lines = [line("h2e2", 30, &["h2e2"]), line("g3g4", -40, &["g3g4"]), line("b0c2", -40, &["b0c2"])];
-        let record = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &lines, true);
-        let other = judge_decision(&start, mv("b0c2"), mv("g3g4"), Some(mv("h2e2")), &lines, true);
+        let record = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &lines, true, None);
+        let other = judge_decision(&start, mv("b0c2"), mv("g3g4"), Some(mv("h2e2")), &lines, true, None);
         assert_eq!(record.verdict, Some(DecisionVerdict::SameAsRecord), "仍陈述与棋谱一致");
         assert_eq!((other.verdict, other.support), (Some(DecisionVerdict::Reasonable), DecisionSupport::Supported));
         assert_eq!(record.support, other.support, "同样的分差，是否是棋谱着法不影响评价");
@@ -535,20 +569,20 @@ mod tests {
         let mut bounded = lines.clone();
         bounded[0].bound = Bound::Lower;
         bounded[1] = EngineLine { score: Score::Cp(10), bound: Bound::Lower, ..bounded[1].clone() };
-        let unclear = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &bounded, true);
+        let unclear = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &bounded, true, None);
         assert_eq!((unclear.verdict, unclear.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::Unknown));
         assert_eq!(unclear.reference.unwrap().notation, "兵三进一");
         assert!(unclear.points[0].contains("无法确定差距") && unclear.points[0].ends_with("暂不评价走法优劣"), "{:?}", unclear.points);
         // 缺少引擎参考的结果，或没有得到引擎参考：同样不评价
-        let missing = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &lines[1..2], true);
+        let missing = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &lines[1..2], true, None);
         assert_eq!((missing.verdict, missing.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::Unknown));
         assert!(missing.points[0].contains("没有同时给出这两步的结果"), "{:?}", missing.points);
-        let no_best = judge_decision(&start, mv("g3g4"), mv("g3g4"), None, &lines, true);
+        let no_best = judge_decision(&start, mv("g3g4"), mv("g3g4"), None, &lines, true, None);
         assert_eq!(no_best.support, DecisionSupport::Unknown);
         assert!(no_best.points[0].contains("没有给出可以对照的引擎参考"), "{:?}", no_best.points);
         // 明显不如引擎参考（超过 80 分）：不支持，和其他选择一样给出对方的回应
         let worse = [line("h2e2", 30, &["h2e2"]), line("g3g4", -60, &["g3g4", "h7e7"])];
-        let bad = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &worse, true);
+        let bad = judge_decision(&start, mv("g3g4"), mv("g3g4"), Some(mv("h2e2")), &worse, true, None);
         assert_eq!((bad.verdict, bad.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::NotSupported));
         assert_eq!(bad.points[1], "走兵三进一之后，对方最值得关注的回应是炮8平5");
     }
@@ -557,18 +591,18 @@ mod tests {
     fn incomplete_or_bounded_searches_do_not_judge() {
         let start = Position::startpos();
         let lines = [line("h2e2", 30, &["h2e2"]), line("g3g4", -60, &["g3g4"])];
-        let partial = judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &lines, false);
+        let partial = judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &lines, false, None);
         assert_eq!((partial.verdict, partial.support), (Some(DecisionVerdict::Unclear), DecisionSupport::Unknown));
         assert!(partial.points[0].contains("没有完成整轮"));
         // 搜索不完整时走了棋谱着法：陈述一致，但棋谱着法的好坏也没有得到比较
-        let partial_same = judge_decision(&start, mv("h2e2"), mv("h2e2"), None, &lines, false);
+        let partial_same = judge_decision(&start, mv("h2e2"), mv("h2e2"), None, &lines, false, None);
         assert_eq!((partial_same.verdict, partial_same.support), (Some(DecisionVerdict::SameAsRecord), DecisionSupport::Unknown));
         let mut bounded = lines.clone();
         bounded[0].bound = Bound::Lower;
         bounded[1].bound = Bound::Lower;
-        assert_eq!(judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &bounded, true).verdict, Some(DecisionVerdict::Unclear));
+        assert_eq!(judge_decision(&start, mv("g3g4"), mv("h2e2"), None, &bounded, true, None).verdict, Some(DecisionVerdict::Unclear));
         // 搜索没有给出这次选择的结果
-        assert_eq!(judge_decision(&start, mv("b0c2"), mv("h2e2"), None, &lines, true).verdict, Some(DecisionVerdict::Unclear));
+        assert_eq!(judge_decision(&start, mv("b0c2"), mv("h2e2"), None, &lines, true, None).verdict, Some(DecisionVerdict::Unclear));
     }
 
     #[test]

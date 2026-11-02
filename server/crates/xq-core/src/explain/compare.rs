@@ -21,6 +21,10 @@ use super::compose::explain_move;
 use super::compose::line_is_legal;
 use super::compose::score_label;
 use super::facts;
+use super::stability;
+use super::stability::RoundSummary;
+use super::stability::Stability;
+use super::stability::StabilityLevel;
 use crate::Move;
 use crate::Position;
 use crate::notation;
@@ -30,7 +34,7 @@ use crate::uci::Bound;
 use crate::uci::Score;
 
 /// 对比内容的生成版本：生成规则改变时递增。
-pub const COMPARE_VERSION: u32 = 1;
+pub const COMPARE_VERSION: u32 = 2;
 
 /// 两种走法在同一次搜索中的结果。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +47,9 @@ pub struct CompareEvidence {
     pub complete: bool,
     /// 搜索不完整的原因。
     pub notes: Vec<String>,
+    /// 最近几个深度的完整一轮（判断两步的先后是否还在变化）；早期的结果没有这一项。
+    #[serde(default)]
+    pub rounds: Vec<RoundSummary>,
 }
 
 /// 对比的结论方向。
@@ -90,6 +97,9 @@ pub struct MoveComparison {
     pub evidence: Vec<Evidence>,
     pub warnings: Vec<String>,
     pub conditions: Option<String>,
+    /// 这次搜索的稳定性；还没有分析时为空。
+    #[serde(default)]
+    pub stability: Option<Stability>,
 }
 
 /// 对比同一局面下的两种走法。走法不合法或两步相同时返回 `None`。
@@ -111,6 +121,7 @@ pub fn compare_moves(
     let b = side(before, reference, "b", ctx, ref_line, &mut evidence, &mut warnings);
 
     let mut differences = Vec::new();
+    let mut stability_info = None;
     // 规则事实上的差别：是否吃子、是否将军
     let (fa, fb) = (facts::move_facts(before, mine)?, facts::move_facts(before, reference)?);
     if fa.captured.is_some() != fb.captured.is_some() || fa.captured != fb.captured {
@@ -130,6 +141,10 @@ pub fn compare_moves(
         }
         Some(e) => {
             warnings.extend(e.notes.iter().cloned());
+            let settled = stability::assess(before, &e.rounds, e.complete);
+            let shifting = settled.level == StabilityLevel::Shifting;
+            let reasons = settled.reasons.join("；");
+            stability_info = Some(settled);
             match (mine_line, ref_line) {
                 _ if !e.complete => {
                     differences.push(program_claim("本次比较搜索没有完成整轮，暂不比较两步的优劣".to_string()));
@@ -137,8 +152,15 @@ pub fn compare_moves(
                 }
                 (Some(m), Some(r)) => {
                     let (outcome, text) = judge_pair(m, r, &a.notation, &b.notation);
-                    differences.push(program_claim(format!("同一次搜索中，{text}")));
-                    outcome
+                    if shifting && matches!(outcome, CompareOutcome::MineBetter | CompareOutcome::ReferenceBetter) {
+                        // 两步的先后在最近几个深度中仍在变化：不比较优劣
+                        differences.push(program_claim(format!("两步的先后在最近几个深度中仍在变化，暂不比较优劣（{reasons}）")));
+                        warnings.push("排名仍在变化：可以用“深入分析”增加搜索预算后再比较".to_string());
+                        CompareOutcome::Unclear
+                    } else {
+                        differences.push(program_claim(format!("同一次搜索中，{text}")));
+                        outcome
+                    }
                 }
                 _ => {
                     differences.push(program_claim("搜索没有同时给出两步的结果，暂不比较优劣".to_string()));
@@ -167,6 +189,7 @@ pub fn compare_moves(
         evidence,
         warnings,
         conditions: engine.map(|e| e.conditions.clone()),
+        stability: stability_info,
     })
 }
 
@@ -321,7 +344,7 @@ mod tests {
     }
 
     fn engine(lines: Vec<EngineLine>, complete: bool) -> CompareEvidence {
-        CompareEvidence { lines, conditions: "测试 · 深度 12".into(), complete, notes: vec![] }
+        CompareEvidence { lines, conditions: "测试 · 深度 12".into(), complete, notes: vec![], rounds: vec![] }
     }
 
     #[test]
@@ -401,6 +424,31 @@ mod tests {
         let (o, t) = judge_pair(&a, &b, "我的", "对照");
         assert_eq!(o, CompareOutcome::ReferenceBetter);
         assert!(t.contains("4 步内杀棋"), "{t}");
+    }
+
+    #[test]
+    fn two_moves_whose_order_is_still_changing_are_not_judged() {
+        let pos = Position::startpos();
+        let lines = vec![
+            EngineLine { mv: Move::parse_iccs("h2e2").unwrap(), score: Score::Cp(40), bound: Bound::Exact, depth: 12, pv: vec![Move::parse_iccs("h2e2").unwrap()] },
+            EngineLine { mv: Move::parse_iccs("a3a4").unwrap(), score: Score::Cp(-80), bound: Bound::Exact, depth: 12, pv: vec![Move::parse_iccs("a3a4").unwrap()] },
+        ];
+        let order = |first: &str, second: &str, depth| RoundSummary {
+            depth,
+            moves: vec![Move::parse_iccs(first).unwrap(), Move::parse_iccs(second).unwrap()],
+            top: Score::Cp(40),
+            top_bound: Bound::Exact,
+        };
+        let shifting = vec![order("a3a4", "h2e2", 10), order("a3a4", "h2e2", 11), order("h2e2", "a3a4", 12)];
+        let e = CompareEvidence { rounds: shifting, ..engine(lines.clone(), true) };
+        let c = compare_moves(&pos, Move::parse_iccs("a3a4").unwrap(), Move::parse_iccs("h2e2").unwrap(), &CTX, Some(&e)).unwrap();
+        assert_eq!(c.outcome, CompareOutcome::Unclear);
+        assert!(c.differences.iter().any(|d| d.text.contains("仍在变化")));
+        assert_eq!(c.stability.map(|s| s.level), Some(StabilityLevel::Shifting));
+        let settled = vec![order("h2e2", "a3a4", 10), order("h2e2", "a3a4", 11), order("h2e2", "a3a4", 12)];
+        let e = CompareEvidence { rounds: settled, ..engine(lines, true) };
+        let c = compare_moves(&pos, Move::parse_iccs("a3a4").unwrap(), Move::parse_iccs("h2e2").unwrap(), &CTX, Some(&e)).unwrap();
+        assert_eq!(c.outcome, CompareOutcome::ReferenceBetter);
     }
 
     #[test]

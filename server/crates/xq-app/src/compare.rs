@@ -258,5 +258,11 @@ fn default_reference(options: &[CompareOption]) -> Option<Move> {
 }
 
 fn compare_evidence(result: SearchResult, cond: &AnalysisConditions) -> CompareEvidence {
-    CompareEvidence { lines: result.lines, conditions: cond.describe(), complete: result.complete, notes: result.notes }
+    CompareEvidence {
+        lines: result.lines,
+        conditions: cond.describe(),
+        complete: result.complete,
+        notes: result.notes,
+        rounds: result.rounds,
+    }
 }

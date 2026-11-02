@@ -12,6 +12,9 @@ use super::facts::CheckResolution;
 use super::facts::Development;
 use super::facts::LineVia;
 use super::facts::MoveFacts;
+use super::stability;
+use super::stability::RoundSummary;
+use super::stability::Stability;
 use crate::board::Position;
 use crate::notation;
 use crate::rules;
@@ -25,7 +28,7 @@ use crate::uci::Bound;
 use crate::uci::Score;
 
 /// 模板版本，随讲解一起保存，便于判断缓存是否过期。
-pub const GENERATOR_VERSION: u32 = 4;
+pub const GENERATOR_VERSION: u32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -167,6 +170,9 @@ pub struct MoveExplanation {
     pub evidence: Vec<Evidence>,
     pub warnings: Vec<String>,
     pub conditions: Option<String>,
+    /// 候选比较的稳定性（见 `stability`）；没有引擎分析或早期的讲解为空。
+    #[serde(default)]
+    pub stability: Option<Stability>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +186,8 @@ pub struct PositionExplanation {
     pub candidates: Vec<CandidateView>,
     pub warnings: Vec<String>,
     pub conditions: Option<String>,
+    #[serde(default)]
+    pub stability: Option<Stability>,
 }
 
 /// 一条引擎变化（评分为根局面行棋方视角）。
@@ -206,6 +214,9 @@ pub struct EngineEvidence {
     /// 候选不完整或不一致的原因。
     #[serde(default)]
     pub notes: Vec<String>,
+    /// 多候选搜索最近几个深度的完整一轮（判断稳定性）；早期的证据没有这一项。
+    #[serde(default)]
+    pub rounds: Vec<RoundSummary>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1027,6 +1038,7 @@ pub fn explain_move(
     let mut comparison = Vec::new();
     let mut replies = Vec::new();
     let mut verdict = None;
+    let mut stability_info = None;
     let mut candidates = Vec::new();
     let mut reply_captures = false;
     let mut swing_loss: Option<String> = None;
@@ -1042,6 +1054,11 @@ pub fn explain_move(
         let rank = engine.candidates.iter().position(|c| c.mv == mv).map(|i| i as u32 + 1);
         let actual_line = rank.map(|r| &engine.candidates[r as usize - 1]).or(engine.actual.as_ref());
         let best_cn = notation::move_to_chinese(before, best.mv).unwrap_or_default();
+        let settled = stability::assess(before, &engine.rounds, engine.complete);
+        // 最近几个深度首选仍在变化：不说“首选”，不按分差评价（损失很大的严重失误除外）
+        let shifting = settled.level == stability::StabilityLevel::Shifting;
+        let shift_note = settled.reasons.join("；");
+        stability_info = Some(settled);
 
         if !engine.complete {
             // 候选不完整，或与引擎最终着法不一致：排名与分差都不可靠，不评价优劣，也不称哪一着为首选
@@ -1063,11 +1080,17 @@ pub fn explain_move(
             verdict = Some(Verdict { tone: VerdictTone::Unclear, label: "比较尚未完成".into(), delta: None, note: reason });
             warnings.push("候选比较尚未完成：暂不评价优劣，引擎变化只作参考".to_string());
         } else if let Some(actual) = actual_line {
-            let v = judge(best, actual, rank);
+            let judged = judge(best, actual, rank);
+            let held = shifting && matches!(judged.tone, VerdictTone::Best | VerdictTone::Inaccuracy | VerdictTone::Mistake);
+            let v = if held {
+                Verdict { tone: VerdictTone::Unclear, label: "排名仍在变化".into(), delta: None, note: shift_note.clone() }
+            } else {
+                judged
+            };
             let best_id = ev.add(
                 EvidenceKind::Variation,
                 "best",
-                format!("引擎首选{}（{}，深度 {}）", best_cn, score_text(best, f.mover), best.depth),
+                format!("{}{}（{}，深度 {}）", if shifting { "当前深度的首选" } else { "引擎首选" }, best_cn, score_text(best, f.mover), best.depth),
                 vec![best.mv.from, best.mv.to],
                 vec![best.mv],
                 Some(LineRef {
@@ -1083,7 +1106,23 @@ pub fn explain_move(
                     &[&best_id],
                 ));
             }
-            if v.tone == VerdictTone::Best {
+            if held {
+                let id = ev.add(
+                    EvidenceKind::Variation,
+                    "unsettled",
+                    format!("排名仍在变化：{shift_note}"),
+                    vec![],
+                    vec![],
+                    None,
+                    Certainty::Tentative,
+                );
+                let text = if best.mv == mv {
+                    format!("{}是当前深度的首选，但最近几个深度首选仍在变化，暂不评价它与其他着法的优劣", f.notation)
+                } else {
+                    format!("当前深度的首选是{best_cn}，但最近几个深度首选仍在变化，暂不评价{}与它的优劣", f.notation)
+                };
+                comparison.push(claim(text, &[&best_id, &id]));
+            } else if v.tone == VerdictTone::Best {
                 let mut text = format!("在当前分析中，{}是首选", f.notation);
                 let mut ids = vec![best_id.clone()];
                 if let Some(second) = engine.candidates.get(1) {
@@ -1119,7 +1158,7 @@ pub fn explain_move(
                 comparison.push(claim(text, &refs));
             } else {
                 let best_summary = first_move_summary(before, best.mv);
-                let mut text = format!("引擎首选{best_cn}");
+                let mut text = format!("{}{best_cn}", if shifting { "当前深度的首选是" } else { "引擎首选" });
                 if !best_summary.is_empty() {
                     text.push_str(&format!("（{best_summary}）"));
                 }
@@ -1133,8 +1172,12 @@ pub fn explain_move(
                 comparison.push(claim(text, &[&best_id]));
             }
 
-            if v.tone == VerdictTone::Unclear {
+            if held {
+                warnings.push("最近几个深度首选仍在变化：暂不评价排名与优劣，建议深入分析".to_string());
+            } else if v.tone == VerdictTone::Unclear {
                 warnings.push("不同搜索得出的结论不一致，建议用“深入分析”增加搜索预算".to_string());
+            } else if shifting {
+                warnings.push("最近几个深度首选仍在变化，这里的评价只因差距较大才给出".to_string());
             }
             verdict = Some(v);
         } else {
@@ -1260,6 +1303,7 @@ pub fn explain_move(
         evidence: ev.items,
         warnings,
         conditions,
+        stability: stability_info,
     };
     audit(&mut explanation.evidence, &mut explanation.warnings, before, &f.after);
     for claims in [&mut explanation.need, &mut explanation.basis, &mut explanation.comparison, &mut explanation.replies] {
@@ -1456,8 +1500,10 @@ pub fn explain_position(pos: &Position, ctx: &ExplainContext, engine: Option<&En
 
     let mut candidates = Vec::new();
     let mut conditions = None;
+    let mut stability_info = None;
     if let Some(engine) = engine.filter(|e| !e.candidates.is_empty()) {
         conditions = Some(engine.conditions.clone());
+        stability_info = Some(stability::assess(pos, &engine.rounds, engine.complete));
         candidates = candidate_views(pos, engine, None);
         warnings.extend(illegal_line_warnings(pos, engine));
         warnings.extend(engine.notes.iter().cloned());
@@ -1483,9 +1529,14 @@ pub fn explain_position(pos: &Position, ctx: &ExplainContext, engine: Option<&En
             moves: best.pv.clone(),
             notation: notation::line_to_chinese(pos, &best.pv),
         };
-        let mut text = format!("引擎首选{best_cn}（{}）", score_text(best, side));
+        let shifting = stability_info.as_ref().is_some_and(|s: &Stability| s.level == stability::StabilityLevel::Shifting);
+        let lead = if shifting { "当前深度的首选是" } else { "引擎首选" };
+        let mut text = format!("{lead}{best_cn}（{}）", score_text(best, side));
         if !effect.is_empty() {
             text.push_str(&format!("：{effect}"));
+        }
+        if shifting {
+            text.push_str("；最近几个深度首选仍在变化，几个候选都值得考虑");
         }
         let id = ev.add(
             EvidenceKind::Variation,
@@ -1512,12 +1563,14 @@ pub fn explain_position(pos: &Position, ctx: &ExplainContext, engine: Option<&En
         candidates,
         warnings,
         conditions,
+        stability: stability_info,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::explain::stability::StabilityLevel;
     use crate::fen::parse_position;
 
     fn mv(s: &str) -> Move { Move::parse_iccs(s).unwrap() }
@@ -1555,6 +1608,7 @@ mod tests {
             conditions: "测试".into(),
             complete: true,
             notes: vec![],
+            rounds: vec![],
         };
         let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
         let on = |topic: &str| e.evidence.iter().find(|x| x.topic == topic).and_then(|x| x.on);
@@ -1565,6 +1619,48 @@ mod tests {
         // 说明一个局面时，证据都在这个局面上
         let p = explain_position(&pos, &CTX, Some(&engine));
         assert!(p.evidence.iter().all(|x| x.on == Some(LineBase::Node)), "{:?}", p.evidence);
+    }
+
+    #[test]
+    fn a_ranking_that_is_still_changing_is_not_judged() {
+        // 炮五进四打中卒：最后两个深度首选在马二进三与马八进七之间交换
+        let pos = parse_position("rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w").unwrap();
+        let shifting: Vec<RoundSummary> = [(9, ["h0g2", "b0c2"]), (10, ["h0g2", "b0c2"]), (11, ["h0g2", "b0c2"]), (12, ["b0c2", "h0g2"])]
+            .into_iter()
+            .map(|(depth, ms)| RoundSummary { depth, moves: ms.iter().map(|m| mv(m)).collect(), top: Score::Cp(60), top_bound: Bound::Exact })
+            .collect();
+        let engine = |actual: Option<EngineLine>, rounds: Vec<RoundSummary>| EngineEvidence {
+            candidates: vec![line("b0c2", Score::Cp(60), &["b0c2", "b9c7"]), line("h0g2", Score::Cp(55), &["h0g2", "h9g7"])],
+            actual,
+            conditions: "测试".into(),
+            complete: true,
+            notes: vec![],
+            rounds,
+        };
+        let words = |e: &MoveExplanation| e.comparison.iter().map(|c| c.text.clone()).collect::<Vec<_>>().join("；");
+        // 实际走了当前深度的首选：不说“是首选”
+        let e = explain_move(&pos, mv("b0c2"), &CTX, Some(&engine(None, shifting.clone()))).unwrap();
+        let v = e.verdict.clone().unwrap();
+        assert_eq!((v.tone, v.label.as_str()), (VerdictTone::Unclear, "排名仍在变化"));
+        assert!(words(&e).contains("最近几个深度首选仍在变化") && !words(&e).contains("在当前分析中"), "{}", words(&e));
+        assert_eq!(e.stability.as_ref().map(|s| s.level), Some(StabilityLevel::Shifting));
+        assert_eq!(e.level, ExplainLevel::Detailed, "分析本身完成了，只是排名还在变化");
+        // 略逊、明显不如：不按分差评价
+        let mistake = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine(Some(line("e2e6", Score::Cp(-60), &["e2e6"])), shifting.clone()))).unwrap();
+        assert_eq!(mistake.verdict.as_ref().unwrap().tone, VerdictTone::Unclear);
+        assert!(!words(&mistake).contains("明显不如"), "{}", words(&mistake));
+        // 损失很大的严重失误照样指出，并说明排名仍在变化
+        let blunder = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine(Some(line("e2e6", Score::Cp(-320), &["e2e6"])), shifting.clone()))).unwrap();
+        assert_eq!(blunder.verdict.as_ref().unwrap().tone, VerdictTone::Blunder);
+        assert!(blunder.warnings.iter().any(|w| w.contains("仍在变化")));
+        // 排名稳定时照常评价
+        let settled: Vec<RoundSummary> = shifting.iter().map(|r| RoundSummary { moves: vec![mv("b0c2"), mv("h0g2")], ..r.clone() }).collect();
+        let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine(Some(line("e2e6", Score::Cp(-60), &["e2e6"])), settled.clone()))).unwrap();
+        assert_eq!(e.verdict.unwrap().tone, VerdictTone::Mistake);
+        assert_eq!(e.stability.map(|s| s.level), Some(StabilityLevel::High));
+        // 说明一个局面时同样不称“引擎首选”
+        let p = explain_position(&pos, &CTX, Some(&engine(None, shifting)));
+        assert!(p.claims.iter().any(|c| c.text.starts_with("当前深度的首选是马八进七") && c.text.contains("仍在变化")), "{:?}", p.claims);
     }
 
     #[test]
@@ -1591,6 +1687,7 @@ mod tests {
             conditions: "测试".into(),
             complete: true,
             notes: vec![],
+            rounds: vec![],
         };
         let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
         let v = e.verdict.clone().unwrap();
@@ -1648,7 +1745,7 @@ mod tests {
         let pos = parse_position("rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w").unwrap();
         let candidates = vec![line("h0g2", Score::Cp(60), &["h0g2", "i9h9"]), line("b0c2", Score::Cp(50), &["b0c2"])];
         // 实际走法不在候选中，单独分析又失败
-        let engine = EngineEvidence { candidates: candidates.clone(), actual: None, conditions: "测试".into(), complete: true, notes: vec![] };
+        let engine = EngineEvidence { candidates: candidates.clone(), actual: None, conditions: "测试".into(), complete: true, notes: vec![], rounds: vec![] };
         let e = explain_move(&pos, mv("e2e6"), &CTX, Some(&engine)).unwrap();
         assert_eq!(e.level, ExplainLevel::Partial);
         assert!(e.verdict.is_none());
@@ -1659,6 +1756,7 @@ mod tests {
             conditions: "测试".into(),
             complete: false,
             notes: vec!["最后一轮搜索没有完成".into()],
+            rounds: vec![],
         };
         let e = explain_move(&pos, mv("h0g2"), &CTX, Some(&engine)).unwrap();
         assert_eq!(e.level, ExplainLevel::Partial);
@@ -1675,6 +1773,7 @@ mod tests {
             conditions: "测试".into(),
             complete: false,
             notes: vec!["引擎最终着法与候选首位不一致，比较结果可能不稳定".into()],
+            rounds: vec![],
         };
         let e = explain_move(&Position::startpos(), mv("h0g2"), &CTX, Some(&engine)).unwrap();
         assert_eq!(e.level, ExplainLevel::Partial);
@@ -1705,6 +1804,7 @@ mod tests {
             conditions: "测试".into(),
             complete: true,
             notes: vec![],
+            rounds: vec![],
         };
         for played in ["e1d1", "e1e2"] {
             let e = explain_move(&pos, mv(played), &CTX, Some(&engine)).unwrap();
@@ -1752,6 +1852,7 @@ mod tests {
             conditions: "测试".into(),
             complete: true,
             notes: vec![],
+            rounds: vec![],
         };
         let e = explain_move(&Position::startpos(), mv("h0g2"), &CTX, Some(&engine)).unwrap();
         assert!(e.warnings.iter().any(|w| w.contains("无法在当前局面合法回放")), "{:?}", e.warnings);

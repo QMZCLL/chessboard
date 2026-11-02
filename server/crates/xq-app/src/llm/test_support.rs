@@ -69,6 +69,28 @@ pub fn detailed_bundle(lines: &[(&str, i32, &[&str])], complete: bool) -> Eviden
         conditions: "测试引擎 · 快速分析（≤1.0 秒，深度≤10）· 2 个候选".into(),
         complete,
         notes: if complete { vec![] } else { vec!["引擎最终着法与候选首位不一致，比较结果可能不稳定".into()] },
+        rounds: vec![],
+    };
+    build(&study, 1, &record(&study, 1, Some(&engine))).unwrap()
+}
+
+/// 起始局面走马二进三；最后一个深度首选才由马二进三换成炮二平五（排名仍在变化）。
+pub fn shifting_bundle() -> EvidenceBundle {
+    use xq_core::explain::stability::RoundSummary;
+    let study = study_with(&["h0g2"]);
+    let round = |depth, first: &str, second: &str| RoundSummary {
+        depth,
+        moves: vec![mv(first), mv(second)],
+        top: Score::Cp(30),
+        top_bound: Bound::Exact,
+    };
+    let engine = EngineEvidence {
+        candidates: vec![line("h2e2", 30, &["h2e2", "h9g7"]), line("h0g2", 28, &["h0g2", "h9g7"])],
+        actual: None,
+        conditions: "测试".into(),
+        complete: true,
+        notes: vec![],
+        rounds: vec![round(8, "h0g2", "h2e2"), round(9, "h0g2", "h2e2"), round(10, "h2e2", "h0g2")],
     };
     build(&study, 1, &record(&study, 1, Some(&engine))).unwrap()
 }
@@ -83,6 +105,7 @@ pub fn blunder_bundle() -> EvidenceBundle {
         conditions: "测试".into(),
         complete: true,
         notes: vec![],
+        rounds: vec![],
     };
     build(&study, 1, &record(&study, 1, Some(&engine))).unwrap()
 }
@@ -98,6 +121,7 @@ pub fn mate_bundle(complete: bool) -> EvidenceBundle {
         conditions: "测试".into(),
         complete,
         notes: if complete { vec![] } else { vec!["最后一轮搜索没有完成".into()] },
+        rounds: vec![],
     };
     build(&study, 1, &record(&study, 1, Some(&engine))).unwrap()
 }
@@ -115,6 +139,7 @@ pub fn ask_bundle(kind: super::ask::QuestionKind, searched: bool, complete: bool
         conditions: "测试引擎 · 快速分析".into(),
         complete,
         notes: if complete { vec![] } else { vec!["最后一轮搜索没有完成".into()] },
+        rounds: vec![],
     };
     let comparison = compare_moves(&before, mv("h2e2"), mv("h0g2"), &ctx, searched.then_some(&engine)).unwrap();
     let cached = crate::compare::CachedComparison {

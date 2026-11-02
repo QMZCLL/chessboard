@@ -545,5 +545,5 @@ fn evidence(result: SearchResult, single: Option<SearchResult>, cond: &AnalysisC
         notes.extend(s.notes.into_iter().map(|n| format!("实际着法单独分析：{n}")));
         s.lines.into_iter().next()
     });
-    EngineEvidence { candidates: result.lines, actual, conditions: cond.describe(), complete, notes }
+    EngineEvidence { candidates: result.lines, actual, conditions: cond.describe(), complete, notes, rounds: result.rounds }
 }

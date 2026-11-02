@@ -12,6 +12,7 @@
 
 use std::collections::HashSet;
 
+use xq_core::explain::stability::StabilityLevel;
 
 use super::CoachExplanation;
 use super::FollowupAction;
@@ -388,8 +389,13 @@ fn followup_evidence(bundle: &EvidenceBundle, action: FollowupAction) -> Option<
     };
     match action {
         FollowupAction::ShowReply => by_topic("reply"),
-        // 分析不完整时没有确定的首选
-        FollowupAction::ShowBest if !bundle.pack.analysis.complete => None,
+        // 分析不完整、或最近几个深度首选仍在变化时，没有确定的首选
+        FollowupAction::ShowBest
+            if !bundle.pack.analysis.complete
+                || bundle.pack.analysis.stability.as_ref().is_some_and(|s| s.level == StabilityLevel::Shifting) =>
+        {
+            None
+        }
         FollowupAction::ShowBest => by_topic("best").or_else(|| candidate(&|c| c.rank == Some(1))),
         FollowupAction::CompareAlternative => by_topic("second").or_else(|| candidate(&|c| !c.is_actual)),
     }
@@ -517,6 +523,25 @@ mod tests {
         assert_eq!(blunder.pack.verdict.as_ref().unwrap().tone, xq_core::explain::VerdictTone::Blunder);
         let cmp = claim_of(&blunder, "comparison");
         rejects(&blunder, "comparison", "这步是严重失误。", &cmp, "“失误”属于");
+    }
+
+    #[test]
+    fn a_ranking_still_changing_offers_no_best_line_and_says_so_in_the_scope() {
+        let b = super::super::test_support::shifting_bundle();
+        let s = b.pack.analysis.stability.clone().unwrap();
+        assert_eq!((s.level, s.label.as_str()), (StabilityLevel::Shifting, "仍在变化"));
+        assert!(b.pack.analysis.allowed_scope.iter().any(|r| r.contains("首选仍在变化")), "{:?}", b.pack.analysis.allowed_scope);
+        // 与当前首选接近的结论照常给出（差距小，不依赖谁排第一），但不称“引擎首选”
+        assert_eq!(b.pack.verdict.as_ref().map(|v| v.tone), Some(xq_core::explain::VerdictTone::Close));
+        assert!(b.pack.claims.iter().any(|c| c.statement.contains("当前深度的首选是炮二平五")), "{:?}", b.pack.claims);
+        let cand = claim_of(&b, "candidate");
+        let ok = validate(
+            &output("出动右马。", json!([{ "kind": "comparison", "text": "几个候选都值得考虑。", "claim_ids": [cand] }])),
+            &b,
+            Detail::Normal,
+        )
+        .unwrap();
+        assert!(ok.followups.iter().all(|f| f.action != FollowupAction::ShowBest));
     }
 
     #[test]

@@ -8,5 +8,6 @@ pub mod compose;
 pub mod describe;
 pub mod facts;
 pub mod hints;
+pub mod stability;
 
 pub use compose::*;

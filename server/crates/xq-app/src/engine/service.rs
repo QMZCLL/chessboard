@@ -19,6 +19,7 @@ use tracing::warn;
 use xq_core::Move;
 use xq_core::Position;
 use xq_core::explain::EngineLine;
+use xq_core::explain::stability::RoundSummary;
 use xq_core::fen;
 use xq_core::rules;
 use xq_core::rules::GameStatus;
@@ -49,6 +50,8 @@ const DEPTH_ONLY_CAP: Duration = Duration::from_secs(120);
 /// 发送 stop 后多久仍无 bestmove 就结束进程。
 const STOP_TIMEOUT: Duration = Duration::from_secs(3);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
+/// 结果中保留的最近几个深度的完整一轮（用于判断稳定性，见 `stability`）。
+const MAX_ROUNDS: usize = 8;
 
 type ProgressFn = Box<dyn FnMut(SearchProgress) + Send>;
 type DoneFn = Box<dyn FnOnce(SearchOutcome) + Send>;
@@ -157,6 +160,8 @@ struct Running {
     round_depth: u32,
     /// 最近一轮完整候选（深度、按名次排列）。
     complete: Option<(u32, Vec<EngineLine>)>,
+    /// 各个深度完整一轮的摘要，按深度升序，最多 `MAX_ROUNDS` 个。
+    rounds: Vec<RoundSummary>,
     depth: u32,
     nodes: u64,
     time_ms: u64,
@@ -383,7 +388,18 @@ impl Worker {
             if r.round.len() as u32 == r.expected {
                 let firsts: HashSet<_> = r.round.values().map(|l| l.mv).collect();
                 if firsts.len() == r.round.len() {
-                    r.complete = Some((depth, r.round.values().cloned().collect()));
+                    let lines: Vec<EngineLine> = r.round.values().cloned().collect();
+                    let summary =
+                        RoundSummary { depth, moves: lines.iter().map(|l| l.mv).collect(), top: lines[0].score, top_bound: lines[0].bound };
+                    // 同一深度的一轮又有更新（例如名次之间交换）时以最新的为准
+                    match r.rounds.last_mut() {
+                        Some(last) if last.depth == depth => *last = summary,
+                        _ => r.rounds.push(summary),
+                    }
+                    if r.rounds.len() > MAX_ROUNDS {
+                        r.rounds.remove(0);
+                    }
+                    r.complete = Some((depth, lines));
                 }
             }
             r.depth = r.depth.max(depth);
@@ -427,6 +443,7 @@ impl Worker {
                 match collect_round(r.complete, r.round, r.round_depth, mv) {
                     Some((lines, depth, complete, notes)) => SearchOutcome::Completed(SearchResult {
                         lines,
+                        rounds: r.rounds,
                         bestmove: Some(mv),
                         depth,
                         nodes: r.nodes,
@@ -800,6 +817,7 @@ impl Worker {
             round: BTreeMap::new(),
             round_depth: 0,
             complete: None,
+            rounds: Vec::new(),
             depth: 0,
             nodes: 0,
             time_ms: 0,

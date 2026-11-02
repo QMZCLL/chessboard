@@ -12,6 +12,7 @@ import CoachCard from "./CoachCard.vue";
 import ComparePanel from "./ComparePanel.vue";
 import ClaimList from "./ClaimList.vue";
 import VerdictTag from "./VerdictTag.vue";
+import StabilityNote from "./StabilityNote.vue";
 import {
   analyze,
   canDemo,
@@ -269,6 +270,7 @@ function openThisReview() {
                   <h2 class="move-name" data-testid="move-name">{{ expl.notation }}</h2>
                   <div class="head-tags">
                     <VerdictTag v-if="expl.verdict" :verdict="expl.verdict" />
+                    <StabilityNote v-if="expl.stability && expl.stability.level !== 'incomplete'" :stability="expl.stability" />
                     <n-tag size="small" :bordered="false" :type="LEVEL[expl.level].type">
                       {{ expl.level === "detailed" && record?.budget === "deep" ? "深入分析完整" : LEVEL[expl.level].text }}
                     </n-tag>
@@ -319,6 +321,7 @@ function openThisReview() {
                     <h4 ref="candidatesAnchor" class="section-title">候选比较</h4>
                     <ClaimList v-if="expl.comparison.length" scope="comparison" :claims="expl.comparison" :evidence="expl.evidence" />
                     <p v-else class="muted">等待引擎分析后补充候选比较。</p>
+                    <StabilityNote v-if="expl.stability && expl.stability.level !== 'incomplete'" :stability="expl.stability" inline />
                     <CandidateTable v-if="expl.candidates.length" scope="move-cand" :candidates="expl.candidates" base="parent" show-actual />
                     <h4 class="section-title">主要应对</h4>
                     <ClaimList v-if="expl.replies.length" scope="replies" :claims="expl.replies" :evidence="expl.evidence" />
@@ -399,6 +402,11 @@ function openThisReview() {
             <n-alert v-for="w in position.warnings" :key="w" type="info" :show-icon="false" class="alert">{{ w }}</n-alert>
             <template v-if="position.status === 'ongoing'">
               <h4 class="section-title">引擎候选</h4>
+              <StabilityNote
+                v-if="position.stability && position.stability.level !== 'incomplete' && !analysisHere?.candidates.length"
+                :stability="position.stability"
+                inline
+              />
               <CandidateTable scope="pos-cand" :candidates="positionCandidates" base="node" />
               <p v-if="position.conditions" class="conditions">分析条件：{{ position.conditions }}</p>
               <div v-if="wb.status?.config.cloud.enabled" class="cloud">

@@ -156,6 +156,17 @@ export interface Verdict {
   note: string;
 }
 
+/** 搜索结论的稳定性（见后台 stability）：衡量这次搜索的结论还在不在变化，不是正确的概率 */
+export type StabilityLevel = "incomplete" | "shifting" | "medium" | "high";
+
+export interface Stability {
+  level: StabilityLevel;
+  /** 判断的依据 */
+  reasons: string[];
+  /** 参与判断的深度范围 */
+  depths: [number, number] | null;
+}
+
 export interface MoveExplanation {
   generator_version: number;
   level: ExplainLevel;
@@ -173,6 +184,8 @@ export interface MoveExplanation {
   evidence: Evidence[];
   warnings: string[];
   conditions: string | null;
+  /** 候选比较的稳定性；没有引擎分析或早期的讲解为空 */
+  stability?: Stability | null;
 }
 
 export interface PositionExplanation {
@@ -185,6 +198,7 @@ export interface PositionExplanation {
   candidates: CandidateView[];
   warnings: string[];
   conditions: string | null;
+  stability?: Stability | null;
 }
 
 export interface ExplanationRecord {
@@ -883,6 +897,7 @@ export interface MoveComparison {
   evidence: Evidence[];
   warnings: string[];
   conditions: string | null;
+  stability?: Stability | null;
 }
 
 export interface CompareOption {

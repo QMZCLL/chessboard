@@ -9,6 +9,7 @@ import { nodeOf, roundAfter, wb } from "../state/workbench";
 import { sideLabel } from "../utils/board";
 import CoachAsk from "./CoachAsk.vue";
 import Icon from "./Icon.vue";
+import StabilityNote from "./StabilityNote.vue";
 
 const view = computed(() => cmp.view);
 const comparison = computed(() => view.value?.comparison ?? null);
@@ -117,6 +118,7 @@ function replyText(s: CompareSide): string {
         <ul v-if="comparison.differences.length" class="points">
           <li v-for="(d, i) in comparison.differences" :key="i">{{ d.text }}</li>
         </ul>
+        <StabilityNote v-if="!view.pending && comparison.stability && comparison.stability.level !== 'incomplete'" :stability="comparison.stability" inline />
         <p v-else-if="!view.pending" class="muted">两步在规则事实上没有直接可比的差别。</p>
         <p v-if="view.error" class="warn">没有得到比较搜索的结果：{{ view.error }}。下面只列出规则事实。</p>
       </section>
