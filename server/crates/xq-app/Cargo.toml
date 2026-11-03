@@ -1,6 +1,6 @@
 [package]
 name = "xq-app"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "学习助手的应用服务层：配置、存储、引擎服务、讲解任务与屏幕捕获流程"
 

@@ -6503,7 +6503,7 @@ dependencies = [
 
 [[package]]
 name = "xq-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "redb",
  "reqwest",
@@ -6520,7 +6520,7 @@ dependencies = [
 
 [[package]]
 name = "xq-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6529,7 +6529,7 @@ dependencies = [
 
 [[package]]
 name = "xq-devserver"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6542,7 +6542,7 @@ dependencies = [
 
 [[package]]
 name = "xqlink"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "image 0.25.6",

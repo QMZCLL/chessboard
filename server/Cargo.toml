@@ -1,6 +1,6 @@
 [package]
 name = "xqlink"
-version = "0.2.0"
+version = "0.3.0"
 description = "中国象棋学习助手"
 authors = ["atopx <3940422@qq.com>"]
 edition = "2024"
