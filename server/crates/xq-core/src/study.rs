@@ -356,6 +356,13 @@ impl Study {
         Ok(path[from..].iter().filter(|n| self.nodes.get(n).is_some_and(|x| fen::position_key(&x.fen) == target)).count())
     }
 
+    /// 这盘棋的指纹：根局面与主线着法（见 `record::game_fingerprint`），用来认出重复导入的棋局。
+    pub fn fingerprint(&self) -> Result<String, StudyError> {
+        let start = self.position(ROOT)?;
+        let moves = self.mainline().into_iter().skip(1).filter_map(|id| self.nodes.get(&id)).map(|n| n.mv);
+        Ok(crate::record::game_fingerprint(&start, moves))
+    }
+
     pub fn mainline(&self) -> Vec<NodeId> {
         let mut line = vec![ROOT];
         let mut cur = ROOT;
