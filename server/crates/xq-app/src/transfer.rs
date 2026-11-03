@@ -32,7 +32,7 @@ const EXPORT_FORMAT: &str = "xqlink-study";
 const EXPORT_VERSION: u32 = 1;
 const CLOUD_URL: &str = "https://www.chessdb.cn/chessdb.php";
 /// 导入的单个文件（学习数据、FEN 或棋谱）的大小上限。
-const MAX_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) const MAX_IMPORT_BYTES: u64 = 32 * 1024 * 1024;
 
 /// 完整学习数据：棋谱树、分支、标注与讲解。
 #[derive(Serialize, Deserialize)]

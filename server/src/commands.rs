@@ -20,6 +20,13 @@ use xq_app::capture::WindowInfo;
 use xq_app::config::AppConfig;
 use xq_app::exercise::ExerciseRequest;
 use xq_app::exercise::ExerciseSummary;
+use xq_app::inbox::InboxGenerateResult;
+use xq_app::inbox::InboxImportRequest;
+use xq_app::inbox::InboxImportResult;
+use xq_app::inbox::InboxList;
+use xq_app::inbox::InboxPreview;
+use xq_app::inbox::InboxPreviewRequest;
+use xq_app::inbox::InboxRef;
 use xq_app::learning::LearningEvent;
 use xq_app::profile::LearningProfile;
 use xq_app::llm::CoachView;
@@ -243,6 +250,36 @@ pub async fn review_hints(state: State<'_, AppService>, req: ReviewRef) -> ApiRe
 pub async fn generate_exercises(state: State<'_, AppService>, req: ExerciseRequest) -> ApiResult<ExerciseSummary> {
     let s = service(&state);
     blocking(move || s.generate_exercises(req)).await
+}
+
+#[tauri::command]
+pub async fn inbox_preview(state: State<'_, AppService>, req: InboxPreviewRequest) -> ApiResult<InboxPreview> {
+    let s = service(&state);
+    blocking(move || s.inbox_preview(req)).await
+}
+
+#[tauri::command]
+pub async fn inbox_import(state: State<'_, AppService>, req: InboxImportRequest) -> ApiResult<InboxImportResult> {
+    let s = service(&state);
+    blocking(move || s.inbox_import(req)).await
+}
+
+#[tauri::command]
+pub async fn inbox_list(state: State<'_, AppService>) -> ApiResult<InboxList> {
+    let s = service(&state);
+    blocking(move || s.inbox_list()).await
+}
+
+#[tauri::command]
+pub async fn inbox_generate(state: State<'_, AppService>) -> ApiResult<InboxGenerateResult> {
+    let s = service(&state);
+    blocking(move || s.inbox_generate()).await
+}
+
+#[tauri::command]
+pub async fn inbox_remove(state: State<'_, AppService>, req: InboxRef) -> ApiResult<InboxList> {
+    let s = service(&state);
+    blocking(move || s.inbox_remove(req)).await
 }
 
 #[tauri::command]

@@ -1828,3 +1828,136 @@ fn better_exercise_comparison_keeps_the_game_history() {
     assert!(gos.len() == 1 && gos[0].contains("searchmoves c3b5"), "{gos:?}");
     service.shutdown();
 }
+
+/// 等到收件箱中的每一盘都分析完（超时则失败）。
+fn wait_inbox_done(service: &AppService, what: &str) -> xq_app::inbox::InboxList {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let list = service.inbox_list().unwrap();
+        if !list.items.is_empty() && list.items.iter().all(|i| i.done) {
+            return list;
+        }
+        assert!(Instant::now() < deadline, "{what}：收件箱没有分析完：{:?}", list.items.iter().map(|i| (i.analysed, i.moves)).collect::<Vec<_>>());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn inbox_previews_splits_dedupes_and_matches_my_side_then_generates_once() {
+    use xq_app::inbox::*;
+
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let mut cfg = service.status().config;
+    cfg.player.names = vec![" 张三 ".into(), "Zhang".into(), "张三".into(), String::new()];
+    let status = service.update_config(cfg).unwrap();
+    assert_eq!(status.config.player.names, ["张三", "Zhang"], "去掉空白、空名字与重复");
+    // 已有的一盘
+    service.import_text("[Event \"旧局\"]\n1. 炮二平五 马8进7", None).unwrap();
+
+    let b = "[Red \"张三\"]\n[Black \"李四\"]\n[Date \"2026.10.01\"]\n1. 炮二平五 马8进7 2. 马二进三 车9平8";
+    let pasted = format!(
+        "[Event \"重导\"]\nh2e2 h9g7\n\n{b}\n\n[Red \"王五\"]\n[Black \"ｚｈａｎｇ\"]\n[Date \"2026.09.01\"]\n1. 兵七进一 卒7进1\n\n\
+         {b}\n\n[Event \"练习赛\"]\n1. 相三进五 马8进7 2. 马二进三 车9平8\n\n[Event \"坏\"]\n[FEN \"4k4/9/9/9/9/9/9/9/9/4K4 w\"]\n"
+    );
+    std::fs::write(dir.path().join("一盘.pgn"), "[Red \"Zhang\"]\n[Black \"Zhang\"]\n1. 炮八平五 炮8平5").unwrap();
+    std::fs::write(dir.path().join("乱码.pgn"), [0xC5u8, 0xDA, 0xB6, 0xFE]).unwrap();
+    let path = |name: &str| dir.path().join(name).to_string_lossy().to_string();
+    let preview = service
+        .inbox_preview(InboxPreviewRequest {
+            sources: vec![
+                InboxSource::Text { name: None, text: pasted },
+                InboxSource::File { path: path("一盘.pgn") },
+                InboxSource::File { path: path("乱码.pgn") },
+            ],
+        })
+        .unwrap();
+    let g = &preview.games;
+    assert_eq!(g.len(), 7, "{g:#?}");
+    assert_eq!(g[0].duplicate.as_deref(), Some("与已有的棋局“旧局”相同"), "记谱方式不同仍认出重复");
+    assert_eq!((g[1].side, g[1].side_reason.as_str(), g[1].name.as_str()), (Some(Color::Red), "红方“张三”与设置中的名字相同", "张三 对 李四"));
+    assert_eq!((g[1].plies, g[1].date.as_deref(), g[1].duplicate.as_ref()), (4, Some("2026.10.01"), None));
+    assert_eq!(g[2].side, Some(Color::Black), "全角与大小写不影响比对");
+    assert_eq!(g[3].duplicate.as_deref(), Some("与这一批中的第 2 盘相同"));
+    assert_eq!((g[4].side, g[4].side_reason.as_str(), g[4].name.as_str()), (None, "棋谱中没有写明双方棋手，请选择", "练习赛"));
+    assert!(g[5].error.as_deref().is_some_and(|e| e.contains("起始局面不成立")), "{:?}", g[5].error);
+    assert_eq!((g[6].source.as_deref(), g[6].side), (Some("一盘"), None), "双方都比对上时需要选择");
+    assert!(preview.notes.iter().any(|n| n.contains("不是 UTF-8")), "{:?}", preview.notes);
+    assert_eq!(service.list_studies().unwrap().len(), 1, "预览不写入");
+
+    // 导入：按预览选定的一方；同一盘再出现时跳过
+    let pick = |i: usize, side: Color| InboxImportGame { text: g[i].text.clone(), name: None, user_side: side };
+    let result = service
+        .inbox_import(InboxImportRequest { games: vec![pick(1, Color::Red), pick(2, Color::Black), pick(4, Color::Black), pick(3, Color::Red)] })
+        .unwrap();
+    assert_eq!((result.added, result.text.as_str()), (3, "加入收件箱 3 盘，引擎空闲时逐盘分析；1 盘没有导入。"));
+    assert!(result.skipped[0].starts_with("第 4 盘“张三 对 李四”与已有的棋局“张三 对 李四”相同"), "{:?}", result.skipped);
+    rec.wait("收件箱更新", |e, _| e == "inbox_updated");
+    let again = service.inbox_import(InboxImportRequest { games: vec![pick(1, Color::Red)] }).unwrap();
+    assert_eq!(again.added, 0, "导入之后再导入同一盘仍认出重复");
+
+    // 有日期的在前、新的在前；没有日期的在后
+    let list = wait_inbox_done(&service, "第一次导入");
+    let names: Vec<&str> = list.items.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, ["张三 对 李四", "王五 对 ｚｈａｎｇ", "练习赛"]);
+    let practice = &list.items[2];
+    assert_eq!((practice.user_side, practice.moves, practice.analysed), (Color::Black, 4, 4));
+    assert_eq!(service.load_study(&practice.study_id).unwrap().study.orientation, Orientation::BlackBottom, "执黑时棋盘黑方在下");
+    assert!(list.items.iter().all(|i| i.key_positions.is_some() && i.exercises.is_none()));
+    assert_eq!(list.text, "共 3 盘，3 盘已分析完，其中 3 盘可以出题。");
+
+    // 出题只为还没有出过题的棋局出一次
+    let first = service.inbox_generate().unwrap();
+    assert_eq!((first.games, first.waiting), (3, 0));
+    assert!(first.text.starts_with("为 3 盘出题"), "{}", first.text);
+    assert!(service.inbox_list().unwrap().items.iter().all(|i| i.exercises.is_some()));
+    assert_eq!(service.inbox_generate().unwrap().text, "没有需要出题的棋局：已经分析完的都出过题了。");
+
+    // 移出只是不再列出；删除棋局时一并移出
+    let removed = service.inbox_remove(InboxRef { study_id: practice.study_id.clone() }).unwrap();
+    assert_eq!(removed.items.len(), 2);
+    assert!(service.list_studies().unwrap().iter().any(|s| s.id == practice.study_id), "移出收件箱不删除棋局");
+    service.delete_study(&list.items[0].study_id).unwrap();
+    assert_eq!(service.inbox_list().unwrap().items.len(), 1);
+    service.shutdown();
+}
+
+#[test]
+fn inbox_analysis_yields_to_the_study_being_viewed_and_resumes_after_restart() {
+    use xq_app::inbox::*;
+
+    // 每次搜索都要一段时间：收件箱的十着要分析好一阵
+    let slow: String = (0..60).map(|_| "@go\nsleep 120\ninfo depth 1 seldepth 1 multipv 1 score cp 10 nodes 1 time 1 pv a3a4\nbestmove a3a4\n").collect();
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), &slow, rec.clone());
+    let text = "[Event \"收件箱\"]\n1. 炮二平五 马8进7 2. 马二进三 车9平8 3. 车一平二 马2进3 4. 兵七进一 卒7进1 5. 车二进六 炮8平9";
+    let result = service.inbox_import(InboxImportRequest { games: vec![InboxImportGame { text: text.into(), name: None, user_side: Color::Red }] }).unwrap();
+    assert_eq!(result.added, 1);
+    // 收件箱排队时新建一盘、走一着：这一着先分析完
+    let study = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap()
+        .study
+        .study
+        .id;
+    let node = service.apply_move(MoveRequest { study_id: study.clone(), parent: ROOT, mv: mv("h2e2"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("正在看的这一着分析完", |e, v| e == "explanation_updated" && v["study_id"] == study.as_str() && v["node_id"] == node && v["record"]["pending"] == false);
+    // 这时引擎只搜索过几次：这一着的候选与实际着法各一次，每次到来时让出正在进行的收件箱搜索（之后重新排队）；
+    // 按后台优先级排队时要先搜完收件箱的十着（实测 14 次）
+    let log = std::fs::read_to_string(dir.path().join("engine").join("mock-uci-commands.log")).unwrap();
+    let gos = log.lines().filter(|l| l.starts_with("go")).count();
+    assert!(gos <= 7, "收件箱的分析让出引擎：已经搜索了 {gos} 次");
+    let item = service.inbox_list().unwrap().items.remove(0);
+    assert!(item.analysed < item.moves, "{}/{}", item.analysed, item.moves);
+
+    // 没有分析完就退出：重新启动后不用打开这盘棋，继续分析
+    service.shutdown();
+    drop(service);
+    let quick: String = (0..60).map(|_| "@go\ninfo depth 1 seldepth 1 multipv 1 score cp 10 nodes 1 time 1 pv a3a4\nbestmove a3a4\n").collect();
+    let restarted = start_with_mock(dir.path(), &quick, rec.clone());
+    let list = wait_inbox_done(&restarted, "重新启动后");
+    assert_eq!((list.items[0].analysed, list.items[0].moves), (10, 10));
+    restarted.shutdown();
+}

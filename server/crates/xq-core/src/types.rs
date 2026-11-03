@@ -5,8 +5,9 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde::Serializer;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum Color {
     Red,
     Black,

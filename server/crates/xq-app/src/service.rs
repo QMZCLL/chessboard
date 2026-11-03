@@ -328,6 +328,8 @@ impl AppService {
         *lock(&inner.coach_workers) = crate::llm::service::spawn_workers(Arc::downgrade(&inner), coach_rx)?;
         // 每天第一次启动时备份学习档案（当天已有备份时不再写入）
         inner.auto_backup();
+        // 收件箱中还没有分析完的着法在引擎空闲时继续分析
+        inner.resume_inbox();
         Ok(Self { inner })
     }
 
@@ -787,6 +789,19 @@ impl Inner {
         &self, name: String, source: StudySource, start: StudyStart, orientation: Option<Orientation>,
         user_side: Option<Color>, moves: &[xq_core::Move],
     ) -> ApiResult<StudyView> {
+        let study = self.build_study(name, source, start, orientation, user_side, moves)?;
+        let created: Vec<NodeId> = study.move_nodes().map(|n| n.id).collect();
+        self.store.save_study(&study)?;
+        self.cache_study(&study);
+        self.on_new_nodes(&study, &created, "create", Priority::Background);
+        self.study_view(&study)
+    }
+
+    /// 建立新会话（还没有保存）：起始局面加上导入的着法。
+    pub(crate) fn build_study(
+        &self, name: String, source: StudySource, start: StudyStart, orientation: Option<Orientation>,
+        user_side: Option<Color>, moves: &[xq_core::Move],
+    ) -> ApiResult<Study> {
         let StudyStart { pos, counters, history_complete } = start;
         let user_side = user_side.unwrap_or(if pos.is_startpos() { Color::Red } else { pos.side });
         let orientation = orientation.unwrap_or(match user_side {
@@ -806,32 +821,35 @@ impl Inner {
             now: now_ms(),
         })?;
         let mut cur = ROOT;
-        let mut created = Vec::new();
         for mv in moves {
-            let outcome = study.apply_move(cur, *mv, MoveSource::Record, now_ms())?;
-            created.push(outcome.node);
-            cur = outcome.node;
+            cur = study.apply_move(cur, *mv, MoveSource::Record, now_ms())?.node;
         }
-        self.store.save_study(&study)?;
-        lock(&self.studies).insert(study.id.clone(), study.clone());
-        self.on_new_nodes(&study, &created, "create", Priority::Background);
-        self.study_view(&study)
+        Ok(study)
     }
+
+    /// 已经保存的会话放进内存中的会话表。
+    pub(crate) fn cache_study(&self, study: &Study) { lock(&self.studies).insert(study.id.clone(), study.clone()); }
 
     /// 新记录的走子：立即排队生成基本讲解，并按设置排队详细讲解。
     pub(crate) fn on_new_nodes(&self, study: &Study, nodes: &[NodeId], reason: &str, priority: Priority) {
         let auto = self.config_snapshot().analysis.auto_explain;
-        for node in nodes {
-            if study.nodes.get(node).is_some_and(|n| n.is_move()) {
-                let mut record = ExplanationRecord::new(&study.id, *node, now_ms());
-                record.pending = true;
-                if let Err(e) = self.store.save_explanation(&record) {
-                    error!("保存讲解任务失败：{e}");
-                }
-                self.enqueue(&study.id, *node, Budget::Quick, priority, auto);
-            }
+        for node in self.mark_pending(study, nodes) {
+            self.enqueue(&study.id, node, Budget::Quick, priority, auto);
         }
         self.emit_study_updated(study, reason, nodes);
+    }
+
+    /// 为新的走子建立讲解任务的记录（界面据此显示“进行中”），返回其中的走子。
+    pub(crate) fn mark_pending(&self, study: &Study, nodes: &[NodeId]) -> Vec<NodeId> {
+        let moves: Vec<NodeId> = nodes.iter().copied().filter(|n| study.nodes.get(n).is_some_and(|x| x.is_move())).collect();
+        for node in &moves {
+            let mut record = ExplanationRecord::new(&study.id, *node, now_ms());
+            record.pending = true;
+            if let Err(e) = self.store.save_explanation(&record) {
+                error!("保存讲解任务失败：{e}");
+            }
+        }
+        moves
     }
 
     pub(crate) fn enqueue(&self, study_id: &str, node_id: NodeId, budget: Budget, priority: Priority, detailed: bool) {

@@ -1,4 +1,5 @@
-//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存、教练追问、复习卡片与练习批次。
+//! 本地数据库：学习会话（含棋谱树与标注）、引擎分析记录、讲解记录、AI 讲解记录与缓存、教练追问、复习卡片与练习批次、
+//! 学习事件与复盘收件箱。
 //! 使用嵌入式数据库 redb，值以 JSON 保存，并带有数据版本，便于后续迁移。
 
 use std::path::Path;
@@ -15,6 +16,7 @@ use crate::llm::CoachRecord;
 use crate::llm::CoachResult;
 use crate::llm::CoachState;
 use crate::llm::ask::AnswerRecord;
+use crate::inbox::InboxEntry;
 use crate::learning::LearningEvent;
 use crate::practice::PracticeSession;
 use crate::records::AnalysisRecord;
@@ -39,6 +41,8 @@ const REVIEWS: TableDefinition<&str, &str> = TableDefinition::new("reviews");
 const PRACTICE: TableDefinition<&str, &str> = TableDefinition::new("practice");
 /// 学习事件，键为事件编号（见 `learning`）。只追加；局面决策的结果晚到时更新同一条。
 const EVENTS: TableDefinition<&str, &str> = TableDefinition::new("learning_events");
+/// 复盘收件箱中的棋局，键为会话编号（见 `inbox`）。删除会话时一并删除。
+const INBOX: TableDefinition<&str, &str> = TableDefinition::new("inbox");
 /// 已经从早期的记录补上学习事件（见 `learning`）。
 const EVENTS_BACKFILLED: &str = "events_backfilled";
 
@@ -126,6 +130,7 @@ impl Store {
             tx.open_table(REVIEWS)?;
             tx.open_table(PRACTICE)?;
             tx.open_table(EVENTS)?;
+            tx.open_table(INBOX)?;
         }
         tx.commit()?;
         Ok(Store { db })
@@ -209,6 +214,7 @@ impl Store {
         let tx = self.db.begin_write()?;
         {
             tx.open_table(STUDIES)?.remove(id)?;
+            tx.open_table(INBOX)?.remove(id)?;
             let prefix = format!("{id}/");
             for table in [EXPLANATIONS, COACH, COACH_CACHE, COACH_ASK] {
                 remove_prefix(&mut tx.open_table(table)?, &prefix)?;
@@ -216,6 +222,35 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// 加入复盘收件箱：棋局与收件箱中的记录在同一个写事务中写入，不会只写入其中一部分。
+    pub fn add_to_inbox(&self, games: &[(Study, InboxEntry)]) -> Result<(), StoreError> {
+        let tx = self.db.begin_write()?;
+        {
+            let mut studies = tx.open_table(STUDIES)?;
+            let mut inbox = tx.open_table(INBOX)?;
+            for (study, entry) in games {
+                studies.insert(study.id.as_str(), serde_json::to_string(study)?.as_str())?;
+                inbox.insert(entry.study_id.as_str(), serde_json::to_string(entry)?.as_str())?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_inbox(&self) -> Result<Vec<InboxEntry>, StoreError> { self.list(INBOX, "收件箱记录") }
+
+    pub fn update_inbox(&self, id: &str, f: impl FnOnce(&mut InboxEntry) -> bool) -> Result<Option<InboxEntry>, StoreError> {
+        self.update_if(INBOX, id, f)
+    }
+
+    /// 移出收件箱，返回是否原来在收件箱中；棋局本身不受影响。
+    pub fn remove_from_inbox(&self, id: &str) -> Result<bool, StoreError> {
+        let tx = self.db.begin_write()?;
+        let removed = tx.open_table(INBOX)?.remove(id)?.is_some();
+        tx.commit()?;
+        Ok(removed)
     }
 
     pub fn save_analysis(&self, record: &AnalysisRecord) -> Result<(), StoreError> {

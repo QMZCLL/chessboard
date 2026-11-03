@@ -1,11 +1,10 @@
 // 与后端 serde 结构一一对应的类型。字段名保持后端的 snake_case。
 
-import type { CardKind, Confidence, Intent, PracticeGoal, ReviewIssue, Stability, StabilityLevel, Theme } from "./generated";
+import type { CardKind, Color, Confidence, Intent, PracticeGoal, ReviewIssue, Stability, StabilityLevel, Theme } from "./generated";
 
 // 由 Rust 结构生成的类型（ts-rs，见 .cargo/config.toml）：新增的共享结构都放在 generated 中，不在这里手写
 export type * from "./generated";
 
-export type Color = "red" | "black";
 export type Orientation = "red_bottom" | "black_bottom";
 /** ICCS 走法，如 "h2e2" */
 export type Move = string;
@@ -621,6 +620,8 @@ export interface AppConfig {
   coach: CoachConfig;
   /** 复习间隔的档位（天）与自动备份保留的份数（0 表示不自动备份） */
   review: { intervals_days: number[]; backup_keep: number };
+  /** 自己的棋手名字：导入多盘棋局时判断哪一方是自己 */
+  player: { names: string[] };
 }
 
 /** 学习档案的来源：桌面应用传文件路径，浏览器中传文件内容 */

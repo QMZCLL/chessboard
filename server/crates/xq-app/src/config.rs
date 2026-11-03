@@ -24,7 +24,19 @@ pub struct AppConfig {
     pub cloud: CloudConfig,
     pub coach: CoachConfig,
     pub review: ReviewConfig,
+    pub player: PlayerConfig,
 }
+
+/// 自己的棋手名字：一次导入多盘棋局时，与棋谱中的红方、黑方比对，判断哪一方是自己（见 `inbox`）。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlayerConfig {
+    pub names: Vec<String>,
+}
+
+/// 最多记下几个名字，每个名字最多几个字。
+pub const MAX_PLAYER_NAMES: usize = 10;
+pub const MAX_PLAYER_NAME_CHARS: usize = 40;
 
 /// 复习的安排与学习档案的自动备份。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +231,7 @@ impl Default for AppConfig {
             cloud: CloudConfig::default(),
             coach: CoachConfig::default(),
             review: ReviewConfig::default(),
+            player: PlayerConfig::default(),
         }
     }
 }
@@ -315,6 +328,18 @@ impl AppConfig {
             notes.push(format!("复习间隔只保留 1～365 天、从小到大排列，已调整为 {days:?} 天"));
         }
         self.review.intervals_days = days;
+        let mut names: Vec<String> = Vec::new();
+        for n in &self.player.names {
+            let n = n.trim();
+            if !n.is_empty() && !names.iter().any(|m| m == n) {
+                names.push(n.chars().take(MAX_PLAYER_NAME_CHARS).collect());
+            }
+        }
+        if names.len() > MAX_PLAYER_NAMES {
+            notes.push(format!("“我的名字”最多 {MAX_PLAYER_NAMES} 个，已只保留前 {MAX_PLAYER_NAMES} 个"));
+            names.truncate(MAX_PLAYER_NAMES);
+        }
+        self.player.names = names;
         if !["error", "warn", "info", "debug", "trace"].contains(&self.log_level.as_str()) {
             self.log_level = "info".into();
         }
