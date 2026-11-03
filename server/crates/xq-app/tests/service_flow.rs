@@ -1763,3 +1763,68 @@ fn exercises_come_from_own_mistakes_in_one_stable_search_and_are_graded_by_kind(
         s.shutdown();
     }
 }
+
+#[test]
+fn better_exercise_comparison_keeps_the_game_history() {
+    use xq_app::exercise::ExerciseRequest;
+    use xq_app::review::CardKind;
+
+    // 找更好的着法的答案是引擎首选，不是当时走的着法；比较这次选择时仍要按当时的着法认出原会话中的这一着，
+    // 与讲解一样带上此前的着法（重复局面的判断依赖它，也能复用讲解已有的分析）
+    let stable = |best: &str, played: &str| -> String {
+        (1..=4)
+            .map(|d| {
+                format!(
+                    "info depth {d} seldepth {d} multipv 1 score cp 50 nodes 10 time 1 pv {best}\n\
+                     info depth {d} seldepth {d} multipv 2 score cp -400 nodes 10 time 1 pv {played}\n"
+                )
+            })
+            .collect()
+    };
+    // 第一着马五进七就是首选（不出题），黑方将 4 进 1，红方再走马七进九：马七进八更好，各个深度都一样（高稳定）；
+    // 最后一段给比较这次选择的搜索
+    let late = stable("c3b5", "c3a4");
+    let script = format!("@go\n{}bestmove e2c3\n@go\nbestmove (none)\n@go\n{late}bestmove c3b5\n@go\n{late}bestmove c3b5\n", stable("e2c3", "e2g3"));
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), &script, rec.clone());
+    let created = service
+        .create_study(CreateStudyRequest {
+            name: Some("出题".into()),
+            kind: CreateKind::Fen { fen: "3k5/9/4c4/9/9/9/9/4N4/9/4K4 w".into(), side: None },
+            orientation: None,
+            user_side: None,
+        })
+        .unwrap();
+    let sid = created.study.study.id.clone();
+    let first = service.apply_move(MoveRequest { study_id: sid.clone(), parent: ROOT, mv: mv("e2c3"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("第一着的讲解", |e, v| e == "explanation_updated" && v["node_id"] == first && v["status"] == "detailed");
+    let black = service.apply_move(MoveRequest { study_id: sid.clone(), parent: first, mv: mv("d9d8"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("黑方讲解结束", |e, v| e == "explanation_updated" && v["node_id"] == black && v["record"]["pending"] == false);
+    let later = service.apply_move(MoveRequest { study_id: sid.clone(), parent: black, mv: mv("c3a4"), variation: false }).unwrap().node_id.unwrap();
+    rec.wait("第二着的讲解", |e, v| e == "explanation_updated" && v["node_id"] == later && v["status"] == "detailed");
+    service.generate_exercises(ExerciseRequest { study_id: sid.clone() }).unwrap();
+    let better = service.list_reviews().unwrap().into_iter().find(|i| i.card.kind == CardKind::Better).expect("出了找更好的着法");
+    assert_eq!((better.card.node_id, better.card.answer.mv.iccs()), (later, "c3b5".to_string()));
+    assert!(better.source_available);
+
+    let log_path = dir.path().join("engine").join("mock-uci-commands.log");
+    let before = std::fs::read_to_string(&log_path).unwrap().lines().count();
+    let id = better.card.id.clone();
+    service
+        .review_attempt(ReviewAttemptRequest { id: id.clone(), choice: Some(mv("c3b5")), ..Default::default() })
+        .unwrap();
+    let done = rec.wait("比较完成", |e, v| {
+        e == "review_updated" && v["card"]["id"] == id.as_str() && v["card"]["attempts"][0]["decision"]["state"] != "pending"
+    });
+    let decision = &done["card"]["attempts"][0]["decision"];
+    assert_eq!((decision["verdict"].as_str(), decision["support"].as_str()), (Some("same_as_record"), Some("supported")), "{decision}");
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    let positions: Vec<&str> = log.lines().skip(before).filter(|l| l.starts_with("position")).collect();
+    assert!(!positions.is_empty(), "{log}");
+    assert!(positions.iter().all(|l| l.ends_with("moves e2c3 d9d8")), "比较时带上此前的着法：{positions:?}");
+    // 不指定着法的一次搜索与讲解的条件相同，直接用已有的分析；只搜索这次的选择
+    let gos: Vec<&str> = log.lines().skip(before).filter(|l| l.starts_with("go")).collect();
+    assert!(gos.len() == 1 && gos[0].contains("searchmoves c3b5"), "{gos:?}");
+    service.shutdown();
+}

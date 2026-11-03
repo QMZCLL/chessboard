@@ -15,7 +15,7 @@
 //! - `%ready-hang`：收到 `isready` 后不回答（模拟卡在初始化中的引擎）；
 //! - `%fail <文字>`：收到 `uci` 后把文字写到错误输出并退出（模拟缺少网络文件等启动错误）。
 //!
-//! 收到的 `go` 与 `setoption` 命令追加写入当前目录下的 `mock-uci-commands.log`，测试据此检查引擎实际收到的条件。
+//! 收到的 `position`、`go` 与 `setoption` 命令追加写入当前目录下的 `mock-uci-commands.log`，测试据此检查引擎实际收到的条件。
 
 use std::collections::VecDeque;
 use std::io::BufRead;
@@ -54,7 +54,7 @@ fn main() {
     let mut log = std::fs::OpenOptions::new().create(true).append(true).open("mock-uci-commands.log").ok();
     while let Some(Ok(command)) = input.next() {
         let command = command.trim();
-        if (command.starts_with("go") || command.starts_with("setoption"))
+        if (command.starts_with("position") || command.starts_with("go") || command.starts_with("setoption"))
             && let Some(f) = log.as_mut()
         {
             let _ = writeln!(f, "{command}");

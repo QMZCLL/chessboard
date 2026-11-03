@@ -380,7 +380,7 @@ fn threat_answer(card: &ReviewCard) -> Vec<Square> {
 }
 
 /// 原会话中的这一着仍在（生成的题目按当时走的着法对照）。
-fn source_available(study: Option<&Study>, card: &ReviewCard) -> bool {
+pub(crate) fn source_available(study: Option<&Study>, card: &ReviewCard) -> bool {
     let played = card.played.as_ref().map_or(card.answer.mv, |m| m.mv);
     study.and_then(|s| s.nodes.get(&card.node_id)).is_some_and(|n| n.mv == Some(played))
 }

@@ -372,12 +372,11 @@ pub fn judge_decision(
 
 impl Inner {
     /// 卡片局面的搜索条件：原会话中的这一着仍在时与讲解使用同样的历史（可以复用已有的分析），
-    /// 否则从卡片保存的局面开始（没有此前的历史）。
+    /// 否则从卡片保存的局面开始（没有此前的历史）。生成的题目按当时走的着法对照（答案是引擎首选）。
     fn card_conditions(&self, card: &ReviewCard, searchmoves: Vec<Move>) -> ApiResult<AnalysisConditions> {
         let source = self.store.load_study(&card.study_id).ok().flatten().and_then(|s| {
-            let node = s.nodes.get(&card.node_id)?;
-            (node.mv == Some(card.answer.mv)).then_some(())?;
-            s.engine_history(node.parent?).ok()
+            crate::review::source_available(Some(&s), card).then_some(())?;
+            s.engine_history(s.nodes.get(&card.node_id)?.parent?).ok()
         });
         let (base_fen, moves) = source.unwrap_or_else(|| (card.fen.clone(), Vec::new()));
         self.conditions_from(base_fen, moves, Budget::Quick, searchmoves)
