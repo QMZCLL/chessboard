@@ -577,12 +577,27 @@ function setView(view: T.StudyView) {
   if (view.explain_seq < wb.explainSeq) void refreshView(view.study.id);
 }
 
+/** 重新获取多少次仍早于讲解事件时放弃（开发桥重新启动后序号从头开始，视图的序号会一直偏小） */
+const REFRESH_ATTEMPTS = 3;
+
+/**
+ * 重新获取会话视图。获取期间又收到了讲解事件时，这份视图同样早于已经显示的讲解状态，
+ * 不采用，再获取一次；一直更早时保留当前视图，之后的讲解事件仍会更新它。
+ */
 async function refreshView(id: string) {
-  try {
-    const fresh = await api.studyView(id);
-    if (wb.view?.study.id === id && fresh.study.revision >= wb.view.study.revision) wb.view = fresh;
-  } catch (e) {
-    notify("error", errorMessage(e));
+  for (let i = 0; i < REFRESH_ATTEMPTS; i++) {
+    let fresh: T.StudyView;
+    try {
+      fresh = await api.studyView(id);
+    } catch (e) {
+      notify("error", errorMessage(e));
+      return;
+    }
+    if (wb.view?.study.id !== id || fresh.study.revision < wb.view.study.revision) return;
+    if (fresh.explain_seq >= wb.explainSeq) {
+      wb.view = fresh;
+      return;
+    }
   }
 }
 

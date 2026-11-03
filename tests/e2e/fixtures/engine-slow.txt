@@ -1,0 +1,13 @@
+# 正被将军（炮隔着马将军），走马五进七：搜索 3 秒后才完成，讲解完成事件晚于会话视图的刷新请求。
+# 各个深度首选不变（高稳定），不会再补充深入分析
+@go
+sleep 3000
+info depth 1 seldepth 1 multipv 1 score cp 50 nodes 10 time 1 pv e2g3
+info depth 1 seldepth 1 multipv 2 score cp -150 nodes 10 time 1 pv e2c3
+info depth 2 seldepth 2 multipv 1 score cp 50 nodes 20 time 2 pv e2g3
+info depth 2 seldepth 2 multipv 2 score cp -150 nodes 20 time 2 pv e2c3
+info depth 3 seldepth 3 multipv 1 score cp 50 nodes 30 time 3 pv e2g3
+info depth 3 seldepth 3 multipv 2 score cp -150 nodes 30 time 3 pv e2c3
+info depth 4 seldepth 4 multipv 1 score cp 50 nodes 40 time 4 pv e2g3
+info depth 4 seldepth 4 multipv 2 score cp -150 nodes 40 time 4 pv e2c3
+bestmove e2g3
