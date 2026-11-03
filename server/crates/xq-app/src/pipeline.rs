@@ -62,7 +62,8 @@ struct ExplainJob {
 }
 
 /// `explanation_updated` 事件。
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct ExplanationEvent<'a> {
     seq: u64,
     /// 序号所属的事件流，见 `StudyView::stream_id`。
@@ -77,7 +78,8 @@ struct ExplanationEvent<'a> {
 }
 
 /// `analysis_progress` 事件。
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, rename = "AnalysisProgressEvent")]
 struct ProgressEvent<'a> {
     request_id: &'a str,
     study_id: &'a str,
@@ -89,7 +91,8 @@ struct ProgressEvent<'a> {
 }
 
 /// `analysis_done` 事件。
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct AnalysisDoneEvent<'a> {
     request_id: &'a str,
     study_id: &'a str,

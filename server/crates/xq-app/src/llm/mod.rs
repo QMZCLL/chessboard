@@ -31,13 +31,15 @@ use evidence::AllowedClaim;
 pub type CoachTestHook = std::sync::Arc<dyn Fn(&'static str) + Send + Sync>;
 
 /// 讲解中的一段文字及其引用的结论编号。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachText {
     pub text: String,
     pub claim_ids: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum SectionKind {
     /// 当前需要解决的问题与本步的作用。
@@ -52,14 +54,16 @@ pub enum SectionKind {
     Caution,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachSection {
     pub kind: SectionKind,
     pub text: String,
     pub claim_ids: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum FollowupAction {
     /// 演示对方的主要应对。
@@ -70,7 +74,8 @@ pub enum FollowupAction {
     CompareAlternative,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Followup {
     pub action: FollowupAction,
     pub label: String,
@@ -80,7 +85,8 @@ pub struct Followup {
 }
 
 /// 通过检查的 AI 讲解。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachExplanation {
     pub summary: CoachText,
     pub sections: Vec<CoachSection>,
@@ -90,7 +96,8 @@ pub struct CoachExplanation {
 
 /// 一次成功生成的结果，连同它引用的结论与证据快照一起保存：
 /// 证据之后更新时，界面仍能按生成时的依据高亮和回放，并提示讲解已过期。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachResult {
     pub output: CoachExplanation,
     pub claims: Vec<AllowedClaim>,
@@ -103,7 +110,8 @@ pub struct CoachResult {
     pub created_at: i64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum CoachState {
     /// 没有进行中的请求。
@@ -119,7 +127,8 @@ pub enum CoachState {
 }
 
 /// 某一着的 AI 讲解记录。与逐着讲解记录分开保存：AI 讲解成功不会改变分析状态。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachRecord {
     pub study_id: String,
     pub node_id: NodeId,
@@ -148,7 +157,8 @@ impl CoachRecord {
 }
 
 /// 界面看到的 AI 讲解状态。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum CoachStatus {
     /// 没有启用或没有配置好模型服务。
@@ -164,7 +174,8 @@ pub enum CoachStatus {
     Stale,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachView {
     /// 状态版本：记录、证据或设置每次变化都会递增，界面按它判断新旧，不依赖响应到达的先后。
     pub seq: u64,

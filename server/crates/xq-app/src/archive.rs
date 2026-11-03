@@ -73,7 +73,8 @@ struct Archive {
 }
 
 /// 档案的来源：桌面应用传文件路径，浏览器中传文件内容。
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ArchiveSource {
     Text { text: String },
@@ -81,7 +82,8 @@ pub enum ArchiveSource {
 }
 
 /// 导入的预览（导入后为实际处理的结果）。
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ArchiveSummary {
     pub exported_at: i64,
     pub app_version: String,
@@ -97,14 +99,16 @@ pub struct ArchiveSummary {
     pub cards_orphan: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct BackupFile {
     pub name: String,
     pub size: u64,
     pub modified_at: i64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct BackupInfo {
     pub dir: String,
     /// 保留的份数；0 表示不自动备份。

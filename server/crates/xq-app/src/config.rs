@@ -13,7 +13,8 @@ use xq_core::study::RuleSet;
 pub const CONFIG_VERSION: u32 = 1;
 pub const REPETITION_RULES: [&str; 6] = ["ChineseRule", "AsianRule", "SkyRule", "ComputerRule", "YitianRule", "AllowChase"];
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct AppConfig {
     pub version: u32,
@@ -28,7 +29,8 @@ pub struct AppConfig {
 }
 
 /// 自己的棋手名字：一次导入多盘棋局时，与棋谱中的红方、黑方比对，判断哪一方是自己（见 `inbox`）。
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct PlayerConfig {
     pub names: Vec<String>,
@@ -39,7 +41,8 @@ pub const MAX_PLAYER_NAMES: usize = 10;
 pub const MAX_PLAYER_NAME_CHARS: usize = 40;
 
 /// 复习的安排与学习档案的自动备份。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct ReviewConfig {
     /// 复习间隔的档位（天，从小到大）：独立选对后标为已理解时升一档，其余情况用第一档。
@@ -53,7 +56,8 @@ impl Default for ReviewConfig {
     fn default() -> Self { Self { intervals_days: vec![1, 3, 7, 14, 30], backup_keep: 7 } }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct EngineConfig {
     /// 自定义引擎程序；为空时使用安装包自带的 Pikafish。
@@ -63,7 +67,8 @@ pub struct EngineConfig {
     pub hash_mb: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct AnalysisConfig {
     pub quick_time_ms: u64,
@@ -79,7 +84,8 @@ pub struct AnalysisConfig {
     pub deepen_unsettled: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct CaptureConfig {
     pub interval_ms: u64,
@@ -90,7 +96,8 @@ pub struct CaptureConfig {
     pub model: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct CloudConfig {
     pub enabled: bool,
@@ -98,7 +105,8 @@ pub struct CloudConfig {
 }
 
 /// 语言模型服务的接口类型。三者的结构化输出参数不同，分别适配。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum CoachProvider {
     /// OpenAI Chat Completions，使用 JSON Schema 结构化输出。
@@ -130,7 +138,8 @@ impl CoachProvider {
 }
 
 /// AI 讲解面向的学习者水平。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Audience {
     Beginner,
@@ -139,7 +148,8 @@ pub enum Audience {
 }
 
 /// AI 讲解的详细程度。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Detail {
     Brief,
@@ -148,7 +158,8 @@ pub enum Detail {
 }
 
 /// 何时自动生成 AI 讲解。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum CoachScope {
     /// 只在用户点击时生成。
@@ -159,7 +170,8 @@ pub enum CoachScope {
 
 /// AI 讲解设置。密钥不在这里：`credential_ref` 只是引用（`store:coach` 表示保存在后台凭据文件，
 /// `env:变量名` 表示从环境变量读取），配置随状态返回界面时不会带出密钥。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct CoachConfig {
     pub enabled: bool,

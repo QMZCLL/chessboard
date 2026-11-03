@@ -52,7 +52,8 @@ use crate::service::ApiResult;
 use crate::service::Inner;
 use crate::service::now_ms;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewStatus {
     /// 待复习：刚加入，或还没有复习过。
@@ -74,14 +75,16 @@ impl ReviewStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewMove {
     pub mv: Move,
     pub notation: String,
 }
 
 /// 加入复习时的思考记录（来自这一着最近一次先想后讲的练习）。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewThinking {
     pub first_choice: Option<ReviewMove>,
     pub hints_used: u8,
@@ -93,7 +96,8 @@ pub struct ReviewThinking {
 }
 
 /// 加入复习时这一着的程序讲解：要点、依据与分析版本。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewBasis {
     pub level: ExplainLevel,
     pub summary: String,
@@ -112,7 +116,8 @@ pub struct ReviewBasis {
 }
 
 /// 一次复习：重新选择的着法（直接看答案时为空）。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewAttempt {
     /// 复习的时间；同一张卡片内唯一，局面决策的比较结果按它写回。
     pub at: i64,
@@ -195,7 +200,8 @@ pub fn kind_card_id(study_id: &str, node_id: NodeId, kind: CardKind) -> String {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewCard {
     /// 与讲解记录相同的“会话/节点”：同一着只有一张卡片。
     pub id: String,
@@ -283,7 +289,8 @@ pub(crate) fn reset_interrupted_decisions(store: &crate::storage::Store) -> Resu
     Ok(count)
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewItem {
     pub card: ReviewCard,
     /// 原会话中的这一着仍在，可以打开原局面。
@@ -294,7 +301,8 @@ pub struct ReviewItem {
     pub themes: Vec<ThemeTag>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewDetail {
     #[serde(flatten)]
     pub item: ReviewItem,

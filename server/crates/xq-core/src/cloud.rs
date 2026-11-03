@@ -6,7 +6,8 @@ use serde::Serialize;
 
 use crate::types::Move;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CloudOutcome {
     Moves { score: i32, depth: u32, pv: Vec<Move> },

@@ -27,7 +27,8 @@ use crate::review::ReviewStatus;
 pub const DAY_MS: i64 = 86_400_000;
 
 /// 最近一次安排的起点：所依据的复习（按时间）、安排前的档位与第一次安排的时间。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScheduleBase {
     /// 所依据的复习；还没有复习过时为空。
     pub attempt_at: Option<i64>,

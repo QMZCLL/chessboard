@@ -33,7 +33,8 @@ use crate::records::ExplainStatus;
 use crate::records::ExplanationRecord;
 use crate::review::ReviewStatus;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CreateKind {
     Standard,
@@ -44,7 +45,8 @@ pub enum CreateKind {
     Record { text: String },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CreateStudyRequest {
     pub name: Option<String>,
     pub kind: CreateKind,
@@ -59,7 +61,8 @@ pub struct ValidateRequest {
     pub side: Option<Color>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ValidateResponse {
     pub format_error: Option<String>,
     /// 给出行棋方后的完整校验。
@@ -131,7 +134,8 @@ pub struct CoachCredentialRequest {
 }
 
 /// AI 讲解是否可用。只说明密钥是否已配置，不返回密钥本身。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachAvailability {
     pub enabled: bool,
     pub ready: bool,
@@ -145,7 +149,8 @@ pub struct CoachAvailability {
 }
 
 /// 生成一着 AI 讲解可能调用模型的次数，与后台的重试策略一致；每次调用都计入每日次数。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachCallPolicy {
     /// 输出一次通过检查。
     pub usual: u32,
@@ -184,7 +189,8 @@ pub struct StudyPrefsRequest {
     pub user_side: Option<Color>,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ExplainStats {
     /// 走子节点总数。
     pub moves: usize,
@@ -199,9 +205,12 @@ pub struct ExplainStats {
     pub failed: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct StudyView {
     pub study: Study,
+    /// JSON 中节点编号是对象的键（字符串）。
+    #[ts(as = "BTreeMap<String, ExplainStatus>")]
     pub explain_status: BTreeMap<NodeId, ExplainStatus>,
     pub stats: ExplainStats,
     /// 生成视图时的讲解序号，见 `explanation_updated` 事件的 `seq`：先取序号再读记录，
@@ -213,7 +222,8 @@ pub struct StudyView {
     pub view_seq: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct StudySummary {
     pub id: String,
     pub name: String,
@@ -224,7 +234,8 @@ pub struct StudySummary {
     pub root_fen: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct NodeDetail {
     pub study_id: String,
     pub revision: u64,
@@ -247,7 +258,8 @@ pub struct NodeDetail {
     pub review: Option<ReviewStatus>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct MoveResponse {
     pub node_id: Option<NodeId>,
     pub created: bool,
@@ -255,14 +267,16 @@ pub struct MoveResponse {
     pub study: Option<StudyView>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ImportResponse {
     pub study: StudyView,
     pub notes: Vec<String>,
     pub stopped: Option<RecordStop>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AppStatus {
     pub version: String,
     pub engine: EngineState,

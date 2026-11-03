@@ -46,7 +46,8 @@ struct StudyExport {
 }
 
 /// `cloud_result` 事件。
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct CloudEvent<'a> {
     study_id: &'a str,
     node_id: u32,

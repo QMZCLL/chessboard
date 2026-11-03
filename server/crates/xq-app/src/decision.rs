@@ -110,7 +110,8 @@ impl Intent {
 }
 
 /// 这一步实际改变了什么（规则事实），以及与落子前意图的对照。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Reflection {
     pub intent: Option<Intent>,
     /// 与意图对照的规则事实；没有选择意图、或意图为“其他”时为空。
@@ -119,7 +120,8 @@ pub struct Reflection {
     pub changes: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionState {
     /// 搜索还在进行。
@@ -129,7 +131,8 @@ pub enum DecisionState {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionVerdict {
     /// 与棋谱一致。
@@ -143,7 +146,8 @@ pub enum DecisionVerdict {
 }
 
 /// 这次比较是否支持这个选择：局面决策的评价依据，与“是否与棋谱一致”分开。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionSupport {
     /// 与参考评分接近，或就是参考。
@@ -158,7 +162,8 @@ pub enum DecisionSupport {
 }
 
 /// 局面决策的反馈。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct DecisionFeedback {
     pub state: DecisionState,
     pub verdict: Option<DecisionVerdict>,

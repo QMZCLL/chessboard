@@ -25,7 +25,8 @@ pub type NodeId = u32;
 pub const ROOT: NodeId = 0;
 pub const STUDY_FORMAT_VERSION: u32 = 1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum StudySource {
     Standard,
@@ -35,7 +36,8 @@ pub enum StudySource {
     Capture,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum MoveSource {
     User,
@@ -45,7 +47,8 @@ pub enum MoveSource {
 }
 
 /// 棋盘显示方向，只影响显示与截图坐标换算，不影响行棋方。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Orientation {
     RedBottom,
@@ -53,7 +56,8 @@ pub enum Orientation {
 }
 
 /// 与引擎一致的规则配置，随分析结果一起记录。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RuleSet {
     pub repetition_rule: String,
     pub sixty_move_rule: bool,
@@ -63,7 +67,8 @@ impl Default for RuleSet {
     fn default() -> Self { Self { repetition_rule: "ChineseRule".to_string(), sixty_move_rule: true } }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, rename = "StudyNode")]
 pub struct Node {
     pub id: NodeId,
     pub parent: Option<NodeId>,
@@ -90,7 +95,8 @@ pub struct Node {
 }
 
 /// 先想后讲的练习记录：用了几级提示、是否没有走子就看了讲解、自己走出的第一步，供以后复习。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Practice {
     pub hints_used: u8,
     pub revealed_directly: bool,
@@ -109,7 +115,8 @@ impl Node {
     pub fn is_move(&self) -> bool { self.mv.is_some() }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Study {
     pub format_version: u32,
     pub id: String,
@@ -123,6 +130,8 @@ pub struct Study {
     pub orientation: Orientation,
     pub user_side: Color,
     pub rules: RuleSet,
+    /// JSON 中节点编号是对象的键（字符串）。
+    #[ts(as = "BTreeMap<String, Node>")]
     pub nodes: BTreeMap<NodeId, Node>,
     pub next_id: NodeId,
     pub revision: u64,

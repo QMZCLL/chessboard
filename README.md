@@ -152,8 +152,13 @@ pnpm tauri dev                     # 桌面应用
 cargo test --manifest-path server/Cargo.toml -p xq-core -p xq-app   # 规则、讲解、引擎服务与流程测试
 ```
 
-前后端共享的部分结构由 Rust 生成 TypeScript 类型（ts-rs，见 `.cargo/config.toml`）：运行上面的 `cargo test` 时写到
-`src/api/generated`，生成的文件随代码提交，CI 检查它们是否最新；新增生成的类型时在 `src/api/generated/index.ts` 加一行。
+前后端之间的全部数据结构都由 Rust 生成 TypeScript 类型（ts-rs，见 `.cargo/config.toml`），界面不手写协议类型：
+运行上面的 `cargo test` 时写到 `src/api/generated`，生成的文件随代码提交，CI 检查它们是否最新；
+新增生成的类型时在 `src/api/generated/index.ts` 加一行（单元测试会检查有没有遗漏）。
+
+界面状态在 `src/state` 中按职责分开：共享状态（`core.ts`）、会话视图的单调合并（`viewSync.ts`、`studyView.ts`）、
+AI 讲解、先想后讲、棋盘显示、节点与讲解、演示、会话的打开与导入，`workbench.ts` 负责启动与订阅后台事件并统一导出；
+复习与练习在 `review.ts`，按题型的规则在 `cardKind.ts`，复盘收件箱在 `inbox.ts`。
 
 流程测试会运行仓库自带的 Pikafish，缺少引擎时测试失败而不是跳过；确实无法运行时，
 可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。引擎服务的异常情况（候选排名变化、部分更新、崩溃、设置变更）

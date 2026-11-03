@@ -24,7 +24,8 @@ use crate::rules;
 use crate::types::Color;
 
 /// 局面需求的类别。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum HintTopic {
     InCheck,
@@ -35,20 +36,23 @@ pub enum HintTopic {
 }
 
 /// 二级提示：相关的棋子与关系。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct HintFocus {
     pub text: String,
     pub squares: Vec<Square>,
     pub arrows: Vec<Move>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct HintMove {
     pub mv: Move,
     pub notation: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ThinkHints {
     pub side: Color,
     pub topic: HintTopic,
@@ -63,7 +67,8 @@ pub struct ThinkHints {
 }
 
 /// 练习时实际看过的提示：只保留用到的级数，供复习时回看当时的思考。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct UsedHints {
     pub observe: String,
     /// 用到二级时才有。

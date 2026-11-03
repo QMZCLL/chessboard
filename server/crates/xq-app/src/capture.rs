@@ -33,7 +33,8 @@ use xq_core::validate;
 
 use crate::config::CaptureConfig;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct WindowInfo {
     pub id: u32,
     pub title: String,
@@ -42,7 +43,8 @@ pub struct WindowInfo {
     pub height: u32,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Snapshot {
     pub window: WindowInfo,
     pub width: u32,
@@ -54,7 +56,8 @@ pub struct Snapshot {
     pub note: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RecognitionStatus {
     pub available: bool,
     pub model: String,
@@ -87,7 +90,8 @@ pub trait CaptureBackend: Send + Sync {
     fn set_model(&self, _path: Option<std::path::PathBuf>) {}
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ObservedBoard {
     /// 标准方向（红方在下）的棋子布局 FEN，不含行棋方。
     pub board: String,
@@ -99,14 +103,16 @@ pub struct ObservedBoard {
     pub suggested_side: Option<Color>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfirmationKind {
     Unexplained,
     NewGame,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum CaptureState {
     Idle,

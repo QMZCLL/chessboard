@@ -49,7 +49,8 @@ impl Theme {
 }
 
 /// 主题与它的依据（规则事实）。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ThemeTag {
     pub theme: Theme,
     pub why: String,

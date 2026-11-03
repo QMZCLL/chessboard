@@ -29,7 +29,8 @@ pub const PACK_VERSION: u32 = 2;
 const HISTORY_LIMIT: usize = 60;
 
 /// 允许模型表达的一条结论。由程序从讲解中已有的结论生成，模型可以选择和衔接，但不能新增。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AllowedClaim {
     pub id: String,
     /// 结论类别，取自证据主题，如 check、escape、capture、protect、best、reply、verdict、candidate、lesson。

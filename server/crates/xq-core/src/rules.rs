@@ -215,7 +215,8 @@ pub fn legal_moves(pos: &Position) -> Vec<Move> {
 }
 
 /// 对局状态。象棋中轮到一方而无合法着法时该方判负：被将军为将死，未被将军为困毙。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum GameStatus {
     Ongoing,
@@ -234,7 +235,8 @@ pub fn game_status(pos: &Position) -> GameStatus {
 }
 
 /// 非法走法的具体原因，供界面直接展示。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct IllegalMove {
     pub code: &'static str,
     pub message: String,

@@ -20,7 +20,8 @@ use crate::service::now_ms;
 const KEEP: usize = 20;
 
 /// 这组练习的来源。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum PracticeSource {
     /// 今天到期的卡片。
@@ -31,7 +32,8 @@ pub enum PracticeSource {
     Topic,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PracticeSession {
     pub id: String,
     /// 界面上的名称，例如“今天的练习”“专题：保护关系变化”。

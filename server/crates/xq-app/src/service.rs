@@ -219,7 +219,8 @@ pub(crate) struct Inner {
 }
 
 /// `study_updated` 事件：会话的棋谱改变了（界面据此重新读取视图）。
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct StudyUpdatedEvent<'a> {
     study_id: &'a str,
     revision: u64,

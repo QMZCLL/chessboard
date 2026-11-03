@@ -14,7 +14,8 @@ use xq_core::study::RuleSet;
 
 use crate::engine::SearchResult;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Budget {
     Quick,
@@ -112,7 +113,8 @@ impl AnalysisRecord {
 }
 
 /// 某个走子节点的讲解状态。排队中的任务不计为已讲解，缺少环节的讲解不计为完成。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplainStatus {
     /// 已建立任务，还没有任何讲解。
@@ -127,7 +129,8 @@ pub enum ExplainStatus {
     Failed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ExplanationRecord {
     pub study_id: String,
     pub node_id: NodeId,
@@ -177,7 +180,8 @@ impl ExplanationRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CloudRecord {
     pub fen: String,
     pub outcome: CloudOutcome,

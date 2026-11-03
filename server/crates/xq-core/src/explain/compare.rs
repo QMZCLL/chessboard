@@ -53,7 +53,8 @@ pub struct CompareEvidence {
 }
 
 /// 对比的结论方向。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum CompareOutcome {
     /// 我的选择更好（区间能够证明）。
@@ -69,7 +70,8 @@ pub enum CompareOutcome {
 }
 
 /// 对比中的一方。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CompareSide {
     pub mv: Move,
     pub notation: String,
@@ -83,7 +85,8 @@ pub struct CompareSide {
     pub score_text: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct MoveComparison {
     pub generator_version: u32,
     /// 比较起点的行棋方（两步棋的走棋方）。

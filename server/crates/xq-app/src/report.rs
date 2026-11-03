@@ -45,7 +45,8 @@ pub enum KeyReason {
     Tactic,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct KeyPosition {
     pub node_id: NodeId,
     pub ply: u32,
@@ -64,14 +65,16 @@ pub struct KeyPosition {
     main: KeyReason,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReportItem {
     pub node_id: NodeId,
     pub label: String,
     pub text: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PracticeStats {
     /// 先想后讲练习过的着法数。
     pub practiced: usize,
@@ -83,7 +86,8 @@ pub struct PracticeStats {
     pub revealed: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct GameReport {
     pub study_id: String,
     pub study_name: String,

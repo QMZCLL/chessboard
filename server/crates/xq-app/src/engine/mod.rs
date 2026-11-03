@@ -37,7 +37,8 @@ pub struct EngineSpec {
 }
 
 /// 搜索结果所对应的引擎与网络文件，用于缓存键与结果追踪。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct EngineIdentity {
     pub name: String,
     /// 网络文件的名称与大小（用于显示）。
@@ -49,13 +50,15 @@ pub struct EngineIdentity {
     pub generation: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AppliedOption {
     pub name: String,
     pub value: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum EngineState {
     Starting,

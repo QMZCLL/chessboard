@@ -12,7 +12,8 @@ use crate::notation;
 use crate::types::Move;
 use crate::validate;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RecordStop {
     /// 第几个半回合（从 1 开始）。
     pub ply: usize,

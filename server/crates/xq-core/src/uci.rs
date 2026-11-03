@@ -8,7 +8,8 @@ use serde::Serialize;
 use crate::types::Move;
 
 /// 从行棋方视角的评分。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "kind", content = "value", rename_all = "lowercase")]
 pub enum Score {
     /// 引擎分（随 ScoreType 设置而定的刻度）。
@@ -53,7 +54,8 @@ impl Ord for Score {
     fn cmp(&self, other: &Self) -> Ordering { self.order_key().cmp(&other.order_key()) }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum Bound {
     Exact,

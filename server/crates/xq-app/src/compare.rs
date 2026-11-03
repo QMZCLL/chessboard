@@ -41,7 +41,8 @@ pub struct CompareRequest {
 }
 
 /// 对照着法与棋谱、分析的关系。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferenceKind {
     /// 棋谱在这个局面之后的着法（第一个后续着法）。
@@ -54,7 +55,8 @@ pub enum ReferenceKind {
     Other,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CompareOption {
     pub mv: Move,
     pub notation: String,
@@ -63,7 +65,8 @@ pub struct CompareOption {
     pub rank: Option<u32>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CompareView {
     /// 这次对比请求的序号（推送的完整结果沿用请求时的序号）。
     pub seq: u64,

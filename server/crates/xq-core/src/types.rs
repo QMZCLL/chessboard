@@ -192,7 +192,8 @@ impl<'de> Deserialize<'de> for Piece {
 }
 
 /// 棋盘交叉点，`index = rank * 9 + file`。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ts_rs::TS)]
+#[ts(export, type = "string")]
 pub struct Square(u8);
 
 impl Square {
@@ -247,7 +248,8 @@ impl<'de> Deserialize<'de> for Square {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ts_rs::TS)]
+#[ts(export, type = "string")]
 pub struct Move {
     pub from: Square,
     pub to: Square,

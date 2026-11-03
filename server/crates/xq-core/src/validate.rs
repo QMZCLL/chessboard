@@ -12,14 +12,16 @@ use crate::types::Piece;
 use crate::types::PieceKind;
 use crate::types::Square;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
     Warning,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Issue {
     pub code: &'static str,
     pub severity: Severity,
@@ -27,7 +29,8 @@ pub struct Issue {
     pub squares: Vec<Square>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ValidationReport {
     /// 没有错误级问题，可以开始分析。
     pub ok: bool,

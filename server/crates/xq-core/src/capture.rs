@@ -18,7 +18,8 @@ use crate::types::PieceKind;
 use crate::types::Square;
 use crate::validate;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Rect {
     pub x: f32,
     pub y: f32,

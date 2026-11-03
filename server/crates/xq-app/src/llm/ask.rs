@@ -59,7 +59,8 @@ const HISTORY_LIMIT: usize = 30;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> { m.lock().unwrap_or_else(|p| p.into_inner()) }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum QuestionKind {
     /// 我的这一步起了什么作用。
@@ -110,7 +111,8 @@ impl QuestionKind {
 }
 
 /// 一个问题：比较起点、两步着法与问题类型。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Question {
     pub study_id: String,
     /// 比较起点：两步棋都从这个节点的局面走出。
@@ -183,7 +185,8 @@ pub struct AskPack {
 }
 
 /// 回答下方的演示：从比较起点开始的一段变化，由程序按问题类型选择。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AnswerDemo {
     pub label: String,
     pub moves: Vec<Move>,
@@ -206,7 +209,8 @@ impl AskBundle {
 }
 
 /// 通过检查的回答。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CoachAnswer {
     /// 直接回答问题。
     pub answer: CoachText,
@@ -217,7 +221,8 @@ pub struct CoachAnswer {
 }
 
 /// 一次成功的回答，连同引用的结论、证据与演示一起保存：对比依据之后更新，仍按回答时的依据显示。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AnswerResult {
     pub output: CoachAnswer,
     pub claims: Vec<AllowedClaim>,
@@ -233,7 +238,8 @@ pub struct AnswerResult {
 }
 
 /// 一个问题的状态与最近一次回答。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AnswerRecord {
     pub question: Question,
     pub state: CoachState,
@@ -244,7 +250,8 @@ pub struct AnswerRecord {
 }
 
 /// 界面看到的回答状态（含义与 `CoachView` 相同）。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AnswerView {
     /// 状态版本：回答每次变化都会递增，界面按它判断新旧。
     pub seq: u64,

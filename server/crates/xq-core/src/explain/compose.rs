@@ -30,7 +30,8 @@ use crate::uci::Score;
 /// 模板版本，随讲解一起保存，便于判断缓存是否过期。
 pub const GENERATOR_VERSION: u32 = 5;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceKind {
     Fact,
@@ -38,7 +39,8 @@ pub enum EvidenceKind {
     Positional,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Certainty {
     /// 由规则直接计算。
@@ -50,21 +52,24 @@ pub enum Certainty {
 }
 
 /// 变化的起点：讲解某一着时为落子前局面，说明某个局面时为该局面本身。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum LineBase {
     Parent,
     Node,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct LineRef {
     pub base: LineBase,
     pub moves: Vec<Move>,
     pub notation: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Evidence {
     pub id: String,
     pub kind: EvidenceKind,
@@ -92,20 +97,23 @@ fn board_of(topic: &str) -> LineBase {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Claim {
     pub text: String,
     pub evidence: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateSource {
     MultiPv,
     SearchMoves,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CandidateView {
     pub mv: Move,
     pub notation: String,
@@ -121,7 +129,8 @@ pub struct CandidateView {
     pub summary: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum VerdictTone {
     Best,
@@ -132,7 +141,8 @@ pub enum VerdictTone {
     Unclear,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Verdict {
     pub tone: VerdictTone,
     pub label: String,
@@ -141,7 +151,8 @@ pub struct Verdict {
     pub note: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplainLevel {
     /// 只有规则事实。
@@ -152,7 +163,8 @@ pub enum ExplainLevel {
     Detailed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct MoveExplanation {
     pub generator_version: u32,
     pub level: ExplainLevel,
@@ -175,7 +187,8 @@ pub struct MoveExplanation {
     pub stability: Option<Stability>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PositionExplanation {
     pub generator_version: u32,
     pub side: Color,
