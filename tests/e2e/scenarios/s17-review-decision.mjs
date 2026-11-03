@@ -26,7 +26,7 @@ await page.waitForSelector(".xq-board");
 const dialog = page.getByTestId("review-dialog");
 const reviewCard = dialog.getByTestId("review-card");
 async function reviewMove(mv) {
-  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await reviewCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await reviewCard.locator(`[data-square="${sq}"]`).first().click();
 }
 async function openCard() {
   await page.getByTestId("open-review").click();

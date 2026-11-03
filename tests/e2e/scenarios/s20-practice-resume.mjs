@@ -36,7 +36,7 @@ const ws = page.getByTestId("practice-workspace");
 const wsCard = ws.getByTestId("review-card");
 const isPrimary = (el) => el.evaluate((e) => e.classList.contains("n-button--primary-type"));
 async function wsMove(mv) {
-  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await wsCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await wsCard.locator(`[data-square="${sq}"]`).first().click();
 }
 const history = (text) => ws.getByTestId("review-history").filter({ hasText: text }).waitFor();
 const entry = (i) => ws.locator(`[data-practice-entry="${i}"]`);

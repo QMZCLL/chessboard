@@ -31,7 +31,7 @@ const dialog = page.getByTestId("review-dialog");
 const reviewCard = dialog.getByTestId("review-card");
 /** 在复习卡片的棋盘上走子 */
 async function reviewMove(mv) {
-  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await reviewCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await reviewCard.locator(`[data-square="${sq}"]`).first().click();
 }
 /** 顶部“复习”入口说明的今天到期张数（数字角标的文字带有动画，读按钮的说明） */
 const todoCount = async () => {
@@ -250,10 +250,12 @@ await dialog.getByTestId("review-reveal").click();
 await dialog.getByTestId("review-result").waitFor();
 await noteBox.fill("马8进7 先保护中卒，再出车");
 const save = await hold(page, "update_review", { match: (body) => body.req.note !== null, holdRequest: true });
-held = await hold(page, "review_detail", { match: (body) => body.req.id === A });
-// 点击列表中的这张卡片：输入框失去焦点而保存（拦在发往后台之前），同时重新打开卡片（后台读到保存之前的卡片）
-await dialog.locator(`[data-review="${A}"]`).click();
+// 点击另一张卡片：输入框失去焦点而保存（拦在发往后台之前）
+await dialog.locator(`[data-review="${B}"]`).click();
 await save.arrived;
+// 立刻回到这张卡片（重选正在显示的卡片不会重新读取，所以先换走再回来）：后台读到保存之前的卡片
+held = await hold(page, "review_detail", { match: (body) => body.req.id === A });
+await dialog.locator(`[data-review="${A}"]`).click();
 await held.arrived;
 await save.release();
 await held.release();

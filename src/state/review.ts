@@ -276,6 +276,15 @@ export async function showCard(id: string, restore: string | null = null) {
   }
 }
 
+/**
+ * 在复习库的列表中选一张卡片：已经在显示、读取完成的这张卡片不再重新读取（不打断作答，也不让棋盘短暂不可用）；
+ * 其他卡片按 showCard 读取（快速切换时只采用最后一次选择）。
+ */
+export function selectCard(id: string) {
+  if (review.current?.card.id === id && !review.busy) return Promise.resolve();
+  return showCard(id);
+}
+
 /** 在棋盘上走子或在选项中选一个作答（棋谱中的一着、二选一、找更好的着法） */
 export function submitChoice(choice: T.Move) {
   return submitAttempt(choice, []);
@@ -306,7 +315,9 @@ async function submitAttempt(choice: T.Move | null, marks: T.Square[]) {
     const { goal, intent } = review;
     // 耗时只记录、不评分；离开很久的作答记为一小时
     const extra = { hints: review.hints, elapsed_ms: Math.min(Date.now() - review.shownAt, 3_600_000), confidence: review.confidence, marks };
-    const send = () => queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request, extra));
+    // 这组练习的修改次数在发送时读取（换题写回之后）：后台据此确认界面看到的是最新的一版
+    const revision = () => (practice && review.session?.id === practice ? review.session.revision : null);
+    const send = () => queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request, { ...extra, practice_revision: revision() }));
     // 这组练习的换题还在写回时，等写回之后再提交：后台只把当前题目的作答记入这组练习
     const item = await (practice ? queued(`practice:${practice}`, send) : send());
     upsert(item);

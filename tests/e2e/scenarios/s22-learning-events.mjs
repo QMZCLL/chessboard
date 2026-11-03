@@ -44,7 +44,7 @@ check((await dialog.getByTestId("review-hint").innerText()).includes("已看 2 �
 await snap(page, "review-hints");
 
 // B. 走出棋谱中的着法：看了提示之后选对
-for (const sq of ["h9", "g7"]) await reviewCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+for (const sq of ["h9", "g7"]) await reviewCard.locator(`[data-square="${sq}"]`).first().click();
 await dialog.getByTestId("review-result").waitFor();
 check((await dialog.getByTestId("review-badge").innerText()) === "看了提示后选对", "看了提示之后选对不算独立选对");
 const notes = await dialog.getByTestId("review-attempt-notes").innerText();

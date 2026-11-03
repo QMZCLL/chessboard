@@ -56,9 +56,12 @@ export async function bridge(cmd, args = {}) {
   return data;
 }
 
-/** 点击棋盘交叉点（ICCS 坐标）。 */
-export async function clickSquare(page, sq) {
-  await page.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+/**
+ * 点棋盘上的一个格子（ICCS 坐标）。用真实的点击：格子要可见、没有被遮挡（例如对话框盖住主棋盘时不会点到下面的棋盘）。
+ * scope 是页面或包含棋盘的区域（复习卡片、练习工作区）。
+ */
+export async function clickSquare(scope, sq) {
+  await scope.locator(`[data-square="${sq}"]`).first().click();
 }
 
 export async function move(page, mv) {

@@ -35,7 +35,7 @@ await page.waitForSelector(".xq-board");
 const dialog = page.getByTestId("review-dialog");
 const reviewCard = dialog.getByTestId("review-card");
 async function reviewMove(mv) {
-  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await reviewCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await reviewCard.locator(`[data-square="${sq}"]`).first().click();
 }
 const todayCount = async () => Number(((await page.getByTestId("open-review").getAttribute("aria-label")) ?? "").match(/今天 (\d+) 张到期/)?.[1] ?? 0);
 /** 标记状态，返回这次标记的提示（之前的提示可能还没消失，等新的一条出现） */
@@ -58,7 +58,7 @@ check((await dialog.locator("[data-review]").first().innerText()).includes("今�
 const ws = page.getByTestId("practice-workspace");
 const wsCard = ws.getByTestId("review-card");
 async function wsMove(mv) {
-  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await wsCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+  for (const sq of [mv.slice(0, 2), mv.slice(2, 4)]) await wsCard.locator(`[data-square="${sq}"]`).first().click();
 }
 const isPrimary = (el) => el.evaluate((e) => e.classList.contains("n-button--primary-type"));
 /** 在工作区中标记状态，返回这次标记的提示 */

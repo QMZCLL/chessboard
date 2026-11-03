@@ -142,7 +142,15 @@ async function mark(status: ReviewStatus) {
 </script>
 
 <template>
-  <section v-if="card && current && spec && layers" class="practice" :class="{ session }" data-testid="review-card">
+  <!-- data-review-state：读取或提交中为 loading，可以作答或操作时为 ready（棋盘与按钮都按同一个状态） -->
+  <section
+    v-if="card && current && spec && layers"
+    class="practice"
+    :class="{ session }"
+    :aria-busy="review.busy"
+    :data-review-state="review.busy ? 'loading' : 'ready'"
+    data-testid="review-card"
+  >
     <header class="head">
       <div>
         <div class="title">{{ current.study_name }} · {{ positionLabel(card) }}</div>

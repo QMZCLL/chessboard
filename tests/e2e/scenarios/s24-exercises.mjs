@@ -1,5 +1,5 @@
 // 场景 24：从自己的棋局生成练习（模拟引擎）。整局报告中“从这盘棋生成练习”：按自己一方的着法出找威胁、二选一、
-// 找更好的着法，写明新增几道；复习库中标出题型；找威胁在棋盘上点出受到威胁的棋子后提交，二选一用按钮选择，
+// 找更好的着法，写明新增几道；复习库中标出题型；重选正在显示的卡片不重新读取；找威胁在棋盘上点出受到威胁的棋子后提交，二选一用按钮选择，
 // 找更好的着法说明当时走了什么；揭示后的结果、标签与比较结论按题型说明，不说“棋谱中”。
 import { BASE, bridge, check, launch, snap } from "../lib.mjs";
 
@@ -23,6 +23,10 @@ const report = page.getByTestId("report-dialog");
 await report.getByTestId("report-generate").click();
 const generated = await report.getByTestId("report-generated").innerText();
 check(generated === "新增 3 道：找威胁 1、二选一 1、找更好的着法 1。", `写明新增几道：${generated}`);
+// 重新出题：分析没有变化，题目内容相同，全部保留
+await report.getByTestId("report-regenerate").click();
+const regenerated = await report.getByTestId("report-generated").filter({ hasText: "保留原来的题目" }).innerText();
+check(regenerated === "没有新的题目；3 道已经在复习中，作答过或内容没有变化，保留原来的题目。", `重新出题写明保留了哪些：${regenerated}`);
 await snap(page, "exercises-generated");
 await page.keyboard.press("Escape");
 await report.waitFor({ state: "hidden" });
@@ -34,13 +38,20 @@ const kinds = await dialog.getByTestId("card-kind").allInnerTexts();
 check(["找威胁", "二选一", "找更好的着法"].every((k) => kinds.includes(k)), `复习库标出题型：${kinds.join("、")}`);
 
 // 找威胁：点出将军的炮，提交
-await dialog.locator(`[data-review="${sid}/0000000001/threat"]`).click();
+const threatItem = dialog.locator(`[data-review="${sid}/0000000001/threat"]`);
+await threatItem.click();
 await dialog.getByTestId("review-prompt").filter({ hasText: "点出受到威胁的己方棋子" }).waitFor();
+await dialog.locator('[data-testid="review-card"][data-review-state="ready"]').waitFor();
 check(await dialog.getByTestId("review-submit-marks").isDisabled(), "还没有点出格子时不能提交");
-// 打开复习库时已经显示这张卡片，再点一次会重新读取；读取期间棋盘不接受点选，提示文字仍是上一次的。
-// 直接派发的事件不等待可操作，先等按钮恢复可用（读取完成）再点格子
-await dialog.locator('[data-testid="review-reveal"]:not([disabled])').waitFor();
-await reviewCard.locator('[data-square="e7"]').first().dispatchEvent("mousedown", { button: 0 });
+// 再点一次正在显示的这张卡片：不重新读取，棋盘一直可以操作
+let reads = 0;
+const countReads = (r) => r.url().includes("/__bridge/invoke/review_detail") && (reads += 1);
+page.on("request", countReads);
+await threatItem.click();
+check((await reviewCard.getAttribute("data-review-state")) === "ready", "重选当前卡片时棋盘不进入读取状态");
+await reviewCard.locator('[data-square="e7"]').first().click();
+page.off("request", countReads);
+check(reads === 0, `重选当前卡片不重新读取（读取 ${reads} 次）`);
 await dialog.getByTestId("review-submit-marks").filter({ hasText: "已点 1 处" }).waitFor();
 check(await dialog.getByTestId("review-submit-marks").isEnabled(), "点出格子之后可以提交");
 await snap(page, "threat-picked");
@@ -72,7 +83,7 @@ await snap(page, "better-revealed");
 // 再试一次，走出引擎首选：比较结论按题型说明，不说“与棋谱一致”
 await dialog.getByRole("button", { name: "再试一次" }).click();
 await dialog.getByTestId("review-prompt").waitFor();
-for (const sq of ["e2", "g3"]) await reviewCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+for (const sq of ["e2", "g3"]) await reviewCard.locator(`[data-square="${sq}"]`).first().click();
 const verdictEl = dialog.getByTestId("review-decision");
 await verdictEl.filter({ hasNotText: "正在用同一次搜索比较" }).waitFor({ timeout: 60000 });
 const verdict = (await verdictEl.innerText()).trim();

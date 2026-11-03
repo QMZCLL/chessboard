@@ -16,6 +16,7 @@ import {
   reviewCounts,
   saveNote,
   sessionCardId,
+  selectCard,
   showCard,
   shownItems,
   startPractice,
@@ -109,7 +110,7 @@ onMounted(loadReviews);
               class="card-item focusable"
               :class="{ active: card?.id === item.card.id }"
               :data-review="item.card.id"
-              @click="showCard(item.card.id)"
+              @click="selectCard(item.card.id)"
             >
               <span class="item-top">
                 <span class="item-name">{{ item.study_name }}</span>

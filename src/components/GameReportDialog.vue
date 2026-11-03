@@ -2,7 +2,7 @@
 // 整局报告：程序选出的关键局面（可以回到棋盘、加入复习）、值得保留的判断与需要重新观察的地方。
 // 筛选与统计都由程序完成，文字取自已经生成的讲解；评价只比较每一着自己的候选，不同局面的评分不直接相减。
 import { computed, ref, watch } from "vue";
-import { NButton, NModal, NSpin, NTag, useMessage } from "naive-ui";
+import { NButton, NModal, NSpin, NTag, NTooltip, useMessage } from "naive-ui";
 import { api, errorMessage } from "../api/backend";
 import type { GameReport, KeyPosition } from "../api/types";
 import { addToReview, loadReviews } from "../state/review";
@@ -67,15 +67,18 @@ async function add(studyId: string, k: KeyPosition): Promise<boolean> {
 }
 
 /** 全部加入：整批使用开始时这份报告的会话与关键局面，中途关闭报告、换了棋谱也不改用新的会话 */
-/** 从这盘棋生成练习（找威胁、二选一、找更好的着法），结果写明新增几道与没有出题的原因 */
+/**
+ * 从这盘棋生成练习（找威胁、二选一、找更好的着法），结果写明新增几道与没有出题的原因。
+ * 重新出题：分析更新之后（例如补充了深入分析、换了引擎），还没有作答过的题目按现在的分析更新，作答过的保留。
+ */
 const generating = ref(false);
 const generated = ref<string | null>(null);
-async function generate() {
+async function generate(regenerate = false) {
   const s = report.value?.study_id;
   if (!s || generating.value) return;
   generating.value = true;
   try {
-    const summary = await api.generateExercises(s);
+    const summary = await api.generateExercises(s, regenerate);
     generated.value = summary.text;
     await loadReviews();
   } catch (e) {
@@ -125,7 +128,13 @@ async function addAll() {
         把这 {{ notInReview.length }} 处加入复习
       </n-button>
       <div class="generate">
-        <n-button size="small" secondary :loading="generating" data-testid="report-generate" @click="generate">从这盘棋生成练习</n-button>
+        <n-button size="small" secondary :loading="generating" data-testid="report-generate" @click="generate()">从这盘棋生成练习</n-button>
+        <n-tooltip>
+          <template #trigger>
+            <n-button size="small" quaternary :disabled="generating" data-testid="report-regenerate" @click="generate(true)">重新出题</n-button>
+          </template>
+          按现在的分析再出一次：还没有作答过的题目更新为新的内容，作答过的保留
+        </n-tooltip>
         <span class="muted">按自己一方的着法出找威胁、二选一与找更好的着法；只用已经完成、结果稳定的分析</span>
       </div>
       <p v-if="generated" class="generated" data-testid="report-generated">{{ generated }}</p>
