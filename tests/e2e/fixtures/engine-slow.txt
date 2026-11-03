@@ -11,3 +11,15 @@ info depth 3 seldepth 3 multipv 2 score cp -150 nodes 30 time 3 pv e2c3
 info depth 4 seldepth 4 multipv 1 score cp 50 nodes 40 time 4 pv e2g3
 info depth 4 seldepth 4 multipv 2 score cp -150 nodes 40 time 4 pv e2c3
 bestmove e2g3
+# 黑方接着走将 4 进 1（d9d8）：同样 3 秒后完成，首选就是这一着
+@go
+sleep 3000
+info depth 1 seldepth 1 multipv 1 score cp 20 nodes 10 time 1 pv d9d8
+info depth 1 seldepth 1 multipv 2 score cp -10 nodes 10 time 1 pv d9e9
+info depth 2 seldepth 2 multipv 1 score cp 20 nodes 20 time 2 pv d9d8
+info depth 2 seldepth 2 multipv 2 score cp -10 nodes 20 time 2 pv d9e9
+info depth 3 seldepth 3 multipv 1 score cp 20 nodes 30 time 3 pv d9d8
+info depth 3 seldepth 3 multipv 2 score cp -10 nodes 30 time 3 pv d9e9
+info depth 4 seldepth 4 multipv 1 score cp 20 nodes 40 time 4 pv d9d8
+info depth 4 seldepth 4 multipv 2 score cp -10 nodes 40 time 4 pv d9e9
+bestmove d9d8

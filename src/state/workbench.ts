@@ -6,6 +6,7 @@ import type * as T from "../api/types";
 import { applyLine, moveNumber, placementOf, sideLabel } from "../utils/board";
 import { newerCoach } from "./coachMerge";
 import { snapshotHints, usedHints } from "./hintSnapshot";
+import { decideEvent, mergeView, newestRecord, type ViewCursor } from "./viewSync";
 
 export interface Preview {
   /** 演示的对象，写明是哪一着的什么变化，如“炮二平五的主要应对” */
@@ -80,8 +81,6 @@ export const wb = reactive({
   collapsed: {} as Record<number, boolean>,
   /** 事件推送来的最新讲解记录（按节点），用于避免较早发出的查询结果覆盖较新的讲解 */
   records: {} as Record<number, T.ExplanationRecord>,
-  /** 已收到的最大讲解序号 */
-  explainSeq: 0,
   /** AI 讲解状态（按节点），来自节点详情与 coach_updated 事件 */
   coach: {} as Record<number, T.CoachView>,
   capture: { state: "idle" } as T.CaptureState,
@@ -220,7 +219,7 @@ async function recordPractice(nodeId: number, firstChoice: T.Move | null) {
   try {
     const shown = usedHints(session.shown, session.hints);
     const view = await api.recordPractice(s.id, nodeId, session.hints, firstChoice === null, firstChoice, shown);
-    if (wb.view?.study.id === s.id && view.study.revision >= wb.view.study.revision) setView(view);
+    setView(view);
   } catch (e) {
     notify("error", errorMessage(e));
   }
@@ -376,21 +375,22 @@ export async function refreshStatus() {
   }
 }
 
-/** 两条讲解记录中较新的一条。 */
-export function newestRecord(
-  a: T.ExplanationRecord | null | undefined,
-  b: T.ExplanationRecord | null | undefined,
-): T.ExplanationRecord | null {
-  if (!a) return b ?? null;
-  if (!b) return a;
-  return b.updated_at > a.updated_at ? b : a;
-}
+export { newestRecord };
 
+/** 当前视图的讲解部分已经采用到哪里（见 viewSync.ts）：只对当前会话有意义 */
+let cursor: ViewCursor | null = null;
+
+/**
+ * 讲解事件：较旧的事件（这一着已经采用了更新的消息）不改动这一着的讲解状态，统计只采用更新的；
+ * 记录按保存次数比较，与事件到达的先后无关。来自新事件流的事件（后台重新启动）之后重新读取一次视图。
+ */
 function onExplanation(p: T.ExplanationEvent) {
-  wb.explainSeq = Math.max(wb.explainSeq, p.seq);
-  if (!wb.view || wb.view.study.id !== p.study_id) return;
-  wb.view.explain_status[String(p.node_id)] = p.status;
-  wb.view.stats = p.stats;
+  if (!wb.view || wb.view.study.id !== p.study_id || !cursor) return;
+  const d = decideEvent(cursor, p);
+  cursor = d.cursor;
+  if (d.node) wb.view.explain_status[String(p.node_id)] = p.status;
+  if (d.stats) wb.view.stats = p.stats;
+  if (d.resync) requestRefresh(p.study_id);
   wb.records[p.node_id] = newestRecord(wb.records[p.node_id], p.record)!;
   if (wb.detail && wb.detail.study_id === p.study_id && wb.detail.node.id === p.node_id) {
     wb.detail.explanation = newestRecord(wb.detail.explanation, p.record);
@@ -500,11 +500,13 @@ async function onStudyUpdated(p: T.StudyUpdatedEvent) {
   if (!wb.view || wb.view.study.id !== p.study_id || p.revision <= wb.view.study.revision) return;
   const previousLive = wb.view.study.live_node;
   try {
+    // 几次读取可能乱序返回：合并时较旧的棋谱树不会覆盖较新的
     setView(await api.studyView(p.study_id));
   } catch (e) {
     notify("error", errorMessage(e));
     return;
   }
+  if (wb.view?.study.id !== p.study_id) return;
   // 用户停留在实际对局最新节点时才跟随；正在阅读其他节点时不切走
   const live = wb.view.study.live_node;
   if (wb.followLive && live !== null && live !== previousLive && (previousLive === null || wb.selected === previousLive)) {
@@ -527,7 +529,7 @@ function lastMainline(view: T.StudyView): number {
 
 export async function openStudy(id: string, select?: number) {
   const view = await api.loadStudy(id);
-  setView(view);
+  setView(view, true);
   wb.main = "board";
   safeStorage("set", "xq-last-study", id);
   // 指定的着法已经删除时（例如记住的上次位置），打开默认的位置
@@ -557,10 +559,12 @@ function rememberPosition(studyId: string, node: number, ply: number) {
 }
 
 /**
- * 采用后台返回的会话视图。命令的响应可能晚于讲解事件到达，此时视图中的讲解状态已过期，
- * 保留棋谱树并重新获取一次视图。
+ * 采用后台返回的会话视图：所有视图都经过这里，按棋谱树与讲解部分分别合并（见 viewSync.ts），
+ * 较旧的部分不覆盖较新的部分，界面不会短暂回退。open 为打开会话（可以换成另一个会话）；
+ * 其他来源（命令的响应、重新读取）属于之前的会话时不采用，不会把界面切回那个会话。
  */
-function setView(view: T.StudyView) {
+function setView(view: T.StudyView, open = false) {
+  if (!open && wb.view?.study.id !== view.study.id) return;
   if (!wb.view || wb.view.study.id !== view.study.id) {
     wb.revealed = {};
     wb.attempts = {};
@@ -573,37 +577,49 @@ function setView(view: T.StudyView) {
     wb.thinkSession = null;
     wb.thinkBase = null;
   }
-  wb.view = view;
-  if (view.explain_seq < wb.explainSeq) void refreshView(view.study.id);
+  if (applyView(view)) requestRefresh(view.study.id);
 }
 
-/** 重新获取多少次仍早于讲解事件时放弃（开发桥重新启动后序号从头开始，视图的序号会一直偏小） */
-const REFRESH_ATTEMPTS = 3;
+/** 合并一份视图，返回是否需要再读取一份完整的视图（棋谱树与讲解部分来自不同的时刻） */
+function applyView(view: T.StudyView): boolean {
+  const r = mergeView(wb.view, cursor, view);
+  cursor = r.cursor;
+  if (!r.ignored && r.view !== wb.view) wb.view = r.view;
+  return r.refresh;
+}
+
+let refreshing = false;
+let refreshAgain = false;
 
 /**
- * 重新获取会话视图。获取期间又收到了讲解事件时，这份视图同样早于已经显示的讲解状态，
- * 不采用，再获取一次；一直更早时保留当前视图，之后的讲解事件仍会更新它。
+ * 再读取一份完整的视图，使统计与棋谱树一致；同一时间只有一个读取，读取期间又有需要时读完再读一次。
+ * 读到的视图同样经过合并，不会让界面回退；正确性不依赖这次读取（读取失败或一直没有返回时，界面保持合并后的状态）。
  */
-async function refreshView(id: string) {
-  for (let i = 0; i < REFRESH_ATTEMPTS; i++) {
-    let fresh: T.StudyView;
+function requestRefresh(id: string) {
+  if (refreshing) {
+    refreshAgain = true;
+    return;
+  }
+  refreshing = true;
+  void (async () => {
     try {
-      fresh = await api.studyView(id);
+      do {
+        refreshAgain = false;
+        const fresh = await api.studyView(id);
+        if (wb.view?.study.id !== id) return;
+        applyView(fresh);
+      } while (refreshAgain);
     } catch (e) {
       notify("error", errorMessage(e));
-      return;
+    } finally {
+      refreshing = false;
     }
-    if (wb.view?.study.id !== id || fresh.study.revision < wb.view.study.revision) return;
-    if (fresh.explain_seq >= wb.explainSeq) {
-      wb.view = fresh;
-      return;
-    }
-  }
+  })();
 }
 
 export async function createStudy(req: T.CreateStudyRequest): Promise<T.ImportResponse> {
   const resp = await api.createStudy(req);
-  setView(resp.study);
+  setView(resp.study, true);
   wb.main = "board";
   safeStorage("set", "xq-last-study", resp.study.study.id);
   for (const n of resp.notes) notify("warning", n);
@@ -613,7 +629,7 @@ export async function createStudy(req: T.CreateStudyRequest): Promise<T.ImportRe
 
 export async function importText(text: string, name: string | null) {
   const resp = await api.importText(text, name);
-  setView(resp.study);
+  setView(resp.study, true);
   wb.main = "board";
   safeStorage("set", "xq-last-study", resp.study.study.id);
   for (const n of resp.notes) notify(resp.stopped ? "warning" : "success", n);
@@ -624,7 +640,7 @@ export async function importFromFile() {
   const path = await pickOpenPath();
   if (!path) return;
   const resp = await api.importFile(path);
-  setView(resp.study);
+  setView(resp.study, true);
   wb.main = "board";
   safeStorage("set", "xq-last-study", resp.study.study.id);
   for (const n of resp.notes) notify(resp.stopped ? "warning" : "success", n);
@@ -1057,8 +1073,7 @@ export async function promote(id: number) {
  * 不用这次的响应覆盖当前视图。
  */
 export async function saveNote(studyId: string, nodeId: number, note: string, starred: boolean) {
-  const view = await api.setNote(studyId, nodeId, note, starred);
-  if (wb.view?.study.id === studyId && view.study.revision >= wb.view.study.revision) setView(view);
+  setView(await api.setNote(studyId, nodeId, note, starred));
 }
 
 /** 主线（从起始局面沿第一个子节点）上的节点。 */
