@@ -22,7 +22,7 @@ const GROUPS = [
   {
     name: "仓库自带的 Pikafish",
     engine: null,
-    scenarios: ["s1-record", "s2-endgame", "s3-capture", "s4-layout", "s5-escape", "s7-coach", "s9-workflow", "s10-review", "s11-reading", "s12-compare", "s13-hints", "s14-coach-pacing", "s15-review", "s16-coach-ask", "s17-review-decision", "s18-review-schedule", "s19-report-topics", "s20-practice-resume", "s22-learning-events", "s23-profile"],
+    scenarios: ["s1-record", "s2-endgame", "s3-capture", "s4-layout", "s5-escape", "s7-coach", "s9-workflow", "s10-review", "s11-reading", "s12-compare", "s13-hints", "s14-coach-pacing", "s15-review", "s16-coach-ask", "s17-review-decision", "s18-review-schedule", "s19-report-topics", "s20-practice-resume", "s22-learning-events", "s23-profile", "s26-inbox"],
   },
   { name: "模拟引擎：不完整搜索与重试", engine: "engine-retry.txt", scenarios: ["s6-retry"] },
   { name: "模拟引擎：评分边界值", engine: "engine-bounds.txt", scenarios: ["s8-bounds"] },
