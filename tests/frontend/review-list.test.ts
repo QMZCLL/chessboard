@@ -6,11 +6,8 @@ import {
   archivePreviewLines,
   attemptMark,
   attemptNotesText,
-  kindResultText,
-  attemptText,
   counts,
   DAY_MS,
-  decisionTitle,
   dueText,
   filterItems,
   hasTopic,
@@ -24,9 +21,7 @@ import {
   recommendation,
   reviewCardId,
   suggestedStatus,
-  entryBadge,
   entryState,
-  outcomeBadge,
   practiceSummary,
   presentFrom,
   suggestionFor,
@@ -36,6 +31,7 @@ import {
   topics,
   whenText,
 } from "../../src/state/reviewList.ts";
+import { decisionTitle, entryBadge, outcomeBadge, resultText } from "../../src/state/cardKind.ts";
 
 /** 本机时间 2026-10-25 20:00 */
 const NOW = new Date(2026, 9, 25, 20, 0).getTime();
@@ -117,9 +113,10 @@ test("原来的思考与这次复习的结果", () => {
     "当时没有用提示，没有走子就看了讲解。",
   );
   assert.match(thinkingText(null), /没有先想后讲的记录/);
-  assert.equal(attemptText(first, false, "马8进7"), "这次走了 马2进3，棋谱中是 马8进7。");
-  assert.equal(attemptText({ notation: "马8进7" }, true, "马8进7"), "这次走了 马8进7，与棋谱相同。");
-  assert.match(attemptText(null, false, "马8进7"), /直接查看了答案/);
+  const moveCard = { kind: "move" as const, side: "black" as const, targets: [], answer: { mv: "h9g7", notation: "马8进7" }, played: null };
+  assert.equal(resultText(moveCard, { choice: first, marks: [], matched: false }), "这次走了 马2进3，棋谱中是 马8进7。");
+  assert.equal(resultText(moveCard, { choice: moveCard.answer, marks: [], matched: true }), "这次走了 马8进7，与棋谱相同。");
+  assert.match(resultText(moveCard, null), /直接查看了答案/);
   assert.equal(suggestedStatus(true), "understood");
   assert.equal(suggestedStatus(false), "again");
 });
@@ -218,16 +215,16 @@ test("一组练习的小结只统计属于这组练习的作答，按第一次�
   const hintedDecision = { ...decision("ready", "supported"), hints: 1 };
   assert.equal(outcomeOf(hintedDecision), "assisted");
   // 生成的题目：找威胁按点出的格子，二选一按选项；结果文字不说“棋谱中”
-  const threatCard = { kind: "threat" as const, targets: ["e7", "e2"], answer: { mv: "e2c3", notation: "马五进七" }, played: null };
+  const threatCard = { kind: "threat" as const, side: "red" as const, targets: ["e7", "e2"], answer: { mv: "e2c3", notation: "马五进七" }, played: null };
   const picked = { ...attempt(NOW, false, false), choice: null, marks: ["e7", "a0"] };
   assert.equal(outcomeOf(picked), "missed", "点出了格子就不是直接看答案");
-  assert.equal(kindResultText(threatCard, picked), "找到 1 / 2 处，多点了 1 处。");
-  assert.equal(kindResultText(threatCard, { ...picked, marks: ["e7", "e2"], matched: true }), "点出了全部 2 处受到威胁的棋子。");
-  assert.equal(kindResultText(threatCard, { ...picked, marks: [] }), "这次没有点出格子，直接查看了答案：受到威胁的有 2 处。");
+  assert.equal(resultText(threatCard, picked), "找到 1 / 2 处，多点了 1 处。");
+  assert.equal(resultText(threatCard, { ...picked, marks: ["e7", "e2"], matched: true }), "点出了全部 2 处受到威胁的棋子。");
+  assert.equal(resultText(threatCard, { ...picked, marks: [] }), "这次没有点出格子，直接查看了答案：受到威胁的有 2 处。");
   assert.deepEqual(outcomeBadge({ ...picked, matched: true }, "threat"), { text: "全部找到", tone: "ok" });
-  const choiceCard = { kind: "choice" as const, targets: [], answer: { mv: "e2g3", notation: "马五进三" }, played: { mv: "e2c3", notation: "马五进七" } };
+  const choiceCard = { kind: "choice" as const, side: "red" as const, targets: [], answer: { mv: "e2g3", notation: "马五进三" }, played: { mv: "e2c3", notation: "马五进七" } };
   const same = { ...attempt(NOW, true, false), choice: { mv: "e2c3", notation: "马五进七" } };
-  assert.equal(kindResultText(choiceCard, same), "这次选了 马五进七，与当时一样；引擎首选是 马五进三。");
+  assert.equal(resultText(choiceCard, same), "这次选了 马五进七，与当时一样；引擎首选是 马五进三。");
   assert.deepEqual(outcomeBadge(same, "choice"), { text: "没有选对", tone: "miss" });
 });
 

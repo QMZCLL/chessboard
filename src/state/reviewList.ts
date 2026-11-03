@@ -1,7 +1,8 @@
 // 复习卡片的分组、计数与文字说明。只依赖数据，便于单独测试。
 // 列表与复习开始前都不显示棋谱中的着法、笔记等可能透露答案的内容。
 // “今天到期”按本机日期计算：下一次复习的时间在今天结束之前（含已经过期的）。
-import type { ArchiveSummary, CardKind, Confidence, DecisionFeedback, ReviewIssue, Theme, DecisionVerdict, Intent, PracticeGoal, PracticeSession, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
+// 按题型不同的作答说明、结果文字与标签见 cardKind.ts。
+import type { ArchiveSummary, Confidence, ReviewIssue, Theme, Intent, PracticeGoal, PracticeSession, ReviewAttempt, ReviewCard, ReviewItem, ReviewStatus, ReviewThinking } from "../api/types";
 
 export const STATUS_LABEL: Record<ReviewStatus, string> = { due: "待复习", again: "需要再练", understood: "已理解" };
 
@@ -76,35 +77,10 @@ export function thinkingText(t: ReviewThinking | null): string {
   return `当时${hints}，第一步走了 ${t.first_choice.notation}，${t.matched ? "与棋谱相同" : "与棋谱不同"}。`;
 }
 
-/** 这次复习的结果。 */
-export function attemptText(choice: { notation: string } | null, matched: boolean, answer: string): string {
-  if (!choice) return `这次没有走子，直接查看了答案：棋谱中是 ${answer}。`;
-  return matched ? `这次走了 ${choice.notation}，与棋谱相同。` : `这次走了 ${choice.notation}，棋谱中是 ${answer}。`;
-}
-
 /** 复习之后建议的状态：走对了建议标为已理解，否则建议再练。 */
 export const suggestedStatus = (matched: boolean): ReviewStatus => (matched ? "understood" : "again");
 
 export const GOAL_LABEL: Record<PracticeGoal, string> = { recall: "复现棋谱", decision: "局面决策" };
-
-/** 题型 */
-export const KIND_LABEL: Record<CardKind, string> = { move: "棋谱中的一着", threat: "找威胁", choice: "二选一", better: "找更好的着法" };
-
-/** 生成的题目揭示后的结果说明；棋谱中的一着用 attemptText。 */
-export function kindResultText(card: Pick<ReviewCard, "kind" | "targets" | "answer" | "played">, a: Pick<ReviewAttempt, "choice" | "marks" | "matched">): string {
-  if (card.kind === "threat") {
-    if (!a.marks?.length) return `这次没有点出格子，直接查看了答案：受到威胁的有 ${card.targets.length} 处。`;
-    const found = a.marks.filter((m) => card.targets.includes(m)).length;
-    const extra = a.marks.length - found;
-    if (a.matched) return `点出了全部 ${card.targets.length} 处受到威胁的棋子。`;
-    return `找到 ${found} / ${card.targets.length} 处${extra ? `，多点了 ${extra} 处` : ""}。`;
-  }
-  const played = card.played?.notation ?? "";
-  if (!a.choice) return `这次没有选择，直接查看了答案：引擎首选是 ${card.answer.notation}，当时走了 ${played}。`;
-  if (a.choice.notation === card.answer.notation) return `这次选了 ${a.choice.notation}，正是引擎首选（当时走了 ${played}）。`;
-  if (a.choice.notation === played) return `这次选了 ${played}，与当时一样；引擎首选是 ${card.answer.notation}。`;
-  return `这次走了 ${a.choice.notation}；引擎首选是 ${card.answer.notation}，当时走了 ${played}。`;
-}
 
 /** 作答时的把握：只用于以后找出“很有把握却没有选对”的地方，不影响这次的安排 */
 export const CONFIDENCES = ["guess", "unsure", "sure"] as const satisfies readonly Confidence[];
@@ -131,20 +107,6 @@ export const INTENT_LABEL: Record<Intent, string> = {
   other: "其他",
 };
 export const INTENTS = Object.keys(INTENT_LABEL) as Intent[];
-
-export const VERDICT_TEXT: Record<DecisionVerdict, string> = {
-  same_as_record: "与棋谱一致",
-  reasonable: "与棋谱不同，但本次分析中与参考评分接近",
-  noteworthy: "这个选择留下了一个值得注意的问题",
-  unclear: "分析尚不充分，暂不评价走法优劣",
-};
-
-/** 局面决策反馈的标题（比较还在进行或没有得到结果时说明原因）。 */
-export function decisionTitle(d: DecisionFeedback): string {
-  if (d.state === "pending") return "正在用同一次搜索比较你的选择、棋谱着法与引擎参考…";
-  if (d.state === "failed" || !d.verdict) return `没有得到比较结果：${d.error ?? "原因不明"}`;
-  return VERDICT_TEXT[d.verdict];
-}
 
 /**
  * 复习之后建议的状态。复现棋谱按是否与棋谱一致；局面决策只在留下值得注意的问题时建议再练：
@@ -214,27 +176,6 @@ export function outcomeOf(a: ReviewAttempt): AttemptOutcome {
 
 export type Tone = "ok" | "miss" | "neutral";
 
-/**
- * 一次作答的结果标签：练习中的列表、反馈与小结用同样的文字与颜色。复现棋谱按是否与棋谱一致；
- * 局面决策按这次比较是否支持这个选择，比较中与无法评价都是中性的，不当作选对或选错。
- */
-export function outcomeBadge(a: ReviewAttempt, kind: CardKind = "move"): { text: string; tone: Tone } {
-  const o = outcomeOf(a);
-  if (o === "revealed") return { text: "直接看了答案", tone: "neutral" };
-  if (o === "assisted") return { text: "看了提示后选对", tone: "neutral" };
-  // 生成的题目：找威胁看是否全部找到，二选一看是否选了更好的一步（找更好的着法按局面决策的比较）
-  if (kind === "threat") return o === "independent" ? { text: "全部找到", tone: "ok" } : { text: "没有全部找到", tone: "miss" };
-  if (kind === "choice") return o === "independent" ? { text: "选对了", tone: "ok" } : { text: "没有选对", tone: "miss" };
-  if (a.goal === "recall") return o === "independent" ? { text: "与棋谱一致", tone: "ok" } : { text: "与棋谱不同", tone: "miss" };
-  const DECISION: Record<Exclude<AttemptOutcome, "revealed" | "assisted">, { text: string; tone: Tone }> = {
-    independent: { text: "比较支持", tone: "ok" },
-    missed: { text: "比较不支持", tone: "miss" },
-    pending: { text: "比较中", tone: "neutral" },
-    ungraded: { text: "无法评价", tone: "neutral" },
-  };
-  return DECISION[o];
-}
-
 /** 已经按最近一次复习标记了状态，但这次的比较还没有结果：下一次复习的时间在结果出来后确定 */
 export function awaitingResult(card: ReviewCard): boolean {
   const last = card.attempts[card.attempts.length - 1];
@@ -247,13 +188,6 @@ export type EntryState = "todo" | "answered" | "skipped" | "missing";
 /** 这张卡片在这组练习中的作答，按时间先后 */
 export function practiceAttempts(card: Pick<ReviewCard, "attempts">, practiceId: string): ReviewAttempt[] {
   return card.attempts.filter((a) => a.practice === practiceId);
-}
-
-/** 一组练习中一道题的标签：作答过的按这组中的第一次作答 */
-export function entryBadge(session: Pick<PracticeSession, "id" | "skipped">, cardId: string, card: ReviewCard | undefined): { text: string; tone: Tone } {
-  const state = entryState(session, cardId, card);
-  if (state === "answered" && card) return outcomeBadge(practiceAttempts(card, session.id)[0], card.kind);
-  return { text: state === "missing" ? "卡片已删除" : state === "skipped" ? "已跳过" : "未作答", tone: "neutral" };
 }
 
 export function entryState(session: Pick<PracticeSession, "id" | "skipped">, cardId: string, card: ReviewCard | undefined): EntryState {

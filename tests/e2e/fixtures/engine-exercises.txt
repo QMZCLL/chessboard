@@ -9,3 +9,14 @@ info depth 3 seldepth 3 multipv 2 score cp -150 nodes 30 time 3 pv e2c3
 info depth 4 seldepth 4 multipv 1 score cp 50 nodes 40 time 4 pv e2g3
 info depth 4 seldepth 4 multipv 2 score cp -150 nodes 40 time 4 pv e2c3
 bestmove e2g3
+# 复习“找更好的着法”时走出马五进三：只搜索这次的选择（不指定着法的一次与讲解条件相同，直接用已有的分析），结果与上面相同
+@go
+info depth 1 seldepth 1 multipv 1 score cp 50 nodes 10 time 1 pv e2g3
+info depth 1 seldepth 1 multipv 2 score cp -150 nodes 10 time 1 pv e2c3
+info depth 2 seldepth 2 multipv 1 score cp 50 nodes 20 time 2 pv e2g3
+info depth 2 seldepth 2 multipv 2 score cp -150 nodes 20 time 2 pv e2c3
+info depth 3 seldepth 3 multipv 1 score cp 50 nodes 30 time 3 pv e2g3
+info depth 3 seldepth 3 multipv 2 score cp -150 nodes 30 time 3 pv e2c3
+info depth 4 seldepth 4 multipv 1 score cp 50 nodes 40 time 4 pv e2g3
+info depth 4 seldepth 4 multipv 2 score cp -150 nodes 40 time 4 pv e2c3
+bestmove e2g3

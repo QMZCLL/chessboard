@@ -22,6 +22,7 @@ import {
   type SessionSummary,
   type TopicKey,
 } from "./reviewList";
+import { KINDS } from "./cardKind";
 import { nodeOf, openStudy, safeStorage, selectNode, setMode, study, wb } from "./workbench";
 
 const GOAL_KEY = "xq-review-goal";
@@ -263,7 +264,6 @@ export async function showCard(id: string, restore: string | null = null) {
     const answered = mine[mine.length - 1];
     review.phase = answered ? "revealed" : "choose";
     review.attemptAt = answered?.at ?? null;
-    review.intent = null;
     resetAttempt();
     review.error = null;
     // 正在编辑或保存失败的草稿保留，其余按卡片中保存的内容显示
@@ -276,8 +276,24 @@ export async function showCard(id: string, restore: string | null = null) {
   }
 }
 
-/** 在棋盘上重新选择；choice 为空表示不走子、直接看答案 */
-export async function submitChoice(choice: T.Move | null, revealOnly = false) {
+/** 在棋盘上走子或在选项中选一个作答（棋谱中的一着、二选一、找更好的着法） */
+export function submitChoice(choice: T.Move) {
+  return submitAttempt(choice, []);
+}
+
+/** 找威胁：提交点出的格子 */
+export function submitMarks() {
+  if (!review.current || KINDS[review.current.card.kind].answer !== "pick" || !review.marks.length) return Promise.resolve();
+  return submitAttempt(null, [...review.marks]);
+}
+
+/** 不作答、直接看答案：同样记为一次作答（与跳过不同） */
+export function revealAnswer() {
+  return submitAttempt(null, []);
+}
+
+/** 记下这次作答：走子或选择的着法、找威胁中点出的格子（两者都为空是直接看答案），以及提示、用时与信心 */
+async function submitAttempt(choice: T.Move | null, marks: T.Square[]) {
   const current = review.current;
   if (!current || review.phase !== "choose" || review.busy) return;
   const v = view;
@@ -289,8 +305,6 @@ export async function submitChoice(choice: T.Move | null, revealOnly = false) {
   try {
     const { goal, intent } = review;
     // 耗时只记录、不评分；离开很久的作答记为一小时
-    // 找威胁提交点出的格子；直接看答案（choice 为空且没有点出格子）时为空
-    const marks = choice === null && current.card.kind === "threat" && !revealOnly ? [...review.marks] : [];
     const extra = { hints: review.hints, elapsed_ms: Math.min(Date.now() - review.shownAt, 3_600_000), confidence: review.confidence, marks };
     const send = () => queued(id, () => api.reviewAttempt(id, choice, goal, intent, practice, request, extra));
     // 这组练习的换题还在写回时，等写回之后再提交：后台只把当前题目的作答记入这组练习
@@ -308,9 +322,10 @@ export async function submitChoice(choice: T.Move | null, revealOnly = false) {
   }
 }
 
-/** 开始一次新的作答：新的请求编号，提示、信心与计时从头开始 */
+/** 开始一次新的作答：新的请求编号，意图、提示、信心、点出的格子与计时从头开始 */
 function resetAttempt() {
   review.request = newRequestId();
+  review.intent = null;
   review.hints = 0;
   review.hintData = null;
   review.confidence = null;
@@ -320,7 +335,7 @@ function resetAttempt() {
 
 /** 找威胁：点出或取消一个格子 */
 export function toggleMark(sq: T.Square) {
-  if (review.phase !== "choose" || review.busy) return;
+  if (!review.current || KINDS[review.current.card.kind].answer !== "pick" || review.phase !== "choose" || review.busy) return;
   review.marks = review.marks.includes(sq) ? review.marks.filter((m) => m !== sq) : [...review.marks, sq];
 }
 
@@ -329,7 +344,6 @@ export function retryCard() {
   view += 1;
   review.phase = "choose";
   review.attemptAt = null;
-  review.intent = null;
   resetAttempt();
   review.busy = false;
 }

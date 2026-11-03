@@ -21,7 +21,8 @@ import {
   startPractice,
   starredNotInReview,
 } from "../state/review";
-import { dueText, ISSUE_LABEL, KIND_LABEL, positionLabel, recommendation, STATUS_LABEL, topics, whenText, type TopicKey } from "../state/reviewList";
+import { dueText, ISSUE_LABEL, positionLabel, recommendation, STATUS_LABEL, topics, whenText, type TopicKey } from "../state/reviewList";
+import { KIND_LABEL } from "../state/cardKind";
 import { study, wb } from "../state/workbench";
 
 const message = useMessage();

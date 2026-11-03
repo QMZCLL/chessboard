@@ -1,6 +1,6 @@
 // 场景 24：从自己的棋局生成练习（模拟引擎）。整局报告中“从这盘棋生成练习”：按自己一方的着法出找威胁、二选一、
 // 找更好的着法，写明新增几道；复习库中标出题型；找威胁在棋盘上点出受到威胁的棋子后提交，二选一用按钮选择，
-// 找更好的着法说明当时走了什么；揭示后的结果与标签按题型说明，不说“棋谱中”。
+// 找更好的着法说明当时走了什么；揭示后的结果、标签与比较结论按题型说明，不说“棋谱中”。
 import { BASE, bridge, check, launch, snap } from "../lib.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -69,9 +69,21 @@ const better = await dialog.getByTestId("review-result").innerText();
 check(better.includes("引擎首选是 马五进三") && !better.includes("棋谱中"), `结果不说“棋谱中”：${better}`);
 check((await dialog.getByTestId("review-played").innerText()) === "马五进七", "讲解与评价标明属于当时走的那一着");
 await snap(page, "better-revealed");
+// 再试一次，走出引擎首选：比较结论按题型说明，不说“与棋谱一致”
+await dialog.getByRole("button", { name: "再试一次" }).click();
+await dialog.getByTestId("review-prompt").waitFor();
+for (const sq of ["e2", "g3"]) await reviewCard.locator(`[data-square="${sq}"]`).first().dispatchEvent("mousedown", { button: 0 });
+const verdictEl = dialog.getByTestId("review-decision");
+await verdictEl.filter({ hasNotText: "正在用同一次搜索比较" }).waitFor({ timeout: 60000 });
+const verdict = (await verdictEl.innerText()).trim();
+check(verdict === "与题目中的引擎首选一致", `找更好的着法走出引擎首选：${verdict}`);
+check((await dialog.getByTestId("review-badge").innerText()) === "比较支持", "比较支持这个选择");
+check(!(await dialog.getByTestId("review-self-check").innerText()).includes("棋谱"), "自我检查的提醒不说“棋谱”");
 
 const events = (await bridge("learning_events")).filter((e) => e.study_id === sid);
-check(events.map((e) => e.kind).sort().join() === "better,choice,threat", `学习事件记下题型：${events.map((e) => `${e.kind}:${e.outcome}`).join("、")}`);
+// 找更好的着法作答了两次：直接看答案，再试一次走出引擎首选
+const recorded = events.map((e) => `${e.kind}:${e.outcome}`).sort().join("、");
+check(recorded === "better:independent、better:revealed、choice:missed、threat:independent", `学习事件记下题型与结果：${recorded}`);
 console.log(problems.length ? `控制台问题：\n${problems.join("\n")}` : "  ✓ 控制台无错误");
 if (problems.length) process.exitCode = 1;
 await browser.close();

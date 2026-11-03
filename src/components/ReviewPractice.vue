@@ -22,6 +22,7 @@ import {
   nextCardId,
   openSource,
   retryCard,
+  revealAnswer,
   review,
   saveNote,
   setGoal,
@@ -31,17 +32,15 @@ import {
   showReviewHint,
   skipCard,
   submitChoice,
+  submitMarks,
   toggleMark,
 } from "../state/review";
 import {
   attemptMark,
   attemptNotesText,
-  attemptText,
   awaitingResult,
   CONFIDENCE_LABEL,
   CONFIDENCES,
-  kindResultText,
-  decisionTitle,
   dueText,
   GOAL_LABEL,
   historyText,
@@ -49,14 +48,13 @@ import {
   INTENTS,
   ISSUE_LABEL,
   ISSUES,
-  outcomeBadge,
   positionLabel,
   STATUS_LABEL,
   suggestionFor,
   THEME_LABEL,
   thinkingText,
 } from "../state/reviewList";
-import { sideLabel } from "../utils/board";
+import { attemptTitle, boardLayers, decisionTitle, GOAL_HINT, KINDS, outcomeBadge, promptText, resultText, resultTone } from "../state/cardKind";
 
 /** session：在一组练习中（专注练习工作区）；否则是复习库中单独复习一张卡片 */
 const props = defineProps<{ session?: boolean }>();
@@ -68,55 +66,28 @@ const revealed = computed(() => review.phase === "revealed");
 const STATUS_TYPE: Record<ReviewStatus, "warning" | "error" | "success"> = { due: "warning", again: "error", understood: "success" };
 const LEVEL = { basic: "规则讲解", partial: "分析不完整", detailed: "引擎分析完整" } as const;
 
-// 揭示后：实线是棋谱中的这一着，虚线是这次的选择（与棋谱不同时）
-const answerArrows = computed(() => (revealed.value && card.value && card.value.kind !== "threat" ? [card.value.answer.mv] : []));
+/** 这张卡片的题型：作答方式与各处文字都由题型决定（见 state/cardKind.ts） */
+const spec = computed(() => (card.value ? KINDS[card.value.kind] : null));
 const attempt = computed(() => currentAttempt.value);
-const choiceArrow = computed(() => {
-  const a = attempt.value;
-  return revealed.value && a?.choice && !a.matched ? a.choice.mv : null;
-});
 const lastMove = computed(() => card.value?.history[card.value.history.length - 1]?.mv ?? null);
 const suggestion = computed(() => (attempt.value ? suggestionFor(attempt.value) : null));
 const decision = computed(() => attempt.value?.decision ?? null);
 /** 这次作答的结果标签（与练习列表、小结相同的文字与颜色） */
 const badge = computed(() => (attempt.value ? outcomeBadge(attempt.value, card.value?.kind) : null));
-const GOAL_HINT = { recall: "回忆这盘棋当时怎样走，看是否与棋谱一致", decision: "作出自己的选择，与棋谱着法、引擎参考在同一次搜索中比较" } as const;
 const toggleIntent = (i: (typeof INTENTS)[number]) => (review.intent = review.intent === i ? null : i);
 const hints = computed(() => card.value?.thinking?.hints ?? null);
-/** 选择前看过的提示：二级提示在棋盘上标出相关的棋子与关系 */
-const hintMarks = computed(() => (review.hintData && review.hints >= 2 ? review.hintData.focus.squares : []));
-const hintArrows = computed(() => (review.hintData && review.hints >= 2 ? review.hintData.focus.arrows : []));
 /** 这次作答看了几级提示、选择的把握与用时 */
 const attemptNotes = computed(() => (attempt.value ? attemptNotesText(attempt.value) : ""));
-/** 在棋盘上走子作答的题型（找威胁点选格子，二选一用按钮） */
-const moves = computed(() => card.value?.kind === "move" || card.value?.kind === "better");
-const prompt = computed(() => {
-  const c = card.value;
-  if (!c) return "";
-  const side = sideLabel(c.side);
-  switch (c.kind) {
-    case "threat":
-      return `轮到${side}走。先不走子：在棋盘上点出受到威胁的己方棋子（被将军时还要点出将军的棋子），再提交。`;
-    case "choice":
-      return `轮到${side}走。下面两步中哪一步更好？选好之后对照同一次搜索的结论。`;
-    case "better":
-      return `轮到${side}走。当时走了 ${c.played?.notation ?? ""}，程序评价为明显不如引擎首选。在棋盘上走出你认为更好的一步。`;
-    default:
-      return `轮到${side}走。在棋盘上走出你的选择，再对照原来的思考与讲解。`;
-  }
-});
-/** 选择前棋盘上的标记：找威胁时是点出的格子，其他题型是二级提示标出的棋子 */
-const choose = computed(() =>
-  card.value?.kind === "threat" ? { marks: review.marks, arrows: [] as string[] } : { marks: hintMarks.value, arrows: hintArrows.value },
-);
-/** 揭示后：找威胁标出答案的格子，自己点出的格子另外高亮 */
-const revealedMarks = computed(() => (card.value?.kind === "threat" ? card.value.targets : []));
-const revealedPicks = computed(() => (card.value?.kind === "threat" ? (attempt.value?.marks ?? []) : []));
-const answerTitle = computed(() => {
-  const c = card.value;
-  if (!c || c.kind === "move") return "棋谱中的这一着";
-  if (c.kind === "threat") return `受到威胁的位置：${c.targets.join("、")}；当时走的着法`;
-  return "答案";
+/** 棋盘上的标记：选择前是点出的格子或二级提示，揭示后是答案与这次的选择 */
+const layers = computed(() => {
+  if (!card.value) return null;
+  const hinted = review.hintData && review.hints >= 2 ? review.hintData.focus : null;
+  return boardLayers(card.value, revealed.value, {
+    marks: review.marks,
+    hintMarks: hinted?.squares ?? [],
+    hintArrows: hinted?.arrows ?? [],
+    attempt: attempt.value,
+  });
 });
 const recent = computed(() => (card.value?.attempts ?? []).slice(-8));
 /** 已经按这次作答标记了状态（安排依据的就是这次作答） */
@@ -171,7 +142,7 @@ async function mark(status: ReviewStatus) {
 </script>
 
 <template>
-  <section v-if="card && current" class="practice" :class="{ session }" data-testid="review-card">
+  <section v-if="card && current && spec && layers" class="practice" :class="{ session }" data-testid="review-card">
     <header class="head">
       <div>
         <div class="title">{{ current.study_name }} · {{ positionLabel(card) }}</div>
@@ -202,12 +173,12 @@ async function mark(status: ReviewStatus) {
           :orientation="card.orientation"
           :legal-moves="revealed ? [] : current.legal_moves"
           :last-move="lastMove"
-          :arrows="revealed ? answerArrows : choose.arrows"
-          :marks="revealed ? revealedMarks : choose.marks"
-          :highlights="revealed ? revealedPicks : []"
-          :next-arrow="choiceArrow"
-          :interactive="!revealed && !review.busy && moves"
-          :pick="!revealed && !review.busy && card.kind === 'threat'"
+          :arrows="layers.arrows"
+          :marks="layers.marks"
+          :highlights="layers.highlights"
+          :next-arrow="layers.next"
+          :interactive="!revealed && !review.busy && spec.answer === 'board'"
+          :pick="!revealed && !review.busy && spec.answer === 'pick'"
           @move="submitChoice"
           @pick="toggleMark"
         />
@@ -215,9 +186,9 @@ async function mark(status: ReviewStatus) {
 
       <div class="side">
         <template v-if="!revealed">
-          <p class="prompt" data-testid="review-prompt">{{ prompt }}</p>
+          <p class="prompt" data-testid="review-prompt">{{ promptText(card) }}</p>
           <!-- 二选一：两个选项按坐标排列，不按优劣 -->
-          <div v-if="card.kind === 'choice'" class="options" data-testid="review-options">
+          <div v-if="spec.answer === 'options'" class="options" data-testid="review-options">
             <n-button
               v-for="o in card.options"
               :key="o.mv"
@@ -228,14 +199,15 @@ async function mark(status: ReviewStatus) {
               {{ o.notation }}
             </n-button>
           </div>
-          <div v-if="card.kind === 'move'" class="goal">
+          <!-- 只有棋谱中的一着可以选择练习目标；其他题型的判断方式由题型决定 -->
+          <div v-if="spec.goal === null" class="goal">
             <n-radio-group :value="review.goal" size="small" data-testid="review-goal" @update:value="setGoal">
               <n-radio-button value="recall" data-testid="review-goal-recall">{{ GOAL_LABEL.recall }}</n-radio-button>
               <n-radio-button value="decision" data-testid="review-goal-decision">{{ GOAL_LABEL.decision }}</n-radio-button>
             </n-radio-group>
             <span class="muted">{{ GOAL_HINT[review.goal] }}</span>
           </div>
-          <div v-if="moves" class="intent" data-testid="review-intent">
+          <div v-if="spec.answer === 'board'" class="intent" data-testid="review-intent">
             <span class="muted">我这一步主要想（可以不选）：</span>
             <n-button
               v-for="i in INTENTS"
@@ -272,12 +244,9 @@ async function mark(status: ReviewStatus) {
           <!-- 你的选择：这一行只陈述事实；局面决策中与棋谱不同不等于走错，结论看下面的比较 -->
           <section class="group" data-testid="feedback-choice">
             <h3>你的选择 <span v-if="badge" class="badge" :class="badge.tone" data-testid="review-badge">{{ badge.text }}</span></h3>
-            <p class="result" :class="{ ok: attempt?.matched, neutral: attempt?.goal === 'decision' && !attempt?.matched }" data-testid="review-result">
-              {{ card.kind === "move" ? attemptText(attempt?.choice ?? null, !!attempt?.matched, card.answer.notation) : kindResultText(card, attempt ?? { choice: null, marks: [], matched: false }) }}
-            </p>
+            <p class="result" :class="resultTone(attempt)" data-testid="review-result">{{ resultText(card, attempt) }}</p>
             <p v-if="attemptNotes" class="muted" data-testid="review-attempt-notes">{{ attemptNotes }}</p>
-            <p v-if="card.kind === 'threat'" class="legend muted">棋盘上圈出的是受到威胁的位置，高亮的是你点出的格子。</p>
-            <p v-else class="legend muted">棋盘上实线箭头是{{ card.kind === "move" ? "棋谱中的着法" : "引擎首选" }}<template v-if="choiceArrow">，虚线是这次的选择</template>。</p>
+            <p class="legend muted">{{ spec.legend(!!layers.next) }}</p>
             <!-- 原来的意图与这一步实际的变化（规则事实） -->
             <template v-if="attempt?.reflection">
               <h4 data-testid="review-intent-title">
@@ -298,7 +267,7 @@ async function mark(status: ReviewStatus) {
           <section v-if="decision" class="group" data-testid="feedback-verdict">
             <h3>比较结论</h3>
             <p class="decision" :class="badge?.tone" data-testid="review-decision">
-              <n-spin v-if="decision.state === 'pending'" :size="12" /> {{ decisionTitle(decision) }}
+              <n-spin v-if="decision.state === 'pending'" :size="12" /> {{ decisionTitle(decision, card.kind) }}
             </p>
             <ul v-if="decision.points.length" class="claims" data-testid="review-decision-points">
               <li v-for="t in decision.points" :key="t">{{ t }}</li>
@@ -311,7 +280,7 @@ async function mark(status: ReviewStatus) {
           <section class="group">
             <h3>具体原因</h3>
             <p v-if="card.origin" class="muted" data-testid="review-origin">出处：{{ card.origin }}</p>
-            <h4>{{ answerTitle }}</h4>
+            <h4>{{ spec.answerTitle(card) }}</h4>
             <!-- 生成的题目：讲解与评价属于当时走的那一着，标明是哪一着，不放在引擎首选旁边 -->
             <p v-if="card.played" class="answer" data-testid="review-answer">
               引擎首选 <strong>{{ card.answer.notation }}</strong>
@@ -401,13 +370,13 @@ async function mark(status: ReviewStatus) {
                 v-for="(a, i) in recent"
                 :key="i"
                 :class="attemptMark(a).tone"
-                :title="`${GOAL_LABEL[a.goal]}${a.decision?.verdict ? ` · ${decisionTitle(a.decision)}` : ''}`"
+                :title="attemptTitle(card.kind, a)"
                 >{{ attemptMark(a).text }}</span
               >
-              <span class="legend">（复现棋谱 ✓ 一致 ✗ 不同；局面决策 ○ 比较支持这个选择 △ 不支持 · 无法判断）</span>
+              <span class="legend">{{ spec.marks }}</span>
             </p>
-            <p v-if="attempt?.goal === 'decision' && !suggestion && decision?.state !== 'pending'" class="muted" data-testid="review-self-check">
-              与棋谱一致或评分接近，不等于已经理解：对照原来的意图与这一步实际的变化，说得清理由再标为“已理解”。
+            <p v-if="spec.selfCheck && attempt?.goal === 'decision' && !suggestion && decision?.state !== 'pending'" class="muted" data-testid="review-self-check">
+              {{ spec.selfCheck }}
             </p>
           </section>
 
@@ -420,16 +389,16 @@ async function mark(status: ReviewStatus) {
     <footer class="actions" data-testid="review-actions">
       <template v-if="!revealed">
         <n-button
-          v-if="card.kind === 'threat'"
+          v-if="spec.answer === 'pick'"
           size="small"
           :type="review.marks.length ? 'primary' : 'default'"
           :disabled="review.busy || !review.marks.length"
           data-testid="review-submit-marks"
-          @click="submitChoice(null)"
+          @click="submitMarks"
         >
           提交（已点 {{ review.marks.length }} 处）
         </n-button>
-        <n-button size="small" data-testid="review-reveal" :disabled="review.busy" @click="submitChoice(null, true)">{{ card.kind === "threat" ? "直接看答案" : "不走子，直接看答案" }}</n-button>
+        <n-button size="small" data-testid="review-reveal" :disabled="review.busy" @click="revealAnswer">{{ spec.reveal }}</n-button>
         <n-button v-if="review.hints < 3" size="small" quaternary data-testid="review-hint" :disabled="review.busy" @click="showReviewHint">
           {{ review.hints ? `再看一级提示（已看 ${review.hints} 级）` : "看提示" }}
         </n-button>

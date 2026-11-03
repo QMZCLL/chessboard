@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 专注练习工作区：一组练习按开始时固定的顺序进行，以棋盘为中心。顶部始终显示练习目标与进度，
+// 专注练习工作区：一组练习按开始时固定的顺序进行，以棋盘为中心。顶部始终显示当前题目怎样判断
+// （棋谱中的一着按练习目标，生成的题目按题型）与进度，
 // 可以保存退出（位置已经写回后台，之后从原处继续）或结束并查看小结；本组卡片列表可以展开，
 // 写明每一题的进展（未作答、已跳过、卡片已删除，或第一次作答的结果）。
 import { computed, ref } from "vue";
@@ -7,7 +8,8 @@ import { NAlert, NButton, NEmpty } from "naive-ui";
 import ReviewPractice from "./ReviewPractice.vue";
 import Icon from "./Icon.vue";
 import { exitPractice, finishSession, goTo, openReviews, review, sessionCardId, sessionResult } from "../state/review";
-import { GOAL_LABEL, entryBadge, entryState, positionLabel, summaryText } from "../state/reviewList";
+import { entryState, positionLabel, summaryText } from "../state/reviewList";
+import { entryBadge, judgeText } from "../state/cardKind";
 import { wb } from "../state/workbench";
 
 const session = computed(() => review.session);
@@ -22,7 +24,8 @@ const entries = computed(() => {
   });
 });
 const answered = computed(() => entries.value.filter((e) => e.state === "answered").length);
-const GOAL_HINT = { recall: "看是否记得棋谱中的着法", decision: "看这次的选择是否得到同一次搜索比较的支持" } as const;
+/** 当前题目怎样判断：棋谱中的一着按这组练习的目标，生成的题目按题型 */
+const judge = computed(() => judgeText(cardOf(sessionCardId.value ?? "")?.kind ?? "move", review.goal));
 
 async function backToLibrary() {
   await exitPractice();
@@ -46,7 +49,7 @@ async function backToLibrary() {
       <header class="ws-head">
         <div class="ws-title">
           <strong data-testid="practice-label">{{ session.label }}</strong>
-          <span class="goal" data-testid="practice-goal">{{ GOAL_LABEL[review.goal] }}：{{ GOAL_HINT[review.goal] }}</span>
+          <span class="goal" data-testid="practice-goal">{{ judge }}</span>
         </div>
         <span class="progress" data-testid="practice-progress">第 {{ session.index + 1 }} / {{ session.cards.length }} 题 · 已作答 {{ answered }} 题</span>
         <div class="ws-actions">
