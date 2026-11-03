@@ -19,6 +19,7 @@
             "../libs/pikafish/Copying.txt": "libs/pikafish/Copying.txt",
             "../libs/pikafish/NNUE-License.md": "libs/pikafish/NNUE-License.md",
             "../libs/pikafish/AUTHORS": "libs/pikafish/AUTHORS",
+            "../THIRD_PARTY_LICENSES.md": "THIRD_PARTY_LICENSES.md",
             "../libs/models/*": "libs/models/"
         }
     }

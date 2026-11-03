@@ -68,6 +68,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # 随安装包分发的第三方许可清单：依赖的 Rust crate 与 npm 包的许可都在允许的列表中，提交的清单是最新的
+      - name: 第三方许可清单
+        run: node scripts/third-party-licenses.mjs --check
       # 中文字体只影响截图与排版宽度，不影响按文字定位
       - name: 安装 Chromium 与中文字体
         run: |
