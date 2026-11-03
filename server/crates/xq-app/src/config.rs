@@ -478,14 +478,12 @@ fn parse(text: &str, notes: &mut Vec<String>) -> Result<AppConfig, String> {
     }
 }
 
-/// 先写临时文件再替换，避免写到一半时损坏配置。
+/// 先写临时文件再替换（见 `files`），避免写到一半时损坏配置。
 pub fn save(path: &Path, config: &AppConfig) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_string_pretty(config).map_err(std::io::Error::other)?)?;
-    fs::rename(tmp, path)
+    crate::files::write_atomic(path, serde_json::to_string_pretty(config).map_err(std::io::Error::other)?.as_bytes())
 }
 
 #[cfg(test)]

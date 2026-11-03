@@ -10,6 +10,7 @@ mod capture_glue;
 pub mod compare;
 pub mod config;
 pub mod exercise;
+mod files;
 pub mod inbox;
 pub mod decision;
 pub mod engine;

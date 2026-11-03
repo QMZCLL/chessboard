@@ -198,6 +198,11 @@ pub(crate) struct Inner {
     pub(crate) focus: Mutex<Option<(String, NodeId)>>,
     /// 每次讲解记录变化递增；视图与事件都带上它，界面据此识别过期的视图。
     pub(crate) explain_seq: AtomicU64,
+    /// 这次启动的事件流编号：讲解序号只在同一个事件流中可以比较。
+    pub(crate) stream_id: String,
+    /// 视图序号：会话的棋谱或任何一着的讲解记录写入之后加一（见 `bump_view`）。生成视图时先取它，
+    /// 序号为 v 的视图反映了序号不超过 v 的全部变化，界面据此判断一份视图是否整体新于已经显示的内容。
+    pub(crate) view_seq: AtomicU64,
     /// 每次对比请求递增；对比结果与推送都带上请求时的序号，界面据此判断新旧（见 `compare`）。
     pub(crate) compare_seq: AtomicU64,
     pub(crate) explain_tx: Mutex<Sender<ExplainMsg>>,
@@ -211,6 +216,16 @@ pub(crate) struct Inner {
     pub(crate) stopping: AtomicBool,
     explain_worker: Mutex<Option<JoinHandle<()>>>,
     coach_workers: Mutex<Vec<JoinHandle<()>>>,
+}
+
+/// `study_updated` 事件：会话的棋谱改变了（界面据此重新读取视图）。
+#[derive(Serialize)]
+struct StudyUpdatedEvent<'a> {
+    study_id: &'a str,
+    revision: u64,
+    reason: &'a str,
+    new_nodes: &'a [NodeId],
+    live_node: Option<NodeId>,
 }
 
 /// 服务入口；可在多个线程间共享。
@@ -287,6 +302,8 @@ impl AppService {
             explain_generation: AtomicU64::new(0),
             focus: Mutex::new(None),
             explain_seq: AtomicU64::new(0),
+            stream_id: uuid::Uuid::new_v4().to_string(),
+            view_seq: AtomicU64::new(0),
             compare_seq: AtomicU64::new(0),
             explain_tx: Mutex::new(tx),
             commit_hook: Mutex::new(None),
@@ -650,7 +667,7 @@ impl AppService {
 
     /// 从这盘棋生成练习（见 `exercise`）：只用已经完成的讲解与规则事实，写明新增与跳过的原因。
     pub fn generate_exercises(&self, r: crate::exercise::ExerciseRequest) -> ApiResult<crate::exercise::ExerciseSummary> {
-        self.inner.generate_exercises(&r.study_id)
+        self.inner.generate_exercises(&r.study_id, r.regenerate)
     }
 
     /// 能力画像（见 `profile`）：由全部学习事件统计，推荐的主题要有复习卡片可练。
@@ -779,6 +796,8 @@ impl Inner {
         if draft.revision != current.revision {
             self.store.save_study(&draft)?;
             studies.insert(id.to_string(), draft);
+            // 写入与放进会话表之后才加一：取到这个序号的视图一定读得到这份棋谱
+            self.bump_view();
         } else if !studies.contains_key(id) {
             studies.insert(id.to_string(), current);
         }
@@ -828,7 +847,13 @@ impl Inner {
     }
 
     /// 已经保存的会话放进内存中的会话表。
-    pub(crate) fn cache_study(&self, study: &Study) { lock(&self.studies).insert(study.id.clone(), study.clone()); }
+    pub(crate) fn cache_study(&self, study: &Study) {
+        lock(&self.studies).insert(study.id.clone(), study.clone());
+        self.bump_view();
+    }
+
+    /// 会话的棋谱或讲解记录已经写入：视图序号加一，返回新的序号。
+    pub(crate) fn bump_view(&self) -> u64 { self.view_seq.fetch_add(1, Ordering::SeqCst) + 1 }
 
     /// 新记录的走子：立即排队生成基本讲解，并按设置排队详细讲解。
     pub(crate) fn on_new_nodes(&self, study: &Study, nodes: &[NodeId], reason: &str, priority: Priority) {
@@ -849,6 +874,7 @@ impl Inner {
                 error!("保存讲解任务失败：{e}");
             }
         }
+        self.bump_view();
         moves
     }
 
@@ -869,15 +895,7 @@ impl Inner {
     }
 
     pub(crate) fn emit_study_updated(&self, study: &Study, reason: &str, new_nodes: &[NodeId]) {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            study_id: &'a str,
-            revision: u64,
-            reason: &'a str,
-            new_nodes: &'a [NodeId],
-            live_node: Option<NodeId>,
-        }
-        events::emit(self.events.as_ref(), events::STUDY_UPDATED, &Payload {
+        events::emit(self.events.as_ref(), events::STUDY_UPDATED, &StudyUpdatedEvent {
             study_id: &study.id,
             revision: study.revision,
             reason,
@@ -887,7 +905,11 @@ impl Inner {
     }
 
     pub(crate) fn study_view(&self, study: &Study) -> ApiResult<StudyView> {
-        // 先取序号再读记录：读取期间若有新记录，视图的序号偏小，界面会重新获取
+        // 先取视图序号，再取会话表中最新的棋谱（调用方给出的可能已经被别处改过）与讲解序号，最后读记录：
+        // 读取期间若有新的变化，视图的序号偏小，界面会按两部分分别合并
+        let view_seq = self.view_seq.load(Ordering::SeqCst);
+        let latest = lock(&self.studies).get(&study.id).filter(|s| s.revision > study.revision).cloned();
+        let study = latest.as_ref().unwrap_or(study);
         let explain_seq = self.explain_seq.load(Ordering::SeqCst);
         let records = self.store.explanations_for(&study.id)?;
         let mut explain_status = BTreeMap::new();
@@ -911,7 +933,7 @@ impl Inner {
             }
             explain_status.insert(r.node_id, status);
         }
-        Ok(StudyView { study: study.clone(), explain_status, stats, explain_seq })
+        Ok(StudyView { study: study.clone(), explain_status, stats, explain_seq, stream_id: self.stream_id.clone(), view_seq })
     }
 
     pub(crate) fn explain_stats(&self, study_id: &str) -> ExplainStats {

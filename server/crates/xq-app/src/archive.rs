@@ -347,9 +347,7 @@ impl Inner {
         let dir = self.backup_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("无法建立备份目录：{e}"))?;
         let path = dir.join(backup_name(now_ms()));
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, self.archive_text()?).map_err(|e| format!("写入备份失败：{e}"))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("写入备份失败：{e}"))?;
+        crate::files::write_atomic(&path, self.archive_text()?.as_bytes()).map_err(|e| format!("写入备份失败：{e}"))?;
         let mut names = backup_names(&dir);
         names.sort_unstable_by(|a, b| b.cmp(a));
         for old in names.iter().skip(keep.max(1) as usize) {
@@ -411,8 +409,7 @@ impl AppService {
     pub fn export_archive(&self) -> ApiResult<String> { self.inner.archive_text() }
 
     pub fn export_archive_to_file(&self, path: &Path) -> ApiResult<()> {
-        std::fs::write(path, self.inner.archive_text()?).map_err(|e| format!("写入 {} 失败：{e}", path.display()))?;
-        Ok(())
+        crate::files::write_atomic(path, self.inner.archive_text()?.as_bytes()).map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
     }
 
     /// 预览导入：不改动本机的数据。

@@ -1,6 +1,6 @@
 // 与后端 serde 结构一一对应的类型。字段名保持后端的 snake_case。
 
-import type { CardKind, Color, Confidence, Intent, PracticeGoal, ReviewIssue, Stability, StabilityLevel, Theme } from "./generated";
+import type { CardKind, Color, Confidence, ExerciseProvenance, Intent, PracticeGoal, ReviewIssue, Stability, StabilityLevel, Theme } from "./generated";
 
 // 由 Rust 结构生成的类型（ts-rs，见 .cargo/config.toml）：新增的共享结构都放在 generated 中，不在这里手写
 export type * from "./generated";
@@ -91,8 +91,12 @@ export interface StudyView {
   study: Study;
   explain_status: Record<string, ExplainStatus>;
   stats: ExplainStats;
-  /** 生成视图时的讲解序号 */
+  /** 生成视图时的讲解序号：序号不超过它的讲解事件都已经反映在这份视图中 */
   explain_seq: number;
+  /** 讲解序号所属的事件流（每次启动后台时不同）；序号只在同一个事件流中可以比较 */
+  stream_id: string;
+  /** 视图序号：序号为 v 的视图反映了序号不超过 v 的全部变化（棋谱与讲解） */
+  view_seq: number;
 }
 
 export interface StudySummary {
@@ -203,6 +207,8 @@ export interface ExplanationRecord {
   pending: boolean;
   error: string | null;
   updated_at: number;
+  /** 保存的次数：同一着的两份记录中次数多的较新（早期的记录为 0） */
+  revision: number;
 }
 
 export type CloudOutcome =
@@ -419,6 +425,8 @@ export interface ReviewCard {
   played: ReviewMove | null;
   /** 生成的题目从哪里来、为什么入选 */
   origin: string | null;
+  /** 生成的题目的出处：出题规则的版本、这一次出题、原会话的棋谱版本与依据的分析 */
+  provenance: ExerciseProvenance | null;
 }
 
 export interface ReviewItem {
@@ -855,6 +863,9 @@ export interface AnalysisDoneEvent {
 
 export interface ExplanationEvent {
   seq: number;
+  stream_id: string;
+  /** 这次写入之后的视图序号 */
+  view_seq: number;
   study_id: string;
   node_id: number;
   status: ExplainStatus;

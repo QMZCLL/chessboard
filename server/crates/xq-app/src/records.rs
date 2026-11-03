@@ -142,6 +142,9 @@ pub struct ExplanationRecord {
     /// 未完成环节的原因。
     pub error: Option<String>,
     pub updated_at: i64,
+    /// 保存的次数：每次保存加一，同一着的两份记录中次数多的较新（早期的记录为 0）。
+    #[serde(default)]
+    pub revision: u64,
 }
 
 impl ExplanationRecord {
@@ -155,6 +158,7 @@ impl ExplanationRecord {
             pending: false,
             error: None,
             updated_at: now,
+            revision: 0,
         }
     }
 

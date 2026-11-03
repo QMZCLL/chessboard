@@ -6,6 +6,7 @@ export type * from "./Confidence";
 export type * from "./Counts";
 export type * from "./EventOutcome";
 export type * from "./EventSource";
+export type * from "./ExerciseProvenance";
 export type * from "./ExerciseSummary";
 export type * from "./InboxCandidate";
 export type * from "./InboxExercises";

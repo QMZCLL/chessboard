@@ -531,7 +531,7 @@ impl AppService {
             if item.exercises.is_some() {
                 continue;
             }
-            let summary = self.inner.generate_exercises(&item.study_id)?;
+            let summary = self.inner.generate_exercises(&item.study_id, false)?;
             r.games += 1;
             (r.threat, r.choice, r.better, r.existing) =
                 (r.threat + summary.threat, r.choice + summary.choice, r.better + summary.better, r.existing + summary.existing);

@@ -1405,6 +1405,16 @@ fn a_practice_session_keeps_its_order_and_position_across_restarts_and_records_e
         })
         .unwrap();
     assert_eq!((moved.index, moved.skipped.clone(), moved.goal, moved.revision), (1, vec![ids[0].clone()], PracticeGoal::Decision, 1));
+    // 界面看到的这组练习不是最新的一版（例如在别处换了题）：不记入；看到最新的一版时照常记入
+    let stale = service
+        .review_attempt(ReviewAttemptRequest { choice: None, practice_revision: Some(0), ..attempt(&ids[0], "stale") })
+        .unwrap_err();
+    assert!(stale.message.contains("已经在别处改变"), "{}", stale.message);
+    let fresh = service
+        .review_attempt(ReviewAttemptRequest { choice: None, practice_revision: Some(moved.revision), ..attempt(&ids[0], "fresh") })
+        .unwrap()
+        .card;
+    assert_eq!(fresh.attempts.last().and_then(|a| a.request.as_deref()), Some("fresh"));
     assert!(service.update_practice(PracticeUpdateRequest { id: session.id.clone(), index: Some(2), ..Default::default() }).is_err());
     // 换题之后：新的当前题目可以作答；上一题重复到达的请求仍只返回已经记下的那次
     service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r5") }).unwrap();
@@ -1432,12 +1442,69 @@ fn a_practice_session_keeps_its_order_and_position_across_restarts_and_records_e
     // 已经结束的一组不再记入新的作答；已经记下的请求重复到达时照样返回
     let late = service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r6") }).unwrap_err();
     assert!(late.message.contains("已经结束"), "{}", late.message);
-    assert_eq!(service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r5") }).unwrap().card.attempts.len(), 1);
+    assert_eq!(service.review_attempt(ReviewAttemptRequest { choice: None, ..attempt(&ids[0], "r5") }).unwrap().card.attempts.len(), 2, "上面看到最新一版时记入的一次加上 r5");
     let done = service.update_practice(PracticeUpdateRequest { id: next.id.clone(), finish: true, ..Default::default() }).unwrap();
     let finished_at = done.finished_at.expect("已经结束");
     let twice = service.update_practice(PracticeUpdateRequest { id: next.id.clone(), finish: true, ..Default::default() }).unwrap();
     assert_eq!(twice.finished_at, Some(finished_at));
     assert_eq!(service.current_practice().unwrap(), None);
+    service.shutdown();
+}
+
+#[test]
+fn concurrent_practice_attempts_are_recorded_once_per_request_and_only_for_the_current_card() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Arc::new(Recorder::default());
+    let service = start_with_mock(dir.path(), "", rec.clone());
+    let sid = service
+        .create_study(CreateStudyRequest { name: None, kind: CreateKind::Standard, orientation: None, user_side: None })
+        .unwrap()
+        .study
+        .study
+        .id;
+    let mut parent = ROOT;
+    let mut ids = Vec::new();
+    for m in ["h2e2", "h9g7"] {
+        parent = service.apply_move(MoveRequest { study_id: sid.clone(), parent, mv: mv(m), variation: false }).unwrap().node_id.unwrap();
+        ids.push(service.add_review(NodeRef { study_id: sid.clone(), node_id: parent }).unwrap().card.id);
+    }
+    let session = service
+        .start_practice(PracticeStartRequest { label: "并发".into(), source: PracticeSource::Today, topic: None, goal: PracticeGoal::Recall, cards: ids.clone() })
+        .unwrap();
+    let attempt = |card: &str, request: String| ReviewAttemptRequest {
+        id: card.to_string(),
+        choice: None,
+        practice: Some(session.id.clone()),
+        request: Some(request),
+        ..Default::default()
+    };
+    // 同一个请求同时到达多次（网络重试）：只记一次
+    let same: Vec<_> = (0..8)
+        .map(|_| {
+            let (s, req) = (service.clone(), attempt(&ids[0], "same".into()));
+            std::thread::spawn(move || s.review_attempt(req).map(|i| i.card.attempts.len()))
+        })
+        .collect();
+    for h in same {
+        assert_eq!(h.join().unwrap().unwrap(), 1, "同一个请求只记一次");
+    }
+    // 不同的请求同时到达，期间换到下一题：每个请求要么在换题之前记入第一题，要么被拒绝，不会记到不是当前题目的卡片上
+    let racing: Vec<_> = (0..8)
+        .map(|i| {
+            let (s, req) = (service.clone(), attempt(&ids[0], format!("r{i}")));
+            std::thread::spawn(move || s.review_attempt(req).map(|_| ()).map_err(|e| e.message))
+        })
+        .collect();
+    let moved = service.update_practice(PracticeUpdateRequest { id: session.id.clone(), index: Some(1), ..Default::default() }).unwrap();
+    assert_eq!(moved.index, 1);
+    let results: Vec<_> = racing.into_iter().map(|h| h.join().unwrap()).collect();
+    let accepted = results.iter().filter(|r| r.is_ok()).count();
+    assert!(results.iter().all(|r| r.as_ref().err().is_none_or(|e| e.contains("不是这组练习当前的题目"))), "{results:?}");
+    let card = service.list_reviews().unwrap().into_iter().find(|i| i.card.id == ids[0]).unwrap().card;
+    assert_eq!(card.attempts.len(), 1 + accepted, "记下的作答与接受的请求一一对应");
+    let events: Vec<_> = service.learning_events().unwrap().into_iter().filter(|e| e.card.as_deref() == Some(ids[0].as_str())).collect();
+    assert_eq!(events.len(), card.attempts.len(), "每次作答一条学习事件，没有重复");
+    assert!(service.review_attempt(attempt(&ids[0], "late".into())).unwrap_err().message.contains("不是这组练习当前的题目"));
     service.shutdown();
 }
 
@@ -1712,7 +1779,7 @@ fn exercises_come_from_own_mistakes_in_one_stable_search_and_are_graded_by_kind(
     let later = service.apply_move(MoveRequest { study_id: sid.clone(), parent: black, mv: mv("c3a4"), variation: false }).unwrap().node_id.unwrap();
     rec.wait("第二着的讲解", |e, v| e == "explanation_updated" && v["node_id"] == later && v["status"] == "detailed");
 
-    let summary = service.generate_exercises(ExerciseRequest { study_id: sid.clone() }).unwrap();
+    let summary = service.generate_exercises(ExerciseRequest { study_id: sid.clone(), regenerate: false }).unwrap();
     assert_eq!((summary.threat, summary.choice, summary.better, summary.existing), (1, 1, 1, 0), "{}", summary.text);
     assert_eq!(summary.skipped, ["第 2 回合马七进九：搜索结果还不够稳定"]);
     assert_eq!(summary.text, "新增 3 道：找威胁 1、二选一 1、找更好的着法 1；1 处失误没有出唯一答案的题目（第 2 回合马七进九：搜索结果还不够稳定）。");
@@ -1726,9 +1793,21 @@ fn exercises_come_from_own_mistakes_in_one_stable_search_and_are_graded_by_kind(
     assert!(choice.origin.as_deref().unwrap().contains("同一次搜索，高稳定"));
     let better = card(CardKind::Better);
     assert_eq!(better.answer.mv.iccs(), "e2g3");
-    // 再次生成不重复加入
-    let again = service.generate_exercises(ExerciseRequest { study_id: sid.clone() }).unwrap();
+    // 出处：同一次出题的编号相同，写明出题规则的版本、原会话的棋谱版本与依据的分析条件
+    let origin = |c: &xq_app::review::ReviewCard| c.provenance.clone().expect("生成的题目写明出处");
+    let p = origin(&better);
+    assert_eq!((p.generator_version, p.source_revision), (xq_app::exercise::GENERATOR_VERSION, created.study.study.revision + 3));
+    assert!(p.conditions.is_some() && p.explain_version.is_some(), "{p:?}");
+    assert!([&threat, &choice].iter().all(|c| origin(c).generation_id == p.generation_id), "同一次出题");
+    // 再次生成不重复加入，已有的题目（含出处）不变
+    let again = service.generate_exercises(ExerciseRequest { study_id: sid.clone(), regenerate: false }).unwrap();
     assert_eq!((again.threat + again.choice + again.better, again.existing), (0, 3));
+    assert_eq!(origin(&card(CardKind::Better)), p);
+    // 重新出题：分析没有变化时题目内容相同，不改动；作答过的题目也保留
+    let regen = service.generate_exercises(ExerciseRequest { study_id: sid.clone(), regenerate: true }).unwrap();
+    assert_eq!((regen.threat + regen.choice + regen.better, regen.updated, regen.existing), (0, 0, 3), "{}", regen.text);
+    assert!(regen.text.contains("作答过或内容没有变化，保留原来的题目"), "{}", regen.text);
+    assert_eq!(origin(&card(CardKind::Better)), p, "内容没有变化时出处也不变");
     // 生成的题目仍能打开原局面
     assert!(service.list_reviews().unwrap().iter().all(|i| i.source_available));
 
@@ -1803,7 +1882,7 @@ fn better_exercise_comparison_keeps_the_game_history() {
     rec.wait("黑方讲解结束", |e, v| e == "explanation_updated" && v["node_id"] == black && v["record"]["pending"] == false);
     let later = service.apply_move(MoveRequest { study_id: sid.clone(), parent: black, mv: mv("c3a4"), variation: false }).unwrap().node_id.unwrap();
     rec.wait("第二着的讲解", |e, v| e == "explanation_updated" && v["node_id"] == later && v["status"] == "detailed");
-    service.generate_exercises(ExerciseRequest { study_id: sid.clone() }).unwrap();
+    service.generate_exercises(ExerciseRequest { study_id: sid.clone(), regenerate: false }).unwrap();
     let better = service.list_reviews().unwrap().into_iter().find(|i| i.card.kind == CardKind::Better).expect("出了找更好的着法");
     assert_eq!((better.card.node_id, better.card.answer.mv.iccs()), (later, "c3b5".to_string()));
     assert!(better.source_available);

@@ -51,6 +51,21 @@ pub const SCHEMA_VERSION: u32 = 1;
 #[derive(Debug)]
 pub struct StoreError(pub String);
 
+/// 加入一张卡片的结果（见 `Store::insert_reviews`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Inserted {
+    Added,
+    /// 还没有作答过，换成了新的题目内容。
+    Replaced,
+    /// 已经有这张卡片，保留原来的。
+    Kept,
+}
+
+/// 两张卡片的题目内容相同：局面、答案、选项、答案格子、当时的着法与出处说明（不比较出题的编号与时间）。
+fn same_exercise(a: &ReviewCard, b: &ReviewCard) -> bool {
+    (&a.fen, &a.answer, &a.options, &a.targets, &a.played, &a.origin) == (&b.fen, &b.answer, &b.options, &b.targets, &b.played, &b.origin)
+}
+
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "数据存储错误：{}", self.0) }
 }
@@ -340,6 +355,44 @@ impl Store {
         };
         tx.commit()?;
         Ok(stored)
+    }
+
+    /// 在同一个写事务中加入几张卡片，写入失败时一张都不加入。已经有的卡片不覆盖；`replace_unanswered` 时，
+    /// 还没有作答过、题目内容又不同的卡片换成新的内容（保留加入的时间、理解与问题，修改次数加一）。
+    pub fn insert_reviews(&self, cards: &[ReviewCard], replace_unanswered: bool) -> Result<Vec<Inserted>, StoreError> {
+        let tx = self.db.begin_write()?;
+        let outcome = {
+            let mut t = tx.open_table(REVIEWS)?;
+            let mut outcome = Vec::with_capacity(cards.len());
+            for card in cards {
+                let existing = t.get(card.id.as_str())?.map(|v| serde_json::from_str::<ReviewCard>(v.value())).transpose()?;
+                let result = match existing {
+                    None => {
+                        t.insert(card.id.as_str(), serde_json::to_string(card)?.as_str())?;
+                        Inserted::Added
+                    }
+                    Some(old) if replace_unanswered && old.attempts.is_empty() && !same_exercise(&old, card) => {
+                        let new = ReviewCard {
+                            created_at: old.created_at,
+                            note: old.note.clone(),
+                            issues: old.issues.clone(),
+                            status: old.status,
+                            due_at: old.due_at,
+                            stage: old.stage,
+                            revision: old.revision + 1,
+                            ..card.clone()
+                        };
+                        t.insert(card.id.as_str(), serde_json::to_string(&new)?.as_str())?;
+                        Inserted::Replaced
+                    }
+                    Some(_) => Inserted::Kept,
+                };
+                outcome.push(result);
+            }
+            outcome
+        };
+        tx.commit()?;
+        Ok(outcome)
     }
 
     /// 修改一张卡片：在同一写事务中读取最新的卡片、修改并写回，同时把修改次数加一。写事务一次只有一个，
@@ -685,6 +738,29 @@ mod tests {
             "thinking": null, "basis": null, "note": "", "attempts": [], "reviewed_at": null
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn regenerating_replaces_only_unanswered_cards_whose_content_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.redb")).unwrap();
+        let mut answered = card("s/2");
+        answered.attempts = serde_json::from_value(serde_json::json!([{ "at": 5, "choice": null, "matched": false, "goal": "recall" }])).unwrap();
+        let fresh = ReviewCard { note: "我的理解".into(), ..card("s/1") };
+        assert_eq!(store.insert_reviews(&[fresh.clone(), answered.clone(), card("s/3")], false).unwrap(), [Inserted::Added; 3]);
+        // 新的分析：三张的答案都变了
+        let changed = |id: &str| {
+            let mut c = card(id);
+            c.answer.notation = "新的答案".into();
+            c.created_at = 99;
+            c
+        };
+        assert_eq!(store.insert_reviews(&[changed("s/1"), changed("s/2"), card("s/3")], false).unwrap(), [Inserted::Kept; 3], "普通的生成不改动已有的卡片");
+        let outcome = store.insert_reviews(&[changed("s/1"), changed("s/2"), card("s/3")], true).unwrap();
+        assert_eq!(outcome, [Inserted::Replaced, Inserted::Kept, Inserted::Kept], "作答过的与内容相同的都保留");
+        let replaced = store.load_review("s/1").unwrap().unwrap();
+        assert_eq!((replaced.answer.notation.as_str(), replaced.note.as_str(), replaced.created_at, replaced.revision), ("新的答案", "我的理解", 1, 1));
+        assert_eq!(store.load_review("s/2").unwrap().unwrap(), answered);
     }
 
     #[test]

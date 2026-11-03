@@ -204,8 +204,13 @@ pub struct StudyView {
     pub study: Study,
     pub explain_status: BTreeMap<NodeId, ExplainStatus>,
     pub stats: ExplainStats,
-    /// 生成视图时的讲解序号，见 `explanation_updated` 事件的 `seq`。
+    /// 生成视图时的讲解序号，见 `explanation_updated` 事件的 `seq`：先取序号再读记录，
+    /// 序号不超过它的讲解事件都已经反映在这份视图中。
     pub explain_seq: u64,
+    /// 讲解序号所属的事件流：每次启动服务时不同。序号只在同一个事件流中可以比较（开发桥重新启动后从头开始）。
+    pub stream_id: String,
+    /// 视图序号：序号为 v 的视图反映了序号不超过 v 的全部变化（棋谱与讲解），见 `explanation_updated` 事件的 `view_seq`。
+    pub view_seq: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -162,12 +162,16 @@ impl Inner {
     }
 }
 
-/// 作答能否记入这组练习：这组练习还没有结束，而且这张卡片是它当前的题目
-/// （界面在换题写回之后才提交作答，见前端的 `submitChoice`）。
-pub(crate) fn attempt_allowed(session: Option<&PracticeSession>, card: &str) -> Result<(), String> {
+/// 作答能否记入这组练习：这组练习还没有结束，界面看到的是它最新的一版（给出修改次数时），
+/// 而且这张卡片是它当前的题目（界面在换题写回之后才提交作答，见前端的 `submitAttempt`）。
+/// 与写入作答在同一个写事务中检查，写事务一次只有一个。
+pub(crate) fn attempt_allowed(session: Option<&PracticeSession>, card: &str, revision: Option<u64>) -> Result<(), String> {
     let Some(s) = session else { return Err("找不到这组练习".into()) };
     if s.finished_at.is_some() {
         return Err("这组练习已经结束".into());
+    }
+    if revision.is_some_and(|r| r != s.revision) {
+        return Err("这组练习已经在别处改变（例如换了题），请重新打开这组练习".into());
     }
     match s.cards.get(s.index) {
         Some(c) if c == card => Ok(()),

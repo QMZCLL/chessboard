@@ -5,9 +5,13 @@
  */
 export type ExerciseSummary = { threat: number, choice: number, better: number, 
 /**
- * 已经有这道题，没有重复加入。
+ * 已经有这道题，没有重复加入（重新出题时：作答过或内容没有变的题目）。
  */
 existing: number, 
+/**
+ * 重新出题时换成新内容的题目（之前没有作答过）。
+ */
+updated: number, 
 /**
  * 没有出题的局面与原因（最多列出 5 处）。
  */

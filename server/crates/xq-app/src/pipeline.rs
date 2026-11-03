@@ -61,9 +61,14 @@ struct ExplainJob {
     ctx: ExplainContext,
 }
 
+/// `explanation_updated` 事件。
 #[derive(Serialize)]
 struct ExplanationEvent<'a> {
     seq: u64,
+    /// 序号所属的事件流，见 `StudyView::stream_id`。
+    stream_id: &'a str,
+    /// 这次写入之后的视图序号，见 `StudyView::view_seq`。
+    view_seq: u64,
     study_id: &'a str,
     node_id: NodeId,
     status: ExplainStatus,
@@ -71,6 +76,7 @@ struct ExplanationEvent<'a> {
     stats: ExplainStats,
 }
 
+/// `analysis_progress` 事件。
 #[derive(Serialize)]
 struct ProgressEvent<'a> {
     request_id: &'a str,
@@ -82,6 +88,7 @@ struct ProgressEvent<'a> {
     candidates: Vec<CandidateView>,
 }
 
+/// `analysis_done` 事件。
 #[derive(Serialize)]
 struct AnalysisDoneEvent<'a> {
     request_id: &'a str,
@@ -293,13 +300,18 @@ impl Inner {
             return;
         }
         record.updated_at = now_ms();
+        // 每次保存加一：界面据此判断同一着的两份记录哪份较新，不依赖墙钟时间
+        record.revision += 1;
         if let Err(e) = self.store.save_explanation(record) {
             warn!("保存讲解失败：{e}");
             return;
         }
+        let view_seq = self.bump_view();
         let seq = self.explain_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         events::emit(self.events.as_ref(), events::EXPLANATION_UPDATED, &ExplanationEvent {
             seq,
+            stream_id: &self.stream_id,
+            view_seq,
             study_id: &record.study_id,
             node_id: record.node_id,
             status: record.status(),

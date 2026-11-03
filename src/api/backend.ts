@@ -201,14 +201,24 @@ export const api = {
     intent: T.Intent | null,
     practice: string | null = null,
     request: string | null = null,
-    extra: { hints: number; elapsed_ms: number | null; confidence: T.Confidence | null; marks?: T.Square[] } = { hints: 0, elapsed_ms: null, confidence: null },
+    extra: {
+      hints: number;
+      elapsed_ms: number | null;
+      confidence: T.Confidence | null;
+      marks?: T.Square[];
+      /** 作答时看到的这组练习的修改次数 */
+      practice_revision?: number | null;
+    } = { hints: 0, elapsed_ms: null, confidence: null },
   ) => call<T.ReviewItem>("review_attempt", { req: { id, choice, goal, intent, practice, request, ...extra } }),
   /** 复习这张卡片时的分级提示（与先想后讲相同的规则）；局面已经结束时为空 */
   reviewHints: (id: string) => call<T.ThinkHints | null>("review_hints", { req: { id } }),
   /** 全部学习事件 */
   learningEvents: () => call<T.LearningEvent[]>("learning_events"),
-  /** 从这盘棋生成练习：找威胁、二选一、找更好的着法 */
-  generateExercises: (study_id: string) => call<T.ExerciseSummary>("generate_exercises", { req: { study_id } }),
+  /**
+   * 从这盘棋生成练习：找威胁、二选一、找更好的着法。regenerate 为重新出题：还没有作答过、内容又变了的题目
+   * 按现在的分析更新，作答过的保留
+   */
+  generateExercises: (study_id: string, regenerate = false) => call<T.ExerciseSummary>("generate_exercises", { req: { study_id, regenerate } }),
   inboxPreview: (sources: T.InboxSource[]) => call<T.InboxPreview>("inbox_preview", { req: { sources } }),
   inboxImport: (games: T.InboxImportGame[]) => call<T.InboxImportResult>("inbox_import", { req: { games } }),
   inboxList: () => call<T.InboxList>("inbox_list"),

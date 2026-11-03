@@ -256,6 +256,9 @@ pub struct ReviewCard {
     /// 生成的题目从哪里来、为什么入选。
     #[serde(default)]
     pub origin: Option<String>,
+    /// 生成的题目的出处：出题规则的版本、这一次出题、原会话的棋谱版本与依据的分析（见 `exercise`）。
+    #[serde(default)]
+    pub provenance: Option<crate::exercise::ExerciseProvenance>,
 }
 
 /// 保留的复习次数。
@@ -316,7 +319,10 @@ pub struct ReviewAttemptRequest {
     /// 这次作答属于哪一组练习（这组练习要包含这张卡片）。
     #[serde(default)]
     pub practice: Option<String>,
-    /// 请求编号：已经有同一编号的作答时不再记录，返回原来的卡片。
+    /// 界面作答时看到的这组练习的修改次数：与后台不同时（例如在别处换了题）不记入，界面需要重新读取这组练习。
+    #[serde(default)]
+    pub practice_revision: Option<u64>,
+    /// 这次作答的凭证（界面每次显示题目、再试一次时重新生成）：只用一次，同一凭证再次到达时不再记录，返回已经记下的那次。
     #[serde(default)]
     pub request: Option<String>,
     /// 作答前看了几级提示（0–3）。
@@ -483,6 +489,7 @@ impl Inner {
             targets: Vec::new(),
             played: None,
             origin: None,
+            provenance: None,
         })
     }
 
@@ -614,7 +621,7 @@ impl Inner {
                 return Ok(false);
             }
             if req.practice.is_some() {
-                crate::practice::attempt_allowed(session, id)?;
+                crate::practice::attempt_allowed(session, id, req.practice_revision)?;
             }
             let matched = match c.kind {
                 CardKind::Threat => !marks.is_empty() && marks == threat_answer(c),

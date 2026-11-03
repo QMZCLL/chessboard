@@ -45,6 +45,7 @@ struct StudyExport {
     explanations: Vec<ExplanationRecord>,
 }
 
+/// `cloud_result` 事件。
 #[derive(Serialize)]
 struct CloudEvent<'a> {
     study_id: &'a str,
@@ -75,7 +76,7 @@ impl AppService {
 
     pub fn export_study_to_file(&self, id: &str, path: &Path) -> ApiResult<()> {
         let text = self.export_study(id)?;
-        std::fs::write(path, text).map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
+        crate::files::write_atomic(path, text.as_bytes()).map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
     }
 
     /// 导入文本：学习数据文件、FEN 或棋谱。学习数据先检查棋谱树是否成立，会话与讲解在同一个写事务中写入。
