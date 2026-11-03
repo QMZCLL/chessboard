@@ -2,7 +2,7 @@
 //!
 //! - 模拟引擎（xq-mock-uci）按脚本输出，稳定复现排名交换、部分更新、提前结束、崩溃与设置变更。
 //! - 真实引擎使用仓库自带的 Pikafish；缺少引擎文件时测试失败，而不是静默跳过。
-//!   确实无法运行时（如 CPU 不支持 BMI2）可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。
+//!   确实无法运行时可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -206,6 +206,19 @@ fn mock_crash_is_detected_and_engine_restarts() {
 }
 
 #[test]
+fn mock_options_follow_what_the_engine_reports() {
+    // 模拟引擎报告重复局面规则、六十步与 ScoreType 选项：按设置设置它们，评分用归一化刻度
+    let (service, _dir) = mock_engine("@go\nbestmove (none)\n");
+    let EngineState::Ready { identity, applied, notes } = service.state() else { panic!() };
+    let value = |name: &str| applied.iter().find(|o| o.name == name).map(|o| o.value.clone());
+    assert_eq!(value("Repetition Rule").as_deref(), Some("ChineseRule"), "{applied:?}");
+    assert_eq!(value("Sixty Move Rule").as_deref(), Some("true"), "{applied:?}");
+    assert_eq!(value("ScoreType").as_deref(), Some("PawnValueNormalized"), "{applied:?}");
+    assert_eq!(identity.score_type, "PawnValueNormalized");
+    assert!(!notes.iter().any(|n| n.contains("重复局面规则")), "{notes:?}");
+}
+
+#[test]
 fn mock_stale_settings_are_rejected() {
     let script = ["@go".to_string(), info(1, 1, A, 30), format!("bestmove {A}")].join("\n");
     let (service, _dir) = mock_engine(&script);
@@ -234,10 +247,15 @@ fn mock_stale_settings_are_rejected() {
 fn handshake_multipv_and_searchmoves() {
     let Some(service) = real_engine() else { return };
     match service.state() {
-        EngineState::Ready { identity, applied, .. } => {
+        EngineState::Ready { identity, applied, notes } => {
             assert!(identity.name.starts_with("Pikafish"), "{identity:?}");
-            assert_eq!(identity.score_type, "PawnValueNormalized");
-            assert!(applied.iter().any(|o| o.name == "Repetition Rule" && o.value == "ChineseRule"));
+            // 自带的 Pikafish 2026-09-06 不再提供 ScoreType、重复局面规则与六十步选项（评分固定为归一化的 cp，
+            // 规则内置）：不设置这些选项，沿用引擎的刻度，并说明没有重复局面规则选项。
+            // 设置这些选项的路径由模拟引擎覆盖（见 mock_options_follow_what_the_engine_reports）
+            assert_eq!(identity.score_type, "cp");
+            assert!(!applied.iter().any(|o| ["Repetition Rule", "Sixty Move Rule", "ScoreType"].contains(&o.name.as_str())), "{applied:?}");
+            assert!(applied.iter().any(|o| o.name == "MultiPV"), "{applied:?}");
+            assert!(notes.iter().any(|n| n == "引擎没有提供重复局面规则选项"), "{notes:?}");
             assert!(!applied.iter().any(|o| o.name == "UCI_ShowWDL"), "不设置引擎不支持的选项");
         }
         other => panic!("{other:?}"),

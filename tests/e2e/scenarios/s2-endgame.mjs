@@ -113,6 +113,10 @@ await waitText(page, "设置已保存");
 const status = await bridge("app_status");
 check(status.config.analysis.deep_time_ms === Number(seconds) * 1000, `界面 ${seconds} 秒 → 后台 ${status.config.analysis.deep_time_ms} 毫秒`);
 await snap(page, "settings");
+// 自带的 Pikafish 没有重复局面规则与六十步选项：高级设置中写明这两项对它不起作用
+await page.locator(".n-collapse-item__header", { hasText: "高级" }).click();
+const ignored = await page.getByTestId("engine-rules-ignored").innerText();
+check(ignored.includes("重复局面规则与六十步自然限着") && ignored.includes("不起作用"), `引擎不接受的规则设置写明不起作用：${ignored}`);
 await page.keyboard.press("Escape");
 
 // 8. 翻转棋盘

@@ -39,7 +39,13 @@ await page.getByTestId("report-open").click();
 await report.getByTestId("report-overview").waitFor();
 check((await report.getByTestId("report-overview").innerText()).includes("主线 6 着"), "概况：主线着法数与完整分析的着法数");
 const second = await keyOf(2).innerText();
-check(second.includes("第 1 回合 · 黑方 马8进7") && second.includes("先想后讲：用了 2 级提示") && second.includes("马2进3"), `练习中用了提示、选择与棋谱不同的局面入选：${second.replace(/\n/g, " / ")}`);
+const good = await report.getByTestId("report-good").innerText();
+// 选了与棋谱不同的马2进3：比较认为它与首选接近时列为值得保留的判断，否则作为入选的原因（结论随引擎而定），两种都要写明这一选择
+const choiceNoted = second.includes("马2进3") || good.includes("先想后讲中你的选择马2进3与首选接近（棋谱中是马8进7）");
+check(
+  second.includes("第 1 回合 · 黑方 马8进7") && second.includes("先想后讲：用了 2 级提示") && choiceNoted,
+  `练习中用了提示的局面入选，写明与棋谱不同的选择：${second.replace(/\n/g, " / ")} | ${good.replace(/\n/g, " / ")}`,
+);
 check((await keyOf(3).innerText()).includes("收藏"), "收藏的局面入选");
 check((await report.getByTestId("report-keys").locator("li").count()) <= 5, "最多五处");
 check((await report.getByTestId("report-good").innerText()).includes("先想后讲中第一步与棋谱一致：车9平8"), "值得保留的判断");

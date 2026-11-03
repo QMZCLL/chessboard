@@ -4,6 +4,9 @@
         "resources": {
             "../libs/pikafish/pikafish-macos": "libs/pikafish/pikafish-macos",
             "../libs/pikafish/pikafish.nnue": "libs/pikafish/pikafish.nnue",
+            "../libs/pikafish/Copying.txt": "libs/pikafish/Copying.txt",
+            "../libs/pikafish/NNUE-License.md": "libs/pikafish/NNUE-License.md",
+            "../libs/pikafish/AUTHORS": "libs/pikafish/AUTHORS",
             "../libs/models/*": "libs/models/"
         }
     }

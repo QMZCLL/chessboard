@@ -150,7 +150,7 @@ cargo test --manifest-path server/Cargo.toml -p xq-core -p xq-app   # 规则、�
 前后端共享的部分结构由 Rust 生成 TypeScript 类型（ts-rs，见 `.cargo/config.toml`）：运行上面的 `cargo test` 时写到
 `src/api/generated`，生成的文件随代码提交，CI 检查它们是否最新；新增生成的类型时在 `src/api/generated/index.ts` 加一行。
 
-流程测试会运行仓库自带的 Pikafish，缺少引擎时测试失败而不是跳过；确实无法运行（如 CPU 不支持 BMI2）时，
+流程测试会运行仓库自带的 Pikafish，缺少引擎时测试失败而不是跳过；确实无法运行时，
 可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。引擎服务的异常情况（候选排名变化、部分更新、崩溃、设置变更）
 由可编排的模拟引擎 `xq-mock-uci` 稳定复现，不依赖真实引擎。
 
@@ -190,7 +190,8 @@ pnpm build:cpu                                            # Windows（需在 Win
 pnpm tauri build --config server/tauri.linux.conf.json    # Linux：server/target/release/bundle/deb/
 ```
 
-安装包带有 Pikafish 引擎（x86-64-bmi2 构建），不含屏幕识别所需的模型与 ONNX Runtime（见 [libs/README.md](./libs/README.md)），
+安装包带有 Pikafish 2026-09-06 引擎（运行时按 CPU 选择指令集的通用构建）及其许可文件，
+不含屏幕识别所需的模型与 ONNX Runtime（见 [libs/README.md](./libs/README.md)），
 也没有代码签名：Windows 首次运行时如出现 SmartScreen 提示，选择“更多信息 → 仍要运行”。
 
 ## 🛠 开发计划
@@ -213,4 +214,6 @@ pnpm tauri build --config server/tauri.linux.conf.json    # Linux：server/targe
 1. 本项目基于 Apache-2.0 许可证（[LICENSE](./LICENSE)），永久免费开源，仅供学习与研究使用。
 2. 严禁任何商业化或非法用途。
 3. 使用本工具时，请遵守各平台用户协议，本工具不涉及任何破解或自动化操作。
-4. 自带的 Pikafish 引擎以 GPL-3.0 许可发布，源码见 <https://github.com/official-pikafish/Pikafish>。
+4. 自带的 Pikafish 引擎（2026-09-06）以 GPL-3.0 许可发布，许可全文见 [libs/pikafish/Copying.txt](./libs/pikafish/Copying.txt)，
+   对应源码见 <https://github.com/official-pikafish/Pikafish/releases/tag/Pikafish-2026-09-06>。
+   网络文件 `pikafish.nnue` 另有许可（[libs/pikafish/NNUE-License.md](./libs/pikafish/NNUE-License.md)）：仅限合法用途，未经许可不得商用。

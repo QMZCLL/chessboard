@@ -112,6 +112,16 @@ const RULES = [
   { label: "弈天规则（YitianRule）", value: "YitianRule" },
   { label: "允许长捉（AllowChase）", value: "AllowChase" },
 ];
+/**
+ * 引擎就绪时没有接受的规则选项（引擎没有提供这些选项，例如新版 Pikafish 使用内置规则）：
+ * 这两项设置对当前引擎不起作用，界面写明，而不是看起来已经生效。
+ */
+const ignoredRules = computed(() => {
+  const e = wb.status?.engine;
+  if (e?.state !== "ready") return [];
+  const has = (name: string) => e.applied.some((o) => o.name === name);
+  return [has("Repetition Rule") ? null : "重复局面规则", has("Sixty Move Rule") ? null : "六十步自然限着"].filter((x) => x !== null);
+});
 const LEVELS = ["error", "warn", "info", "debug", "trace"].map((v) => ({ label: v, value: v }));
 
 function load(c: AppConfig) {
@@ -349,6 +359,9 @@ const engineText = computed(() => {
                 <n-form-item label="哈希表 (MB)"><n-input-number v-model:value="form.hash_mb" :min="16" :max="65536" :step="64" /></n-form-item>
                 <n-form-item label="重复局面规则"><n-select v-model:value="form.repetition_rule" :options="RULES" /></n-form-item>
                 <n-form-item label="六十步自然限着"><n-switch v-model:value="form.sixty_move_rule" /></n-form-item>
+                <p v-if="ignoredRules.length" class="muted" data-testid="engine-rules-ignored">
+                  当前引擎没有提供{{ ignoredRules.join("与") }}的选项，分析按引擎内置的规则进行，这里的设置对它不起作用。
+                </p>
               </n-collapse-item>
               <n-collapse-item title="云库（可选）" name="cloud">
                 <n-form-item label="启用云库查询"><n-switch v-model:value="form.cloud_enabled" /></n-form-item>
