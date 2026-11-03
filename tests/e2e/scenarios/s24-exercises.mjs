@@ -37,6 +37,9 @@ check(["找威胁", "二选一", "找更好的着法"].every((k) => kinds.includ
 await dialog.locator(`[data-review="${sid}/0000000001/threat"]`).click();
 await dialog.getByTestId("review-prompt").filter({ hasText: "点出受到威胁的己方棋子" }).waitFor();
 check(await dialog.getByTestId("review-submit-marks").isDisabled(), "还没有点出格子时不能提交");
+// 打开复习库时已经显示这张卡片，再点一次会重新读取；读取期间棋盘不接受点选，提示文字仍是上一次的。
+// 直接派发的事件不等待可操作，先等按钮恢复可用（读取完成）再点格子
+await dialog.locator('[data-testid="review-reveal"]:not([disabled])').waitFor();
 await reviewCard.locator('[data-square="e7"]').first().dispatchEvent("mousedown", { button: 0 });
 await dialog.getByTestId("review-submit-marks").filter({ hasText: "已点 1 处" }).waitFor();
 check(await dialog.getByTestId("review-submit-marks").isEnabled(), "点出格子之后可以提交");
