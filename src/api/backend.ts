@@ -49,6 +49,7 @@ const EVENTS = [
   "comparison_updated",
   "coach_answer_updated",
   "review_updated",
+  "inbox_updated",
 ] as const;
 export type EventName = (typeof EVENTS)[number];
 
@@ -208,6 +209,11 @@ export const api = {
   learningEvents: () => call<T.LearningEvent[]>("learning_events"),
   /** 从这盘棋生成练习：找威胁、二选一、找更好的着法 */
   generateExercises: (study_id: string) => call<T.ExerciseSummary>("generate_exercises", { req: { study_id } }),
+  inboxPreview: (sources: T.InboxSource[]) => call<T.InboxPreview>("inbox_preview", { req: { sources } }),
+  inboxImport: (games: T.InboxImportGame[]) => call<T.InboxImportResult>("inbox_import", { req: { games } }),
+  inboxList: () => call<T.InboxList>("inbox_list"),
+  inboxGenerate: () => call<T.InboxGenerateResult>("inbox_generate"),
+  inboxRemove: (study_id: string) => call<T.InboxList>("inbox_remove", { req: { study_id } }),
   /** 能力画像：最近反复出错的地方、今天最值得练的一组、掌握的依据（都写明次数与依据） */
   learningProfile: () => call<T.LearningProfile>("learning_profile"),
   /** 开始一组练习：卡片按给出的顺序；之前还没有结束的一组记为结束 */
@@ -277,6 +283,14 @@ export async function pickOpenPath(): Promise<string | null> {
     filters: [{ name: "棋谱、FEN 或学习数据", extensions: ["json", "pgn", "txt", "fen", "xqf"] }],
   });
   return typeof result === "string" ? result : null;
+}
+
+/** 选择要放进收件箱的棋谱文件，可以多选（仅桌面应用）。 */
+export async function pickRecordPaths(): Promise<string[]> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const result = await open({ multiple: true, directory: false, filters: [{ name: "棋谱", extensions: ["pgn", "txt"] }] });
+  if (!result) return [];
+  return Array.isArray(result) ? result : [result];
 }
 
 export async function copyText(text: string): Promise<void> {

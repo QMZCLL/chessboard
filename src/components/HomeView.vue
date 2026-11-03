@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 今日学习：打开软件时知道练什么。三块内容——继续上次的练习、今天到期的卡片、继续复盘最近的棋谱，
-// 下面是学习画像：最近反复错在哪里、今天最值得练什么、掌握了还是记住了答案，都由程序按学习事件统计，
+// 接着是复盘收件箱（一次导入多盘自己的棋，逐盘分析后出题），下面是学习画像：最近反复错在哪里、今天最值得练什么、掌握了还是记住了答案，都由程序按学习事件统计，
 // 写明次数与依据，不显示百分比；作答还不多时如实说明。画像没有推荐时，按自己确认的问题给出专题推荐。主要操作随状态决定：有没有完成的练习时继续练习；
 // 否则有到期的卡片时开始今天的练习；还没有复习卡片时建立学习局面。
 import { computed, onMounted, ref, watch } from "vue";
@@ -12,6 +12,7 @@ import type { TopicKey } from "../state/reviewList";
 import { dueAt, dueText, entryState, GOAL_LABEL, ISSUE_LABEL, recommendation } from "../state/reviewList";
 import { lastPositions, openStudy, study, wb } from "../state/workbench";
 import Icon from "./Icon.vue";
+import InboxPanel from "./InboxPanel.vue";
 
 const message = useMessage();
 const SIZES = [
@@ -157,6 +158,8 @@ async function resumeStudy(s: StudySummary) {
         <n-button text size="small" class="library" @click="wb.dialogs.newStudy = true">新建或打开其他棋谱</n-button>
       </section>
     </div>
+
+    <InboxPanel />
 
     <!-- 学习画像：由学习事件统计，写明次数与依据 -->
     <section class="profile surface" data-testid="home-profile">

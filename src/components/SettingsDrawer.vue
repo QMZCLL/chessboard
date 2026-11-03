@@ -27,6 +27,7 @@ import type { AppConfig, Audience, CoachProvider, CoachScope, Detail } from "../
 import { refreshCoach, wb, type SettingsTab } from "../state/workbench";
 import { setThemePref, themePref } from "../state/theme";
 import { parseIntervals } from "../state/reviewList";
+import { parseNames } from "../state/inbox";
 import ArchivePanel from "./ArchivePanel.vue";
 import { viewport } from "../state/layout";
 import { secondsToMs } from "../utils/units";
@@ -67,6 +68,7 @@ const form = reactive({
   coach_detail: "normal" as Detail,
   review_intervals: "1, 3, 7, 14, 30",
   backup_keep: 7,
+  player_names: "",
 });
 // 最近一次载入或保存时的表单，用来判断是否有未保存的修改
 const savedForm = ref("");
@@ -157,6 +159,7 @@ function load(c: AppConfig) {
   form.coach_detail = c.coach.detail;
   form.review_intervals = c.review.intervals_days.join(", ");
   form.backup_keep = c.review.backup_keep;
+  form.player_names = c.player.names.join("、");
   savedForm.value = JSON.stringify(form);
 }
 
@@ -226,6 +229,7 @@ async function save() {
       detail: form.coach_detail,
     },
     review: { intervals_days: parseIntervals(form.review_intervals), backup_keep: form.backup_keep },
+    player: { names: parseNames(form.player_names) },
   };
   // 引擎参数在正在进行的分析结束后才生效，只在改了它们时提示
   const ENGINE_KEYS = ["quick_time_ms", "quick_depth", "deep_time_ms", "deep_depth", "multipv", "repetition_rule", "sixty_move_rule"] as const;
@@ -286,6 +290,10 @@ const engineText = computed(() => {
             <n-form-item label="学习水平"><n-select v-model:value="form.coach_audience" :options="AUDIENCES" /></n-form-item>
             <n-form-item label="AI 讲解篇幅"><n-select v-model:value="form.coach_detail" :options="DETAILS" /></n-form-item>
             <p class="muted">学习水平与篇幅用于 AI 讲解；修改后，已有的 AI 讲解会标为过期。</p>
+            <n-form-item label="我的名字">
+              <n-input v-model:value="form.player_names" placeholder="如 张三、Zhang" data-testid="player-names" />
+            </n-form-item>
+            <p class="muted">一次导入多盘棋局时，与棋谱中的红方、黑方比对，判断哪一方是你；几个名字用顿号或逗号分开。比对不上时在导入预览中选择。</p>
             <n-form-item label="复习间隔（天）">
               <n-input v-model:value="form.review_intervals" placeholder="1, 3, 7, 14, 30" data-testid="review-intervals" />
             </n-form-item>
