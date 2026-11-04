@@ -161,6 +161,20 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
             sim.show(board, orientation);
             Ok(Value::Null)
         }
+        // 端到端场景：设置故障注入点（action 为 "abort"、"error" 或空，空表示清除）
+        #[cfg(feature = "failpoints")]
+        "dev_failpoint" => {
+            use xq_app::failpoints::Action;
+            let name: String = arg(args, "name")?;
+            let action = match arg::<Option<String>>(args, "action")?.as_deref() {
+                Some("abort") => Some(Action::Abort),
+                Some("error") => Some(Action::Error),
+                None => None,
+                Some(other) => return Err(format!("无法识别的动作 {other}").into()),
+            };
+            xq_app::failpoints::set(&name, action);
+            Ok(Value::Null)
+        }
         other => Err(format!("未知命令 {other}").into()),
     }
 }

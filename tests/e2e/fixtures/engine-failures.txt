@@ -1,0 +1,97 @@
+# 外部依赖故障场景（s30）中正常工作的引擎：每次搜索都从开局局面回答（场景中每一步都在新的会话中从开局走炮二平五）
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2
+@go
+info depth 1 seldepth 1 multipv 1 score cp 30 nodes 10 time 1 pv h2e2 h9g7
+info depth 1 seldepth 1 multipv 2 score cp 20 nodes 10 time 1 pv h0g2
+info depth 2 seldepth 2 multipv 1 score cp 32 nodes 20 time 2 pv h2e2 h9g7
+info depth 2 seldepth 2 multipv 2 score cp 18 nodes 20 time 2 pv h0g2
+bestmove h2e2

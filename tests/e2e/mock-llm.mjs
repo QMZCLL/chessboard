@@ -1,6 +1,8 @@
 // 模拟 DeepSeek 接口：根据请求中的证据包生成合格（或故意不合格）的讲解；证据包带有问题（教练追问）时生成回答。
 // POST /__mode {"mode":"valid"|"bad", "delay_ms": 0} 切换输出与回复前的延迟；
-// POST /__mode {"script": ["503", "bad", "valid", ...]} 之后的请求依次按脚本回复（503 为服务端错误），用完后按 mode；
+// POST /__mode {"script": ["503", "bad", "valid", ...]} 之后的请求依次按脚本回复，用完后按 mode。回复方式：
+//   valid 合格的讲解、bad 不合格的输出；401、429、500、503 返回对应的状态码；
+//   drop 不回复、直接断开连接；invalid-json 状态 200 但内容不是 JSON；missing-fields 状态 200 但没有 choices；
 // POST /__reset 恢复默认并清空记录；
 // GET /__calls 返回收到的请求（含 Authorization 头、这一着的记法、追问的问题类型与收到的时间）。
 import http from "node:http";
@@ -87,14 +89,32 @@ http
       });
       // 按收到请求时的设置回复
       const how = script.length ? script.shift() : mode;
-      const content = how === "503" ? null : JSON.stringify(asking ? answer(pack, how) : output(pack, how));
+      const failures = {
+        401: "invalid api key",
+        429: "rate limited",
+        500: "internal error",
+        503: "service busy",
+      };
       setTimeout(() => {
-        res.setHeader("Content-Type", "application/json");
-        if (content === null) {
-          res.statusCode = 503;
-          res.end(JSON.stringify({ error: { message: "service busy" } }));
+        if (how === "drop") {
+          req.socket.destroy();
           return;
         }
+        res.setHeader("Content-Type", "application/json");
+        if (failures[how]) {
+          res.statusCode = Number(how);
+          res.end(JSON.stringify({ error: { message: failures[how] } }));
+          return;
+        }
+        if (how === "invalid-json") {
+          res.end("<html>gateway</html>");
+          return;
+        }
+        if (how === "missing-fields") {
+          res.end(JSON.stringify({ id: "x", object: "chat.completion" }));
+          return;
+        }
+        const content = JSON.stringify(asking ? answer(pack, how) : output(pack, how));
         res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }] }));
       }, delay);
     });

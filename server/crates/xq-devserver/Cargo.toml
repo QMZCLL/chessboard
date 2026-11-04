@@ -5,6 +5,10 @@ edition = "2024"
 publish = false
 description = "开发桥：在浏览器中调试界面时，用 HTTP 与服务器推送事件代替 Tauri IPC（不随应用发布）"
 
+[features]
+# 端到端场景使用：开发桥接受 dev_failpoint 命令，在写入的关键位置模拟崩溃（见 xq-app 的 failpoints）
+failpoints = ["xq-app/failpoints"]
+
 [dependencies]
 base64 = "0.22"
 xq-app = { path = "../xq-app" }

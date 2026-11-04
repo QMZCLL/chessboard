@@ -1,12 +1,21 @@
 // 端到端场景运行器：构建开发桥与模拟引擎，启动 Vite、开发桥与模拟模型服务，按组运行场景，最后汇总结果。
 // 每次运行使用临时数据目录与空闲端口，不影响本机正在运行的 pnpm dev / pnpm bridge。
 //
-// 用法：node tests/e2e/run.mjs [场景...] [--no-build] [--keep]
+// 用法：node tests/e2e/run.mjs [场景...] [--no-build] [--keep] [--repeat N] [--races]
 //   场景可写全名（s7-coach）或编号（s7）；不写时运行全部。依赖其他场景数据的场景会自动先运行所依赖的场景。
 //   --no-build  不重新构建开发桥与模拟引擎（已经构建过时）
 //   --keep      保留临时数据目录（失败时总是保留）
+//   --repeat N  连续运行 N 轮（每轮使用新的数据目录），汇总每个场景通过的轮数（发布前检查用）
+//   --races     只运行竞态场景（RACES 中列出的）
+//
+// 开发桥带故障注入点构建（xq-devserver 的 failpoints 功能）。场景通过控制接口（环境变量 E2E_CONTROL）
+// 强制结束或重启开发桥、换到新的数据目录（见 lib.mjs 的 restartBridge、waitBridgeExit）。
+//
+// 每个场景的结果分为：通过、断言失败（检查没有通过）、运行出错（场景脚本抛出异常）、超时、环境故障（服务没能启动）。
+// 结果写在输出目录的 results.json 中；开发桥日志中出现 panic 时也算失败。
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -29,15 +38,25 @@ const GROUPS = [
   { name: "模拟引擎：排名仍在变化", engine: "engine-shifting.txt", scenarios: ["s21-stability"] },
   { name: "模拟引擎：从自己的棋局生成练习", engine: "engine-exercises.txt", scenarios: ["s24-exercises"] },
   { name: "模拟引擎：搜索较慢，会话视图较晚到达", engine: "engine-slow.txt", scenarios: ["s25-view-refresh"] },
+  { name: "重启与恢复（自带 Pikafish）", engine: null, scenarios: ["s28-restart-recovery", "s29-crash-recovery", "s31-rapid-operations"] },
+  { name: "外部依赖故障（模拟引擎）", engine: "engine-failures.txt", scenarios: ["s30-dependency-failures"] },
 ];
+// 竞态与时序相关的场景（发布前检查中重复运行更多次）
+const RACES = ["s15-review", "s16-coach-ask", "s19-report-topics", "s20-practice-resume", "s25-view-refresh", "s27-revision-order", "s31-rapid-operations"];
 // 打开 s1 建立的“导入的棋谱”继续检查
 const NEEDS = { "s2-endgame": ["s1-record"], "s4-layout": ["s1-record"] };
 const SCENARIO_TIMEOUT_MS = 8 * 60 * 1000;
 
 const args = process.argv.slice(2);
+const repeatAt = args.indexOf("--repeat");
+const repeat = repeatAt >= 0 ? Number(args.splice(repeatAt, 2)[1]) : 1;
+if (!Number.isInteger(repeat) || repeat < 1) {
+  console.error("--repeat 后面要写轮数");
+  process.exit(2);
+}
 const flags = new Set(args.filter((a) => a.startsWith("--")));
 const all = GROUPS.flatMap((g) => g.scenarios);
-const wanted = new Set();
+const wanted = new Set(flags.has("--races") ? RACES : []);
 for (const a of args.filter((x) => !x.startsWith("--"))) {
   const name = all.find((s) => s === a || s.startsWith(`${a}-`));
   if (!name) {
@@ -118,7 +137,10 @@ if (!flags.has("--no-build")) {
   console.log("构建开发桥与模拟引擎…");
   const r = spawnSync(
     cargo,
-    ["build", "--manifest-path", path.join(server, "Cargo.toml"), "-p", "xq-devserver", "-p", "xq-app", "--bin", "xq-devserver", "--bin", "xq-mock-uci"],
+    [
+      "build", "--manifest-path", path.join(server, "Cargo.toml"), "-p", "xq-devserver", "-p", "xq-app",
+      "--bin", "xq-devserver", "--bin", "xq-mock-uci", "--features", "xq-devserver/failpoints",
+    ],
     { stdio: "inherit" },
   );
   if (r.status !== 0) process.exit(r.status ?? 1);
@@ -153,8 +175,8 @@ await waitFor("Vite", async () => (await fetch(base)).ok, 60000, vite);
  * 默认的按时间搜索在较慢或繁忙的机器上可能在一轮中途停止，讲解会如实标为“分析不完整”，使场景结果不稳定。
  * 模拟引擎：写入引擎程序与脚本。
  */
-function prepareData(group, index) {
-  const dir = path.join(tmp, `group-${index + 1}`);
+function prepareData(group, index, round = 1, fresh = 0) {
+  const dir = path.join(tmp, `round-${round}`, `group-${index + 1}${fresh ? `-fresh-${fresh}` : ""}`);
   fs.mkdirSync(path.join(dir, "config"), { recursive: true });
   if (!group.engine) {
     const config = {
@@ -186,52 +208,170 @@ async function bridgeStatus() {
   return r.ok ? r.json() : null;
 }
 
-function runScenario(name) {
+// ---------- 开发桥与控制接口 ----------
+// 当前组的开发桥；场景可以通过控制接口重启它（同一个或新的数据目录）
+const bridgeState = { child: null, data: null, group: null, index: 0, round: 1, starts: 0, fresh: 0, logs: [] };
+
+async function startBridge(data) {
+  bridgeState.starts += 1;
+  const log = `bridge-r${bridgeState.round}-g${bridgeState.index + 1}-${bridgeState.starts}`;
+  bridgeState.logs.push(path.join(out, "logs", `${log}.log`));
+  const child = startProcess(log, devserver, ["--port", String(bridgePort), "--data", data], {
+    env: { ...process.env, RUST_LOG: process.env.RUST_LOG ?? "info" },
+  });
+  bridgeState.child = child;
+  bridgeState.data = data;
+  // 引擎可能是故意不可用的（外部依赖故障场景）：开发桥能回答即可，正常的组再等引擎就绪
+  await waitFor("开发桥", async () => !!(await bridgeStatus()), 60000, child);
+  if (bridgeState.group?.engine !== "engine-failures.txt") {
+    await waitFor("开发桥与引擎", async () => (await bridgeStatus())?.engine?.state === "ready", 120000, child);
+  }
+}
+
+function exited(child, timeoutMs) {
   return new Promise((resolve) => {
-    console.log(`\n== ${name}`);
+    if (child.exitCode !== null || child.signalCode !== null) return resolve({ code: child.exitCode, signal: child.signalCode });
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    child.once("exit", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    });
+  });
+}
+
+const controlPort = await freePort();
+const control = http.createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", async () => {
+    const reply = (status, value) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(value));
+    };
+    try {
+      const args = body ? JSON.parse(body) : {};
+      if (req.url === "/bridge") return reply(200, { data: bridgeState.data, pid: bridgeState.child?.pid ?? null, mockEngine });
+      if (req.url === "/bridge/exited") {
+        // 等开发桥自己退出（故障注入点终止进程），返回退出状态；超时返回 null
+        return reply(200, await exited(bridgeState.child, args.timeout_ms ?? 30000));
+      }
+      if (req.url === "/bridge/restart") {
+        // 结束开发桥（默认 SIGKILL：模拟断电或强制结束）并重新启动；fresh 为 true 时换到新的空数据目录
+        const old = bridgeState.child;
+        if (old && old.exitCode === null && old.signalCode === null) {
+          old.kill(args.signal ?? "SIGKILL");
+          await exited(old, 30000);
+        }
+        let data = bridgeState.data;
+        if (args.fresh) {
+          bridgeState.fresh += 1;
+          data = prepareData(bridgeState.group, bridgeState.index, bridgeState.round, bridgeState.fresh);
+        }
+        await startBridge(data);
+        return reply(200, { data });
+      }
+      reply(404, { message: `没有 ${req.url}` });
+    } catch (e) {
+      reply(500, { message: e.message });
+    }
+  });
+});
+await new Promise((r) => control.listen(controlPort, "127.0.0.1", r));
+
+/** 开发桥日志中的 panic（不论是否被捕获，都说明有未处理的错误）。 */
+function panicsIn(files) {
+  const found = [];
+  for (const f of files) {
+    const text = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
+    for (const line of text.split("\n")) if (line.includes("panicked at")) found.push(`${path.basename(f)}：${line.trim()}`);
+  }
+  return found;
+}
+
+const STATUS_TEXT = {
+  passed: "通过",
+  assertion_failed: "断言失败",
+  operation_failed: "运行出错",
+  timed_out: "超时",
+  infrastructure_failed: "环境故障",
+};
+
+function runScenario(name, round) {
+  return new Promise((resolve) => {
+    console.log(`\n== ${name}${repeat > 1 ? `（第 ${round} 轮）` : ""}`);
     const started = Date.now();
+    let timedOut = false;
     const child = spawn(process.execPath, [path.join(here, "scenarios", `${name}.mjs`)], {
       cwd: here,
       stdio: "inherit",
-      env: { ...process.env, E2E_BASE: base, E2E_OUT: out, MOCK_LLM: `http://127.0.0.1:${llmPort}` },
+      env: {
+        ...process.env,
+        E2E_BASE: base,
+        E2E_OUT: out,
+        MOCK_LLM: `http://127.0.0.1:${llmPort}`,
+        E2E_CONTROL: `http://127.0.0.1:${controlPort}`,
+        E2E_MOCK_ENGINE: mockEngine,
+      },
     });
     const timer = setTimeout(() => {
+      timedOut = true;
       console.log(`  ✗ ${name} 超过 ${SCENARIO_TIMEOUT_MS / 60000} 分钟，已停止`);
       child.kill();
     }, SCENARIO_TIMEOUT_MS);
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
-      resolve({ name, ok: code === 0, code: code ?? signal, seconds: Math.round((Date.now() - started) / 1000) });
+      // 场景的退出码：0 通过，1 有检查没有通过，2 脚本抛出异常（见 lib.mjs）
+      const status = timedOut ? "timed_out" : code === 0 ? "passed" : code === 1 ? "assertion_failed" : "operation_failed";
+      resolve({ name, round, status, ok: status === "passed", code: code ?? signal, seconds: Math.round((Date.now() - started) / 1000) });
     });
   });
 }
 
 // ---------- 按组运行 ----------
 const results = [];
-try {
+const panics = [];
+for (let round = 1; round <= repeat; round++) {
   for (const [i, group] of GROUPS.entries()) {
     const scenarios = group.scenarios.filter((s) => wanted.has(s));
     if (!scenarios.length) continue;
-    console.log(`\n### ${group.name}`);
-    const data = prepareData(group, i);
-    const bridge = startProcess(`bridge-${i + 1}`, devserver, ["--port", String(bridgePort), "--data", data], {
-      env: { ...process.env, RUST_LOG: process.env.RUST_LOG ?? "info" },
-    });
-    await waitFor("开发桥与引擎", async () => (await bridgeStatus())?.engine?.state === "ready", 120000, bridge);
-    for (const s of scenarios) results.push(await runScenario(s));
-    await stopProcess(bridge);
+    console.log(`\n### ${group.name}${repeat > 1 ? `（第 ${round} 轮）` : ""}`);
+    Object.assign(bridgeState, { group, index: i, round, starts: 0, fresh: 0, logs: [] });
+    try {
+      await startBridge(prepareData(group, i, round));
+    } catch (e) {
+      console.error(`\n环境故障：${e.message}`);
+      for (const s of scenarios) results.push({ name: s, round, status: "infrastructure_failed", ok: false, code: "error", seconds: 0 });
+      if (bridgeState.child) await stopProcess(bridgeState.child);
+      continue;
+    }
+    for (const s of scenarios) results.push(await runScenario(s, round));
+    await stopProcess(bridgeState.child);
+    panics.push(...panicsIn(bridgeState.logs));
   }
-} catch (e) {
-  console.error(`\n运行中断：${e.message}`);
-  results.push({ name: "（环境）", ok: false, code: "error", seconds: 0 });
 }
+control.close();
 await Promise.all([...children].map(stopProcess));
 
 // ---------- 汇总 ----------
+fs.writeFileSync(path.join(out, "results.json"), JSON.stringify({ repeat, results, panics }, null, 2));
 console.log("\n场景结果：");
-for (const r of results) console.log(`  ${r.ok ? "✓" : "✗"} ${r.name}（${r.seconds} 秒${r.ok ? "" : `，退出状态 ${r.code}`}）`);
+if (repeat === 1) {
+  for (const r of results) console.log(`  ${r.ok ? "✓" : "✗"} ${r.name}（${r.seconds} 秒${r.ok ? "" : `，${STATUS_TEXT[r.status]}，退出状态 ${r.code}`}）`);
+} else {
+  const names = [...new Set(results.map((r) => r.name))];
+  for (const n of names) {
+    const runs = results.filter((r) => r.name === n);
+    const bad = runs.filter((r) => !r.ok);
+    const kinds = [...new Set(bad.map((r) => STATUS_TEXT[r.status]))].join("、");
+    console.log(`  ${bad.length ? "✗" : "✓"} ${n}：${runs.length - bad.length}/${runs.length} 轮通过${bad.length ? `（${kinds}，第 ${bad.map((r) => r.round).join("、")} 轮）` : ""}`);
+  }
+}
+if (panics.length) {
+  console.log("\n开发桥日志中出现 panic：");
+  for (const p of panics.slice(0, 20)) console.log(`  ${p}`);
+}
 const failed = results.filter((r) => !r.ok);
-console.log(`截图与日志：${out}`);
-if (failed.length || flags.has("--keep")) console.log(`数据目录：${tmp}`);
+console.log(`截图与日志：${out}（结果：results.json）`);
+if (failed.length || panics.length || flags.has("--keep")) console.log(`数据目录：${tmp}`);
 else fs.rmSync(tmp, { recursive: true, force: true });
-process.exit(failed.length ? 1 : 0);
+process.exit(failed.length || panics.length ? 1 : 0);

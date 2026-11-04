@@ -79,6 +79,7 @@ jobs:
       - name: 运行场景
         run: pnpm test:e2e
       - name: 保存截图与日志
+        # 场景结果（results.json）按类别记下每个失败：断言失败、运行出错、超时、环境故障
         if: failure()
         uses: actions/upload-artifact@v4
         with:
