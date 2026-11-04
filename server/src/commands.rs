@@ -400,6 +400,9 @@ pub async fn import_text(state: State<'_, AppService>, text: String, name: Optio
 pub async fn diagnostics(state: State<'_, AppService>) -> ApiResult<String> { Ok(service(&state).diagnostics()) }
 
 #[tauri::command]
+pub async fn job_history(state: State<'_, AppService>) -> ApiResult<xq_app::jobs::JobSnapshot> { Ok(service(&state).jobs()) }
+
+#[tauri::command]
 pub async fn open_log_dir(state: State<'_, AppService>) -> ApiResult<()> {
     let dir = service(&state).log_dir();
     std::fs::create_dir_all(&dir).map_err(|e| ApiError::from(format!("无法创建日志目录：{e}")))?;

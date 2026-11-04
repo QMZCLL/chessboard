@@ -50,6 +50,8 @@ use crate::engine::EngineState;
 use crate::engine::Priority;
 use crate::events;
 use crate::events::EventSink;
+use crate::jobs::JobKind;
+use crate::jobs::JobRegistry;
 use crate::llm::service::CoachRuntime;
 use crate::records::Budget;
 use crate::records::ExplainStatus;
@@ -214,6 +216,8 @@ pub(crate) struct Inner {
     pub(crate) weak: Weak<Inner>,
     /// 正在退出：不再开始新的讲解与 AI 请求。
     pub(crate) stopping: AtomicBool,
+    /// 后台任务的登记（见 `jobs`）。
+    pub(crate) jobs: JobRegistry,
     explain_worker: Mutex<Option<JoinHandle<()>>>,
     coach_workers: Mutex<Vec<JoinHandle<()>>>,
 }
@@ -264,15 +268,15 @@ impl AppService {
             }
             loaded.notes.push(text);
         }
-        // 上次退出时尚未完成的 AI 讲解请求已经不存在，标为中断，避免界面一直显示排队或生成中
+        // 上次退出时没有完成的任务：AI 讲解、追问与局面比较标为中断（界面不会一直显示排队或生成中，可以重新发起），
+        // 讲解在打开会话时重新排队（收件箱中的棋局在启动时排队）。启动后记入任务登记，便于诊断
+        let mut interrupted: Vec<(JobKind, String, &str)> = Vec::new();
         match store.reset_interrupted_coach(now_ms()) {
-            Ok(0) => {}
-            Ok(n) => tracing::info!("{n} 条 AI 讲解请求在上次退出时中断，已标为可重新生成"),
+            Ok(keys) => interrupted.extend(keys.into_iter().map(|k| (JobKind::Coach, k, "上次退出时没有完成，已标为可以重新生成"))),
             Err(e) => warn!("整理中断的 AI 讲解请求失败：{e}"),
         }
         match crate::review::reset_interrupted_decisions(&store) {
-            Ok(0) => {}
-            Ok(n) => tracing::info!("{n} 张复习卡片的局面决策比较在上次退出时中断"),
+            Ok(ids) => interrupted.extend(ids.into_iter().map(|k| (JobKind::Decision, k, "上次退出时比较没有完成，已标为失败"))),
             Err(e) => warn!("整理中断的局面决策比较失败：{e}"),
         }
         // 第一次启动时，从已有的作答与先想后讲的练习记录补上学习事件（只做一次）
@@ -291,9 +295,15 @@ impl AppService {
             }
         }
         match store.reset_interrupted_asks(now_ms()) {
-            Ok(0) => {}
-            Ok(n) => tracing::info!("{n} 个追问在上次退出时中断，已标为可重新提问"),
+            Ok(keys) => interrupted.extend(keys.into_iter().map(|k| (JobKind::Ask, k, "上次退出时没有完成，已标为可以重新提问"))),
             Err(e) => warn!("整理中断的追问失败：{e}"),
+        }
+        match store.pending_explanations() {
+            Ok(keys) => interrupted.extend(keys.into_iter().map(|k| (JobKind::Explain, k, "上次退出时没有完成，打开会话时重新排队"))),
+            Err(e) => warn!("读取没有完成的讲解失败：{e}"),
+        }
+        if !interrupted.is_empty() {
+            tracing::info!("上次退出时有 {} 个任务没有完成", interrupted.len());
         }
         let engine_events = events.clone();
         let engine = EngineService::start(
@@ -326,9 +336,14 @@ impl AppService {
             capture_state: Mutex::new(CaptureState::Idle),
             weak: weak.clone(),
             stopping: AtomicBool::new(false),
+            jobs: JobRegistry::default(),
             explain_worker: Mutex::new(None),
             coach_workers: Mutex::new(Vec::new()),
         });
+        for (kind, key, detail) in interrupted {
+            let study = key.split('/').next().map(str::to_string);
+            inner.jobs.record_interrupted(kind, key, study, detail);
+        }
         let weak = Arc::downgrade(&inner);
         let explain = thread::Builder::new()
             .name("explain".into())
@@ -387,7 +402,18 @@ impl AppService {
         {
             warn!("讲解线程在退出时还没有结束，不再等待");
         }
+        // 仍没有结束的任务记为中断：它们留下的“进行中”状态在下次启动时整理（见 `start`）
+        let left = inner.jobs.interrupt_all("应用退出时还没有完成");
+        if left > 0 {
+            tracing::info!("退出时 {left} 个任务还没有完成，记为中断");
+        }
     }
+
+    /// 后台任务的登记：进行中的与最近结束的任务。
+    pub fn jobs(&self) -> crate::jobs::JobSnapshot { self.inner.jobs.snapshot() }
+
+    /// 等到没有进行中的后台任务，返回是否等到。
+    pub fn wait_jobs_idle(&self, timeout: Duration) -> bool { self.inner.jobs.wait_idle(timeout) }
 
     pub fn status(&self) -> AppStatus {
         let inner = &self.inner;
@@ -590,6 +616,8 @@ impl AppService {
         lock(&self.inner.studies).remove(id);
         self.inner.coach_forget(id, None);
         self.inner.store.delete_study(id)?;
+        // 晚到的结果不再写入（各任务写入前确认会话仍在）
+        self.inner.jobs.finish_study(id, crate::jobs::Outcome::Cancelled("会话已删除".into()));
         Ok(())
     }
 
@@ -642,8 +670,10 @@ impl AppService {
             Ok((removed, s.clone()))
         })?;
         for n in &removed {
-            self.inner.engine.cancel_group(&explain_group(&r.study_id, *n));
+            let group = explain_group(&r.study_id, *n);
+            self.inner.engine.cancel_group(&group);
             lock(&self.inner.inflight).remove(&(r.study_id.clone(), *n));
+            self.inner.jobs.finish_key(JobKind::Explain, &group, crate::jobs::Outcome::Cancelled("这一着已删除".into()));
         }
         self.inner.coach_forget(&r.study_id, Some(&removed));
         self.inner.store.delete_explanations(&r.study_id, &removed)?;
@@ -680,7 +710,8 @@ impl AppService {
 
     /// 从这盘棋生成练习（见 `exercise`）：只用已经完成的讲解与规则事实，写明新增与跳过的原因。
     pub fn generate_exercises(&self, r: crate::exercise::ExerciseRequest) -> ApiResult<crate::exercise::ExerciseSummary> {
-        self.inner.generate_exercises(&r.study_id, r.regenerate)
+        let key = format!("exercises:{}", r.study_id);
+        self.inner.tracked(JobKind::Exercises, &key, Some(&r.study_id), || self.inner.generate_exercises(&r.study_id, r.regenerate))
     }
 
     /// 能力画像（见 `profile`）：由全部学习事件统计，推荐的主题要有复习卡片可练。
@@ -866,6 +897,28 @@ impl Inner {
     }
 
     /// 会话的棋谱或讲解记录已经写入：视图序号加一，返回新的序号。
+    /// 在任务登记中记下一次同步完成的操作（出题、导入、导出、备份）：开始时登记，返回时按结果结束。
+    pub(crate) fn tracked<T>(&self, kind: JobKind, key: &str, study: Option<&str>, f: impl FnOnce() -> ApiResult<T>) -> ApiResult<T> {
+        let id = self.jobs.next_id(kind);
+        let mut job = crate::jobs::NewJob::new(kind, id.clone(), key).concurrent();
+        if let Some(s) = study {
+            job = job.study(s, None);
+        }
+        self.jobs.begin(job);
+        self.jobs.running(&id);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        let outcome = match &result {
+            Ok(Ok(_)) => crate::jobs::Outcome::Succeeded { committed: true },
+            Ok(Err(e)) => crate::jobs::Outcome::Failed(e.message.clone()),
+            Err(_) => crate::jobs::Outcome::Failed("操作出错".into()),
+        };
+        self.jobs.finish(&id, outcome);
+        match result {
+            Ok(r) => r,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
     pub(crate) fn bump_view(&self) -> u64 { self.view_seq.fetch_add(1, Ordering::SeqCst) + 1 }
 
     /// 新记录的走子：立即排队生成基本讲解，并按设置排队详细讲解。

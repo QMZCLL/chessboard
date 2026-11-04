@@ -55,6 +55,9 @@ use crate::config::Audience;
 use crate::config::Detail;
 use crate::engine::Priority;
 use crate::events;
+use crate::jobs::JobKind;
+use crate::jobs::NewJob;
+use crate::jobs::Outcome;
 use crate::records::Budget;
 use crate::records::ExplanationRecord;
 use crate::service::ApiResult;
@@ -66,6 +69,11 @@ use crate::service::now_ms;
 const WORKERS: usize = 4;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> { m.lock().unwrap_or_else(|p| p.into_inner()) }
+
+/// AI 讲解任务在任务登记中的编号与对象。
+fn coach_job_id(generation: u64) -> String { format!("coach-{generation}") }
+
+fn coach_job_key(study_id: &str, node_id: NodeId) -> String { format!("coach:{study_id}:{node_id}") }
 
 /// UTC 日序号，用于每日调用次数。
 fn today() -> i64 { now_ms().div_euclid(86_400_000) }
@@ -408,6 +416,9 @@ impl Inner {
         let cfg = self.config_snapshot().coach;
         // 已经发出的请求返回后丢弃；排队中的请求不再发送
         let mut affected: Vec<(String, NodeId)> = lock(&self.coach.inflight).drain().map(|(k, _)| k).collect();
+        for (sid, nid) in &affected {
+            self.coach_drop_job(sid, *nid, Outcome::Superseded("模型服务设置改变".into()));
+        }
         if !usable {
             affected.extend(lock(&self.coach.waiting).drain().map(|(k, _)| k));
         }
@@ -510,6 +521,7 @@ impl Inner {
                 // 引擎分析还在进行：讲解记录完成后再生成
                 let key = (sid.clone(), nid);
                 lock(&self.coach.inflight).remove(&key);
+                self.coach_drop_job(&sid, nid, Outcome::Superseded("讲解依据在更新，引擎分析完成后重新生成".into()));
                 lock(&self.coach.waiting).insert(key, req);
                 self.update_coach(&sid, nid, |c| {
                     c.state = CoachState::Queued;
@@ -531,6 +543,7 @@ impl Inner {
             Ok(b) => b,
             Err(e) => {
                 lock(&self.coach.inflight).remove(&key);
+                self.coach_drop_job(&sid, nid, Outcome::Superseded(format!("讲解依据无法使用：{e}")));
                 self.update_coach(&sid, nid, |c| {
                     c.state = CoachState::Failed;
                     c.waiting_evidence = false;
@@ -555,6 +568,7 @@ impl Inner {
             if has_current || cached.is_some() {
                 // 已有对应当前证据与设置的结果：不再调用模型
                 lock(&self.coach.inflight).remove(&key);
+                self.coach_drop_job(&sid, nid, Outcome::Superseded("已有对应当前依据与设置的结果".into()));
                 self.update_coach(&sid, nid, |c| {
                     if let Some(result) = cached {
                         c.result = Some(result);
@@ -570,6 +584,8 @@ impl Inner {
         }
         let generation = self.coach.generation.fetch_add(1, Ordering::SeqCst) + 1;
         lock(&self.coach.inflight).insert(key.clone(), (generation, cache_key.clone()));
+        let revision = study.revision;
+        self.jobs.begin(NewJob::new(JobKind::Coach, coach_job_id(generation), coach_job_key(&sid, nid)).study(&sid, Some(revision)));
         self.update_coach(&sid, nid, |c| {
             c.state = CoachState::Queued;
             c.waiting_evidence = false;
@@ -579,6 +595,7 @@ impl Inner {
         let job = CoachJob { request: req, generation, config_rev, bundle, cache_key, settings };
         if self.coach_send(CoachTask::Explain(job)).is_err() {
             lock(&self.coach.inflight).remove(&key);
+            self.jobs.finish(&coach_job_id(generation), Outcome::Failed("AI 讲解线程已停止".into()));
             self.update_coach(&sid, nid, |c| {
                 c.state = CoachState::Failed;
                 c.error = Some("AI 讲解线程已停止".into());
@@ -605,8 +622,14 @@ impl Inner {
 
     fn coach_mark_running(&self, key: (String, NodeId), generation: u64) {
         if lock(&self.coach.inflight).get(&key).map(|(g, _)| *g) == Some(generation) {
+            self.jobs.running(&coach_job_id(generation));
             self.update_coach(&key.0, key.1, |c| c.state = CoachState::Running);
         }
+    }
+
+    /// 结束一着上还没有结束的 AI 讲解任务（请求被取消、取代或不再需要）。
+    fn coach_drop_job(&self, study_id: &str, node_id: NodeId, outcome: Outcome) {
+        self.jobs.finish_key(JobKind::Coach, &coach_job_key(study_id, node_id), outcome);
     }
 
     /// 提交结果（讲解线程）：任务仍是最新请求，且证据版本与模型设置都没有改变时才写入。
@@ -621,11 +644,18 @@ impl Inner {
             latest
         };
         let (sid, nid) = key;
-        let Ok(study) = self.with_study(&sid, |s| Ok(s.clone())) else { return };
+        let id = coach_job_id(job.generation);
+        let gone = || Outcome::Cancelled("会话或着法已删除".into());
+        let Ok(study) = self.with_study(&sid, |s| Ok(s.clone())) else {
+            self.jobs.finish(&id, gone());
+            return;
+        };
         if !study.nodes.contains_key(&nid) {
+            self.jobs.finish(&id, gone());
             return;
         }
         if !latest {
+            self.jobs.finish(&id, Outcome::Superseded("已取消，或被这一着更新的请求取代".into()));
             // 已经发出的请求在取消（或被更新的请求取代）后返回：不改动讲解状态，
             // 但证据与设置都没有改变时把结果存入缓存，再次查看这一着时直接使用
             if let Ok(output) = outcome
@@ -640,6 +670,7 @@ impl Inner {
         }
         if !self.coach_inputs_unchanged(&study, &job) {
             debug!("节点 {nid} 的讲解依据或模型设置在生成期间改变，按当前状态重新安排");
+            self.jobs.finish(&id, Outcome::Superseded("讲解依据或模型设置在生成期间改变".into()));
             self.coach_request(CoachRequest { refresh: false, ..job.request });
             return;
         }
@@ -655,12 +686,16 @@ impl Inner {
                     c.result = Some(result);
                     c.error = None;
                 });
+                self.jobs.finish(&id, Outcome::Succeeded { committed: true });
             }
-            Err(e) => self.update_coach(&sid, nid, |c| {
-                c.state = CoachState::Failed;
-                c.waiting_evidence = false;
-                c.error = Some(e);
-            }),
+            Err(e) => {
+                self.jobs.finish(&id, Outcome::Failed(e.clone()));
+                self.update_coach(&sid, nid, |c| {
+                    c.state = CoachState::Failed;
+                    c.waiting_evidence = false;
+                    c.error = Some(e);
+                });
+            }
         }
     }
 
@@ -689,6 +724,7 @@ impl Inner {
         if state == Some(CoachState::Queued) {
             // 请求在发送前会确认自己仍是最新的；移除后它不再发出
             lock(&self.coach.inflight).remove(&key);
+            self.coach_drop_job(study_id, node_id, Outcome::Cancelled("离开了这一着，排队的请求不再发送".into()));
         }
         if waited || state == Some(CoachState::Queued) {
             self.update_coach(study_id, node_id, |c| {
@@ -705,6 +741,7 @@ impl Inner {
         let key = (study_id.to_string(), node_id);
         lock(&self.coach.waiting).remove(&key);
         lock(&self.coach.inflight).remove(&key);
+        self.coach_drop_job(study_id, node_id, Outcome::Cancelled("已取消".into()));
         if self.store.load_coach(study_id, node_id).ok().flatten().is_some() {
             self.update_coach(study_id, node_id, |c| {
                 if matches!(c.state, CoachState::Queued | CoachState::Running) {
@@ -719,7 +756,15 @@ impl Inner {
     pub(crate) fn coach_forget(&self, study_id: &str, nodes: Option<&[NodeId]>) {
         let hit = |k: &(String, NodeId)| k.0 == study_id && nodes.is_none_or(|n| n.contains(&k.1));
         lock(&self.coach.waiting).retain(|k, _| !hit(k));
-        lock(&self.coach.inflight).retain(|k, _| !hit(k));
+        let dropped: Vec<(String, NodeId)> = {
+            let mut inflight = lock(&self.coach.inflight);
+            let keys = inflight.keys().filter(|k| hit(k)).cloned().collect();
+            inflight.retain(|k, _| !hit(k));
+            keys
+        };
+        for (sid, nid) in dropped {
+            self.coach_drop_job(&sid, nid, Outcome::Cancelled("会话或着法已删除".into()));
+        }
         self.ask_forget(study_id, nodes);
     }
 }

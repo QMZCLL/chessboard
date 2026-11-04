@@ -403,6 +403,10 @@ impl AppService {
 
     /// 导入并加入收件箱：再查一次重复，棋局与收件箱记录在同一个写事务中写入，然后在引擎空闲时逐盘分析。
     pub fn inbox_import(&self, req: InboxImportRequest) -> ApiResult<InboxImportResult> {
+        self.inner.tracked(crate::jobs::JobKind::ImportStudy, "inbox_import", None, || self.inbox_import_now(req))
+    }
+
+    fn inbox_import_now(&self, req: InboxImportRequest) -> ApiResult<InboxImportResult> {
         if req.games.len() > MAX_GAMES {
             return Err(format!("一次最多导入 {MAX_GAMES} 盘").into());
         }
@@ -520,6 +524,10 @@ impl AppService {
 
     /// 为已经分析完、还没有出过题的棋局出题，汇总新增了几道；还没有分析完的这次不出题。
     pub fn inbox_generate(&self) -> ApiResult<InboxGenerateResult> {
+        self.inner.tracked(crate::jobs::JobKind::Exercises, "exercises:inbox", None, || self.inbox_generate_now())
+    }
+
+    fn inbox_generate_now(&self) -> ApiResult<InboxGenerateResult> {
         let list = self.inbox_list()?;
         let mut r = InboxGenerateResult::default();
         let mut skipped = Vec::new();

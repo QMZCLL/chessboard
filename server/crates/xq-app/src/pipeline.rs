@@ -35,6 +35,9 @@ use crate::engine::SearchProgress;
 use crate::engine::SearchRequest;
 use crate::engine::SearchResult;
 use crate::events;
+use crate::jobs::JobKind;
+use crate::jobs::NewJob;
+use crate::jobs::Outcome;
 use crate::records::ANALYSIS_FORMAT;
 use crate::records::AnalysisConditions;
 use crate::records::AnalysisOutcome;
@@ -256,7 +259,20 @@ impl Inner {
         let budget = req.budget;
         let weak = self.weak.clone();
         let cond = conditions.clone();
-        self.search(conditions, Priority::Interactive, format!("analyze:{}", req.request_id), Some(progress), move |outcome| {
+        let group = format!("analyze:{}", req.request_id);
+        let job_id = self.jobs.next_id(JobKind::Analyze);
+        self.jobs.begin(
+            NewJob::new(JobKind::Analyze, job_id.clone(), group.clone())
+                .operation(req.request_id.clone())
+                .study(&req.study_id, Some(study.revision)),
+        );
+        self.jobs.running(&job_id);
+        self.search(conditions, Priority::Interactive, group, Some(progress), move |outcome| {
+            let finish = |o: Outcome| {
+                if let Some(inner) = weak.upgrade() {
+                    inner.jobs.finish(&job_id, o);
+                }
+            };
             let (engine, error, cancelled) = match outcome {
                 SearchOutcome::Completed(r) => (Some(evidence(r, None, &cond)), None, false),
                 SearchOutcome::Terminal(_) => (None, None, false),
@@ -264,6 +280,7 @@ impl Inner {
                 SearchOutcome::Failed(e) => (None, Some(e), false),
                 SearchOutcome::Stale(reason) => {
                     // 设置在排队期间改变：按新设置重新分析，界面继续等待同一个请求
+                    // （重新分析登记新的任务时，这一次记为被取代；重新分析没能开始时，这一次记为失败）
                     let retry = weak.upgrade().map(|inner| inner.analyze_position(req.clone()));
                     match retry {
                         Some(Ok(())) => return,
@@ -272,6 +289,11 @@ impl Inner {
                     }
                 }
             };
+            finish(match (&error, cancelled) {
+                (Some(e), _) => Outcome::Failed(e.clone()),
+                (None, true) => Outcome::Cancelled("分析已取消".into()),
+                (None, false) => Outcome::Succeeded { committed: false },
+            });
             let position = explain::explain_position(&pos, &ctx, engine.as_ref());
             events::emit(events_sink.as_ref(), events::ANALYSIS_DONE, &AnalysisDoneEvent {
                 request_id: &req.request_id,
@@ -298,16 +320,17 @@ impl Inner {
         self.studies.lock().map(|s| s.get(study_id).is_some_and(|st| st.nodes.contains_key(&node_id))).unwrap_or(false)
     }
 
-    fn save_and_emit(&self, record: &mut ExplanationRecord) {
+    /// 保存并推送讲解记录，返回是否写入（这一着已经删除或写入失败时没有写入）。
+    fn save_and_emit(&self, record: &mut ExplanationRecord) -> bool {
         if !self.node_exists(&record.study_id, record.node_id) {
-            return;
+            return false;
         }
         record.updated_at = now_ms();
         // 每次保存加一：界面据此判断同一着的两份记录哪份较新，不依赖墙钟时间
         record.revision += 1;
         if let Err(e) = self.store.save_explanation(record) {
             warn!("保存讲解失败：{e}");
-            return;
+            return false;
         }
         let view_seq = self.bump_view();
         let seq = self.explain_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -322,6 +345,7 @@ impl Inner {
             stats: self.explain_stats(&record.study_id),
         });
         self.coach_on_explanation(record);
+        true
     }
 
     fn load_record(&self, study_id: &str, node_id: NodeId) -> ExplanationRecord {
@@ -369,9 +393,12 @@ impl Inner {
 
     /// 提交讲解任务的结果：确认它仍是节点最新的请求，写入记录，再结束登记。
     /// 被更新的请求取代时丢弃结果。只在讲解线程上调用，新请求的登记不会插在确认与写入之间。
-    fn commit(&self, job: &ExplainJob, update: impl FnOnce(&mut ExplanationRecord)) {
+    /// `outcome` 为空表示得到了结果（任务成功）。
+    fn commit(&self, job: &ExplainJob, outcome: Option<Outcome>, update: impl FnOnce(&mut ExplanationRecord)) {
+        let id = explain_job_id(job.generation);
         if !self.is_latest(job) {
             debug!("节点 {} 的讲解结果已被更新的请求取代，丢弃", job.node_id);
+            self.jobs.finish(&id, Outcome::Superseded("较新的讲解请求已经开始，或这一着已经删除".into()));
             return;
         }
         let hook = self.commit_hook.lock().unwrap_or_else(|p| p.into_inner()).clone();
@@ -380,8 +407,9 @@ impl Inner {
         }
         let mut record = self.load_record(&job.study_id, job.node_id);
         update(&mut record);
-        self.save_and_emit(&mut record);
+        let written = self.save_and_emit(&mut record);
         self.end_job(job);
+        self.jobs.finish(&id, outcome.unwrap_or(Outcome::Succeeded { committed: written }));
     }
 
     pub(crate) fn process_explain(&self, task: ExplainTask) {
@@ -449,6 +477,9 @@ impl Inner {
         };
         let generation = self.explain_generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.inflight.lock().unwrap_or_else(|p| p.into_inner()).insert(key, (task.budget, generation));
+        let job_id = explain_job_id(generation);
+        self.jobs.begin(NewJob::new(JobKind::Explain, job_id.clone(), group.clone()).study(&task.study_id, Some(study.revision)));
+        self.jobs.running(&job_id);
         record.pending = true;
         record.error = None;
         self.save_and_emit(&mut record);
@@ -524,9 +555,13 @@ impl Inner {
 
     /// 引擎设置在排队期间改变：按新设置重新排队，讲解仍保持进行中。
     fn restart_explain(&self, job: ExplainJob) {
+        let outcome = Outcome::Superseded("引擎设置在排队期间改变，按新设置重新排队".into());
         if self.is_latest(&job) {
             self.end_job(&job);
+            self.jobs.finish(&explain_job_id(job.generation), outcome);
             self.enqueue(&job.study_id, job.node_id, job.budget, job.priority, true);
+        } else {
+            self.jobs.finish(&explain_job_id(job.generation), outcome);
         }
     }
 
@@ -536,7 +571,7 @@ impl Inner {
     ) {
         let engine = evidence(result, single, cond);
         let mut unsettled = false;
-        self.commit(&job, |record| {
+        self.commit(&job, None, |record| {
             if let Some(expl) = explain::explain_move(&job.before, job.mv, &job.ctx, Some(&engine)) {
                 unsettled = expl.stability.as_ref().is_some_and(|s| s.level == StabilityLevel::Shifting);
                 record.explanation = Some(expl);
@@ -556,12 +591,19 @@ impl Inner {
 
     /// 引擎任务没有完成：保留已有讲解，记录原因（取消时不算失败）。
     fn finish_without_engine(&self, job: ExplainJob, error: Option<String>) {
-        self.commit(&job, |record| {
+        let outcome = Some(match &error {
+            Some(e) => Outcome::Failed(e.clone()),
+            None => Outcome::Cancelled("搜索已取消".into()),
+        });
+        self.commit(&job, outcome, |record| {
             record.pending = false;
             record.error = error;
         });
     }
 }
+
+/// 讲解任务在任务登记中的编号（与请求代次一一对应）。
+pub(crate) fn explain_job_id(generation: u64) -> String { format!("explain-{generation}") }
 
 /// 把搜索结果整理成讲解用的引擎证据，保留结果是否完整一致的信息：
 /// 实际走法单独分析的完整性与说明同样计入，任何一次搜索不完整，证据都只算部分完成。

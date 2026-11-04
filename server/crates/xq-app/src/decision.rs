@@ -39,6 +39,9 @@ use xq_core::rules;
 use crate::engine::Priority;
 use crate::engine::SearchOutcome;
 use crate::events;
+use crate::jobs::JobKind;
+use crate::jobs::NewJob;
+use crate::jobs::Outcome;
 use crate::records::AnalysisConditions;
 use crate::records::Budget;
 use crate::review::ReviewCard;
@@ -389,7 +392,12 @@ impl Inner {
 
     /// 开始比较一次复习的选择（局面决策）。结果写回这次复习（按时间找到它）后推送。
     pub(crate) fn review_decide(&self, card: &ReviewCard, at: i64, choice: Move) {
-        let fail = |inner: &Inner, e: String| inner.finish_decision(&card.id, at, DecisionFeedback::failed(e));
+        // 同一次复习的比较是同一个操作：设置改变后重新比较时，之前的任务记为被取代
+        let key = format!("decision:{}:{at}", card.id);
+        let job_id = self.jobs.next_id(JobKind::Decision);
+        self.jobs.begin(NewJob::new(JobKind::Decision, job_id.clone(), key.clone()).operation(key).study(&card.study_id, None));
+        self.jobs.running(&job_id);
+        let fail = |inner: &Inner, e: String| inner.settle_decision(&job_id, &card.id, at, DecisionFeedback::failed(e));
         let pos = match fen::parse_position(&card.fen) {
             Ok(p) => p,
             Err(e) => return fail(self, format!("卡片中的局面无法读取：{e}")),
@@ -401,17 +409,19 @@ impl Inner {
         let (weak, card2) = (self.weak.clone(), card.clone());
         let group = format!("review:{}", card.id);
         let group2 = group.clone();
+        let job2 = job_id.clone();
         self.search(first, Priority::Interactive, group, None, move |outcome| {
             let Some(inner) = weak.upgrade() else { return };
-            let fail = |e: String| inner.finish_decision(&card2.id, at, DecisionFeedback::failed(e));
+            let fail = |e: String| inner.settle_decision(&job2, &card2.id, at, DecisionFeedback::failed(e));
             let best = match outcome {
                 SearchOutcome::Completed(r) => r.lines.first().map(|l| l.mv).filter(|mv| rules::is_legal(&pos, *mv)),
                 SearchOutcome::Terminal(_) => return fail("这个局面已经结束，不能比较".to_string()),
                 SearchOutcome::Failed(e) => return fail(e),
                 SearchOutcome::Cancelled => return fail("搜索已取消".to_string()),
-                // 设置在排队期间改变：按新设置重新比较
+                // 设置在排队期间改变：按新设置重新比较（新的任务取代这一次）
                 SearchOutcome::Stale(_) => return inner.review_decide(&card2, at, choice),
             };
+            let job3 = job2.clone();
             let answer = card2.answer.mv;
             let mut moves = vec![choice, answer];
             moves.extend(best);
@@ -440,7 +450,7 @@ impl Inner {
                     SearchOutcome::Cancelled => DecisionFeedback::failed("搜索已取消".to_string()),
                     SearchOutcome::Stale(_) => return inner.review_decide(&card3, at, choice),
                 };
-                inner.finish_decision(&card3.id, at, feedback);
+                inner.settle_decision(&job3, &card3.id, at, feedback);
             });
         });
     }
@@ -453,7 +463,7 @@ impl Inner {
     ///
     /// 比较完成前已经按这次复习标记过状态（安排先按“还没有结果”计算）：如果这仍是最近一次复习，
     /// 按结果从同一个起点重新安排；之后又有了新的复习时不改动，留给新的复习安排。
-    fn finish_decision(&self, id: &str, at: i64, feedback: DecisionFeedback) {
+    fn finish_decision(&self, id: &str, at: i64, feedback: DecisionFeedback) -> bool {
         let intervals = self.config_snapshot().review.intervals_days;
         // 比较结果与这次作答的学习事件在同一个写事务中更新
         let event_id = crate::learning::review_event_id(id, at);
@@ -478,10 +488,26 @@ impl Inner {
             true
         }, &event_id, refresh);
         match updated {
-            Ok(Some(card)) => events::emit(self.events.as_ref(), events::REVIEW_UPDATED, &self.review_item(card)),
-            Ok(None) => {}
-            Err(e) => warn!("保存复习的比较结果失败：{e}"),
+            Ok(Some(card)) => {
+                events::emit(self.events.as_ref(), events::REVIEW_UPDATED, &self.review_item(card));
+                true
+            }
+            Ok(None) => false,
+            Err(e) => {
+                warn!("保存复习的比较结果失败：{e}");
+                false
+            }
         }
+    }
+
+    /// 结束一次局面比较：写回结果并结束任务登记。
+    fn settle_decision(&self, job_id: &str, id: &str, at: i64, feedback: DecisionFeedback) {
+        let error = (feedback.state == DecisionState::Failed).then(|| feedback.error.clone().unwrap_or_default());
+        let written = self.finish_decision(id, at, feedback);
+        self.jobs.finish(job_id, match error {
+            Some(e) => Outcome::Failed(e),
+            None => Outcome::Succeeded { committed: written },
+        });
     }
 }
 

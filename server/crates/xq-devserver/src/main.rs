@@ -136,6 +136,7 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         "backup_now" => to_value(service.backup_now()?),
         "import_text" => to_value(service.import_text(&arg::<String>(args, "text")?, arg(args, "name")?)?),
         "diagnostics" => to_value(service.diagnostics()),
+        "job_history" => to_value(service.jobs()),
         "open_log_dir" => Err("开发桥不支持打开目录".into()),
         "list_windows" => to_value(service.list_windows()?),
         "capture_snapshot" => to_value(service.capture_snapshot(arg(args, "windowId")?)?),

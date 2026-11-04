@@ -24,6 +24,7 @@ use tracing::warn;
 use xq_core::study::Study;
 use xq_core::study::StudyLimits;
 
+use crate::jobs::JobKind;
 use crate::learning;
 use crate::learning::LearningEvent;
 use crate::records::ExplanationRecord;
@@ -347,7 +348,9 @@ impl Inner {
     fn backup_dir(&self) -> PathBuf { self.paths.data_dir.join("backups") }
 
     /// 写入当天的备份（已有时覆盖），并删除超出保留份数的旧备份。
-    fn write_backup(&self, keep: u32) -> ApiResult<()> {
+    fn write_backup(&self, keep: u32) -> ApiResult<()> { self.tracked(JobKind::Backup, "backup", None, || self.write_backup_now(keep)) }
+
+    fn write_backup_now(&self, keep: u32) -> ApiResult<()> {
         let dir = self.backup_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("无法建立备份目录：{e}"))?;
         let path = dir.join(backup_name(now_ms()));
@@ -413,7 +416,10 @@ impl AppService {
     pub fn export_archive(&self) -> ApiResult<String> { self.inner.archive_text() }
 
     pub fn export_archive_to_file(&self, path: &Path) -> ApiResult<()> {
-        crate::files::write_atomic(path, self.inner.archive_text()?.as_bytes()).map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
+        self.inner.tracked(JobKind::Export, "export_archive", None, || {
+            crate::files::write_atomic(path, self.inner.archive_text()?.as_bytes())
+                .map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
+        })
     }
 
     /// 预览导入：不改动本机的数据。
@@ -423,8 +429,10 @@ impl AppService {
     }
 
     pub fn import_archive(&self, source: ArchiveSource) -> ApiResult<ArchiveSummary> {
-        let archive = self.inner.read_source(source)?;
-        self.inner.import(archive)
+        self.inner.tracked(JobKind::ImportArchive, "import_archive", None, || {
+            let archive = self.inner.read_source(source)?;
+            self.inner.import(archive)
+        })
     }
 
     pub fn backup_info(&self) -> BackupInfo { self.inner.backup_info() }

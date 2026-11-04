@@ -258,6 +258,8 @@ export const api = {
   importFile: (path: string) => call<T.ImportResponse>("import_file", { path }),
   importText: (text: string, name: string | null) => call<T.ImportResponse>("import_text", { text, name }),
   diagnostics: () => call<string>("diagnostics"),
+  /** 后台任务的登记：进行中的与最近结束的任务（诊断用） */
+  jobHistory: () => call<T.JobSnapshot>("job_history"),
   openLogDir: () => call<void>("open_log_dir"),
   listWindows: () => call<T.WindowInfo[]>("list_windows"),
   captureSnapshot: (windowId: number) => call<T.Snapshot>("capture_snapshot", { windowId }),

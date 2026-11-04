@@ -270,9 +270,9 @@ pub struct ReviewCard {
 /// 保留的复习次数。
 pub(crate) const MAX_ATTEMPTS: usize = 20;
 
-/// 上次退出时还在进行的局面决策比较已经不会完成：标为没有得到结果，返回处理的卡片数。
-pub(crate) fn reset_interrupted_decisions(store: &crate::storage::Store) -> Result<usize, crate::storage::StoreError> {
-    let mut count = 0;
+/// 把上次运行遗留的、还在等待结果的局面比较标为失败，返回卡片编号。
+pub(crate) fn reset_interrupted_decisions(store: &crate::storage::Store) -> Result<Vec<String>, crate::storage::StoreError> {
+    let mut ids = Vec::new();
     for card in store.list_reviews()? {
         let pending = |a: &ReviewAttempt| a.decision.as_ref().is_some_and(|d| d.state == DecisionState::Pending);
         if !card.attempts.iter().any(pending) {
@@ -284,9 +284,9 @@ pub(crate) fn reset_interrupted_decisions(store: &crate::storage::Store) -> Resu
                 d.error = Some("上次比较在应用退出前没有完成".into());
             }
         })?;
-        count += 1;
+        ids.push(card.id.clone());
     }
-    Ok(count)
+    Ok(ids)
 }
 
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]

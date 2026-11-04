@@ -651,10 +651,10 @@ impl Store {
 
     pub fn load_answer(&self, key: &str) -> Result<Option<AnswerRecord>, StoreError> { self.get(COACH_ASK, key) }
 
-    /// 把上次运行遗留的排队中、生成中的追问标为中断（保留已有回答），返回处理的条数。
-    pub fn reset_interrupted_asks(&self, now: i64) -> Result<usize, StoreError> {
+    /// 把上次运行遗留的排队中、生成中的追问标为中断（保留已有回答），返回处理的记录的键。
+    pub fn reset_interrupted_asks(&self, now: i64) -> Result<Vec<String>, StoreError> {
         let tx = self.db.begin_write()?;
-        let mut count = 0;
+        let mut keys = Vec::new();
         {
             let mut t = tx.open_table(COACH_ASK)?;
             let mut updates = Vec::new();
@@ -670,17 +670,17 @@ impl Store {
             }
             for (k, v) in updates {
                 t.insert(k.as_str(), v.as_str())?;
-                count += 1;
+                keys.push(k);
             }
         }
         tx.commit()?;
-        Ok(count)
+        Ok(keys)
     }
 
-    /// 把上次运行遗留的排队中、生成中的 AI 讲解标为中断（保留已有结果），返回处理的条数。
-    pub fn reset_interrupted_coach(&self, now: i64) -> Result<usize, StoreError> {
+    /// 把上次运行遗留的排队中、生成中的 AI 讲解标为中断（保留已有结果），返回处理的记录的键。
+    pub fn reset_interrupted_coach(&self, now: i64) -> Result<Vec<String>, StoreError> {
         let tx = self.db.begin_write()?;
-        let mut count = 0;
+        let mut keys = Vec::new();
         {
             let mut t = tx.open_table(COACH)?;
             let mut updates = Vec::new();
@@ -697,11 +697,25 @@ impl Store {
             }
             for (k, v) in updates {
                 t.insert(k.as_str(), v.as_str())?;
-                count += 1;
+                keys.push(k);
             }
         }
         tx.commit()?;
-        Ok(count)
+        Ok(keys)
+    }
+
+    /// 还标为进行中的讲解记录（上次退出时没有完成），返回“会话/节点”的键。
+    pub fn pending_explanations(&self) -> Result<Vec<String>, StoreError> {
+        let tx = self.db.begin_read()?;
+        let t = tx.open_table(EXPLANATIONS)?;
+        let mut out = Vec::new();
+        for item in t.iter()? {
+            let (k, v) = item?;
+            if serde_json::from_str::<ExplanationRecord>(v.value()).is_ok_and(|r| r.pending) {
+                out.push(k.value().to_string());
+            }
+        }
+        Ok(out)
     }
 
     /// 某天（UTC 日序号）已经发出的 AI 讲解请求数。
@@ -841,7 +855,7 @@ mod tests {
         let question = Question { study_id: "s".into(), node_id: 0, mine: mv("h2e2"), reference: mv("h0g2"), kind: QuestionKind::MyMove };
         let record = AnswerRecord { question: question.clone(), state: CoachState::Running, generation: 3, result: None, error: None, updated_at: 1 };
         store.save_answer(&record).unwrap();
-        assert_eq!(store.reset_interrupted_asks(9).unwrap(), 1);
+        assert_eq!(store.reset_interrupted_asks(9).unwrap().len(), 1);
         let reset = store.load_answer(&question.key()).unwrap().unwrap();
         assert_eq!(reset.state, CoachState::Idle);
         assert!(reset.error.unwrap().contains("没有完成"));

@@ -22,6 +22,9 @@ use crate::engine::Priority;
 use crate::engine::SearchOutcome;
 use crate::engine::SearchResult;
 use crate::events;
+use crate::jobs::JobKind;
+use crate::jobs::NewJob;
+use crate::jobs::Outcome;
 use crate::records::AnalysisConditions;
 use crate::records::AnalysisOutcome;
 use crate::records::Budget;
@@ -155,8 +158,11 @@ impl Inner {
         }
 
         let group = format!("compare:{}:{}", req.study_id, req.node_id);
-        // 同一局面只保留最新的对比请求
+        // 同一局面只保留最新的对比请求（登记新任务时，之前的对比记为被取代）
         self.engine.cancel_group(&group);
+        let job_id = self.jobs.next_id(JobKind::Compare);
+        self.jobs.begin(NewJob::new(JobKind::Compare, job_id.clone(), group.clone()).study(&req.study_id, Some(study.revision)));
+        self.jobs.running(&job_id);
         let weak = self.weak.clone();
         let sink = self.events.clone();
         let pending = view(facts_only.clone(), true, None);
@@ -164,6 +170,11 @@ impl Inner {
         let (pos2, ctx2, cond2) = (pos.clone(), ctx, cond.clone());
         let finished = pending.clone();
         self.search(cond, Priority::Interactive, group, None, move |outcome| {
+            let finish = |o: Outcome| {
+                if let Some(inner) = weak.upgrade() {
+                    inner.jobs.finish(&job_id, o);
+                }
+            };
             let (comparison, error) = match outcome {
                 SearchOutcome::Completed(result) => {
                     let engine = compare_evidence(result, &cond2);
@@ -175,15 +186,20 @@ impl Inner {
                 SearchOutcome::Terminal(_) => (facts_only, Some("这个局面已经结束，不能比较".to_string())),
                 SearchOutcome::Failed(e) => (facts_only, Some(e)),
                 // 被同一局面更新的对比请求取代
-                SearchOutcome::Cancelled => return,
+                SearchOutcome::Cancelled => return finish(Outcome::Cancelled("同一局面有了新的对比".into())),
                 SearchOutcome::Stale(_) => {
                     // 设置在排队期间改变：按新设置重新比较，结果由新的请求推送
+                    finish(Outcome::Superseded("引擎设置在排队期间改变，按新设置重新比较".into()));
                     if let Some(inner) = weak.upgrade() {
                         let _ = inner.compare_moves(retry);
                     }
                     return;
                 }
             };
+            finish(match &error {
+                Some(e) => Outcome::Failed(e.clone()),
+                None => Outcome::Succeeded { committed: false },
+            });
             let done = CompareView { pending: false, error, comparison, ..finished };
             events::emit(sink.as_ref(), events::COMPARISON_UPDATED, &done);
         });

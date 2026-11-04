@@ -47,6 +47,9 @@ use crate::compare::CachedComparison;
 use crate::compare::ReferenceKind;
 use crate::config::Audience;
 use crate::events;
+use crate::jobs::JobKind;
+use crate::jobs::NewJob;
+use crate::jobs::Outcome;
 use crate::service::ApiError;
 use crate::service::ApiResult;
 use crate::service::Inner;
@@ -474,6 +477,11 @@ fn result_of(job: &AskJob, output: CoachAnswer) -> AnswerResult {
     }
 }
 
+/// 追问任务在任务登记中的编号与对象。
+fn ask_job_id(generation: u64) -> String { format!("ask-{generation}") }
+
+fn ask_job_key(question: &str) -> String { format!("ask:{question}") }
+
 impl Inner {
     fn ask_bundle(&self, q: &Question) -> ApiResult<AskBundle> {
         let cached = self.cached_comparison(&q.study_id, q.node_id, q.mine, q.reference)?;
@@ -522,6 +530,7 @@ impl Inner {
         }
         let generation = self.coach.generation.fetch_add(1, Ordering::SeqCst) + 1;
         lock(&self.coach.asks).insert(q.key(), (generation, key.clone()));
+        self.jobs.begin(NewJob::new(JobKind::Ask, ask_job_id(generation), ask_job_key(&q.key())).study(&q.study_id, None));
         self.update_answer(&q, |r| {
             r.state = CoachState::Queued;
             r.generation = generation;
@@ -530,6 +539,7 @@ impl Inner {
         let job = AskJob { question: q.clone(), generation, config_rev, bundle, cache_key: key, settings, audience };
         if self.coach_send(CoachTask::Ask(job)).is_err() {
             lock(&self.coach.asks).remove(&q.key());
+            self.jobs.finish(&ask_job_id(generation), Outcome::Failed("AI 讲解线程已停止".into()));
             self.update_answer(&q, |r| {
                 r.state = CoachState::Failed;
                 r.error = Some("AI 讲解线程已停止".into());
@@ -540,11 +550,13 @@ impl Inner {
 
     /// 工作线程：发送前确认请求仍然有效，回答后写入记录。
     pub(crate) fn ask_run(&self, job: AskJob) {
+        let id = ask_job_id(job.generation);
         if !self.ask_current(&job) {
             let _guard = lock(&self.coach.ask_lock);
             // 仍是最新的请求，只是模型服务设置在发送前改变：不发送，说明原因
             if lock(&self.coach.asks).get(&job.question.key()).map(|(g, _)| *g) == Some(job.generation) {
                 lock(&self.coach.asks).remove(&job.question.key());
+                self.jobs.finish(&id, Outcome::Failed("模型服务设置在发送前已改变".into()));
                 self.update_answer(&job.question, |r| {
                     r.state = CoachState::Failed;
                     r.error = Some("模型服务设置在发送前已改变，这个问题没有发送，可以重新提问".into());
@@ -556,6 +568,7 @@ impl Inner {
         {
             let _guard = lock(&self.coach.ask_lock);
             if self.ask_current(&job) {
+                self.jobs.running(&id);
                 self.update_answer(&job.question, |r| r.state = CoachState::Running);
             }
         }
@@ -568,6 +581,8 @@ impl Inner {
             let mut asks = lock(&self.coach.asks);
             // 已被同一问题更新的请求取代，或所在的会话、节点已经删除
             if asks.get(&key).map(|(g, _)| *g) != Some(job.generation) {
+                drop(asks);
+                self.jobs.finish(&id, Outcome::Superseded("被同一问题更新的请求取代，或会话、着法已删除".into()));
                 return;
             }
             asks.remove(&key);
@@ -580,11 +595,15 @@ impl Inner {
                     r.result = Some(result);
                     r.error = None;
                 });
+                self.jobs.finish(&id, Outcome::Succeeded { committed: true });
             }
-            Err(e) => self.update_answer(&job.question, |r| {
-                r.state = CoachState::Failed;
-                r.error = Some(e);
-            }),
+            Err(e) => {
+                self.jobs.finish(&id, Outcome::Failed(e.clone()));
+                self.update_answer(&job.question, |r| {
+                    r.state = CoachState::Failed;
+                    r.error = Some(e);
+                });
+            }
         }
     }
 
@@ -650,7 +669,15 @@ impl Inner {
             Some(ids) => ids.iter().map(|n| format!("{study_id}/{n:010}/")).collect(),
         };
         let _guard = lock(&self.coach.ask_lock);
-        lock(&self.coach.asks).retain(|k, _| !prefixes.iter().any(|p| k.starts_with(p)));
+        let dropped: Vec<String> = {
+            let mut asks = lock(&self.coach.asks);
+            let keys = asks.keys().filter(|k| prefixes.iter().any(|p| k.starts_with(p))).cloned().collect();
+            asks.retain(|k, _| !prefixes.iter().any(|p| k.starts_with(p)));
+            keys
+        };
+        for k in dropped {
+            self.jobs.finish_key(JobKind::Ask, &ask_job_key(&k), Outcome::Cancelled("会话或着法已删除".into()));
+        }
     }
 }
 

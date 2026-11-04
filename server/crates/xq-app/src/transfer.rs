@@ -21,6 +21,7 @@ use crate::archive::too_large;
 use crate::capture::CaptureState;
 use crate::engine::EngineState;
 use crate::events;
+use crate::jobs::JobKind;
 use crate::records::CloudRecord;
 use crate::records::ExplanationRecord;
 use crate::service::APP_VERSION;
@@ -76,12 +77,18 @@ impl AppService {
     }
 
     pub fn export_study_to_file(&self, id: &str, path: &Path) -> ApiResult<()> {
-        let text = self.export_study(id)?;
-        crate::files::write_atomic(path, text.as_bytes()).map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
+        self.inner.tracked(JobKind::Export, &format!("export_study:{id}"), Some(id), || {
+            let text = self.export_study(id)?;
+            crate::files::write_atomic(path, text.as_bytes()).map_err(|e| format!("写入 {} 失败：{e}", path.display()).into())
+        })
     }
 
     /// 导入文本：学习数据文件、FEN 或棋谱。学习数据先检查棋谱树是否成立，会话与讲解在同一个写事务中写入。
     pub fn import_text(&self, text: &str, name: Option<String>) -> ApiResult<ImportResponse> {
+        self.inner.tracked(JobKind::ImportStudy, "import_study", None, || self.import_text_now(text, name))
+    }
+
+    fn import_text_now(&self, text: &str, name: Option<String>) -> ApiResult<ImportResponse> {
         if text.len() as u64 > MAX_IMPORT_BYTES {
             return Err(too_large("导入的内容", MAX_IMPORT_BYTES));
         }
@@ -130,6 +137,10 @@ impl AppService {
     }
 
     pub fn import_file(&self, path: &Path) -> ApiResult<ImportResponse> {
+        self.inner.tracked(JobKind::ImportStudy, "import_study", None, || self.import_file_now(path))
+    }
+
+    fn import_file_now(&self, path: &Path) -> ApiResult<ImportResponse> {
         let size = std::fs::metadata(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?.len();
         if size > MAX_IMPORT_BYTES {
             return Err(too_large("文件", MAX_IMPORT_BYTES));
@@ -137,7 +148,7 @@ impl AppService {
         let bytes = std::fs::read(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
         let text = String::from_utf8(bytes).map_err(|_| "文件不是 UTF-8 文本，请先转换编码后再导入")?;
         let name = path.file_stem().map(|s| s.to_string_lossy().to_string());
-        self.import_text(&text, name)
+        self.import_text_now(&text, name)
     }
 
     /// 便于用户反馈问题的诊断信息。
@@ -223,6 +234,10 @@ impl AppService {
         let pos = study.position(r.node_id)?;
         let fen_text = fen::position_fen(&pos);
         let inner = self.inner.clone();
+        let job_id = inner.jobs.next_id(JobKind::Cloud);
+        let key = format!("cloud:{}:{}", r.study_id, r.node_id);
+        inner.jobs.begin(crate::jobs::NewJob::new(JobKind::Cloud, job_id.clone(), key).study(&r.study_id, Some(study.revision)));
+        inner.jobs.running(&job_id);
         std::thread::spawn(move || {
             let result = query_cloud(&fen_text, cfg.timeout_ms).map(|outcome| {
                 let pv_notation = match &outcome {
@@ -240,6 +255,10 @@ impl AppService {
                 }
                 Err(e) => (None, Some(e)),
             };
+            inner.jobs.finish(&job_id, match &error {
+                Some(e) => crate::jobs::Outcome::Failed(e.clone()),
+                None => crate::jobs::Outcome::Succeeded { committed: true },
+            });
             events::emit(inner.events.as_ref(), events::CLOUD_RESULT, &CloudEvent {
                 study_id: &r.study_id,
                 node_id: r.node_id,

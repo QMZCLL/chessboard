@@ -13,6 +13,7 @@ pub mod exercise;
 pub mod failpoints;
 mod files;
 pub mod inbox;
+pub mod jobs;
 pub mod decision;
 pub mod engine;
 pub mod events;
