@@ -506,9 +506,14 @@ impl Inner {
         });
         f(&mut record);
         record.updated_at = now_ms();
-        if let Err(e) = self.store.save_answer(&record) {
-            warn!("保存追问的回答失败：{e}");
-            return;
+        match self.store.save_answer(&record) {
+            Ok(true) => {}
+            // 比较起点在写入前已经删除
+            Ok(false) => return,
+            Err(e) => {
+                warn!("保存追问的回答失败：{e}");
+                return;
+            }
         }
         self.coach.ask_seq.fetch_add(1, Ordering::SeqCst);
         events::emit(self.events.as_ref(), events::COACH_ANSWER_UPDATED, &self.answer_view(q));

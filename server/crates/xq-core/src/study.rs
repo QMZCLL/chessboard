@@ -422,6 +422,13 @@ impl Study {
         &mut self, id: NodeId, hints_used: u8, revealed_directly: bool, first_choice: Option<Move>, hints: Option<UsedHints>,
         now: i64,
     ) -> Result<(), StudyError> {
+        let parent = self.node(id)?.parent.ok_or(StudyError::NoSuchNode(id))?;
+        // 第一次选择必须是落子前局面中的合法着法：保存后要能通过导入、备份恢复与迁移时的检查（见 `check_integrity`）
+        if let Some(first) = first_choice
+            && let Some(reason) = rules::illegal_reason(&self.position(parent)?, first)
+        {
+            return Err(StudyError::Illegal(reason));
+        }
         let node = self.nodes.get_mut(&id).ok_or(StudyError::NoSuchNode(id))?;
         if node.mv.is_none() {
             return Err(StudyError::NoSuchNode(id));
@@ -674,6 +681,20 @@ mod tests {
         s.record_practice(node, 0, true, None, None, 7).unwrap();
         assert!(!s.node(node).unwrap().practice.as_ref().unwrap().matched, "直接看讲解不算走对");
         assert!(s.record_practice(ROOT, 0, true, None, None, 8).is_err(), "起始局面不是一着，没有练习记录");
+    }
+
+    #[test]
+    fn an_illegal_first_choice_is_refused_so_the_study_stays_importable() {
+        let mut s = study(Position::startpos());
+        let node = s.apply_move(ROOT, mv("h2e2"), MoveSource::User, 1).unwrap().node;
+        let before = s.clone();
+        // 马被蹩腿：落子前的局面中不合规则
+        match s.record_practice(node, 0, false, Some(mv("b0d1")), None, 5) {
+            Err(StudyError::Illegal(i)) => assert_eq!(i.code, "horse_leg"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(s, before, "没有写入练习记录");
+        assert!(s.check_integrity(&StudyLimits::default()).is_ok());
     }
 
     #[test]

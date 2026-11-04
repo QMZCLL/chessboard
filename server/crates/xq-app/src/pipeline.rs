@@ -328,9 +328,14 @@ impl Inner {
         record.updated_at = now_ms();
         // 每次保存加一：界面据此判断同一着的两份记录哪份较新，不依赖墙钟时间
         record.revision += 1;
-        if let Err(e) = self.store.save_explanation(record) {
-            warn!("保存讲解失败：{e}");
-            return false;
+        match self.store.save_explanation(record) {
+            Ok(true) => {}
+            // 这一着在写入前已经删除
+            Ok(false) => return false,
+            Err(e) => {
+                warn!("保存讲解失败：{e}");
+                return false;
+            }
         }
         let view_seq = self.bump_view();
         let seq = self.explain_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;

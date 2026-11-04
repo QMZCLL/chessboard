@@ -362,9 +362,14 @@ impl Inner {
             self.store.load_coach(study_id, node_id).ok().flatten().unwrap_or_else(|| CoachRecord::new(study_id, node_id, now_ms()));
         f(&mut record);
         record.updated_at = now_ms();
-        if let Err(e) = self.store.save_coach(&record) {
-            warn!("保存 AI 讲解失败：{e}");
-            return;
+        match self.store.save_coach(&record) {
+            Ok(true) => {}
+            // 这一着在写入前已经删除
+            Ok(false) => return,
+            Err(e) => {
+                warn!("保存 AI 讲解失败：{e}");
+                return;
+            }
         }
         self.emit_coach(study_id, node_id);
     }

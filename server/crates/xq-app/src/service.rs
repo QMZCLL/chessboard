@@ -665,10 +665,15 @@ impl AppService {
     }
 
     pub fn delete_node(&self, r: NodeRef) -> ApiResult<StudyView> {
-        let (removed, study) = self.inner.with_study(&r.study_id, |s| {
-            let removed = s.delete_subtree(r.node_id, now_ms())?;
-            Ok((removed, s.clone()))
-        })?;
+        // 会话与这些着法上的讲解、AI 讲解与追问在同一个写事务中删除
+        let (removed, study) = self.inner.with_study_save(
+            &r.study_id,
+            |s| {
+                let removed = s.delete_subtree(r.node_id, now_ms())?;
+                Ok((removed, s.clone()))
+            },
+            |store, s, (removed, _)| store.save_study_removing(s, removed),
+        )?;
         for n in &removed {
             let group = explain_group(&r.study_id, *n);
             self.inner.engine.cancel_group(&group);
@@ -676,7 +681,6 @@ impl AppService {
             self.inner.jobs.finish_key(JobKind::Explain, &group, crate::jobs::Outcome::Cancelled("这一着已删除".into()));
         }
         self.inner.coach_forget(&r.study_id, Some(&removed));
-        self.inner.store.delete_explanations(&r.study_id, &removed)?;
         self.inner.emit_study_updated(&study, "delete", &[]);
         self.inner.study_view(&study)
     }
@@ -692,16 +696,18 @@ impl AppService {
     /// 记录一次练习。看过的提示用界面记下的那份内容：提交时重新生成可能与当时看到的不同
     /// （练习期间分析完成或条件改变，候选着法就会变化）。
     pub fn record_practice(&self, req: PracticeRequest) -> ApiResult<StudyView> {
-        let study = self.inner.with_study(&req.study_id, |s| {
-            s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, req.hints, now_ms())?;
-            Ok(s.clone())
-        })?;
-        // 这次练习的学习事件（节点只保存最近一次练习，事件保留每一次）
-        if let Some(event) = study.node(req.node_id).ok().and_then(|n| crate::learning::from_practice(&study, n))
-            && let Err(e) = self.inner.store.insert_events(&[event])
-        {
-            warn!("保存学习事件失败：{e}");
-        }
+        // 练习记录与这次练习的学习事件在同一个写事务中保存（节点只保存最近一次练习，事件保留每一次）
+        let study = self.inner.with_study_save(
+            &req.study_id,
+            |s| {
+                s.record_practice(req.node_id, req.hints_used, req.revealed_directly, req.first_choice, req.hints, now_ms())?;
+                Ok(s.clone())
+            },
+            |store, s, _| {
+                let events: Vec<_> = s.node(req.node_id).ok().and_then(|n| crate::learning::from_practice(s, n)).into_iter().collect();
+                store.save_study_with_events(s, &events)
+            },
+        )?;
         self.inner.study_view(&study)
     }
 
@@ -830,6 +836,13 @@ impl Inner {
     /// 在会话锁内修改会话。修改在副本上进行：闭包成功且写入数据库后才替换缓存，
     /// 任何一步失败时内存与数据库都保持原样。
     pub(crate) fn with_study<R>(&self, id: &str, f: impl FnOnce(&mut Study) -> ApiResult<R>) -> ApiResult<R> {
+        self.with_study_save(id, f, |store, s, _| store.save_study(s))
+    }
+
+    /// 与 `with_study` 相同，但棋谱改变时用 `save` 写入（如连同删除的着法上的记录，或学习事件，在同一个写事务中写入）。
+    pub(crate) fn with_study_save<R>(
+        &self, id: &str, f: impl FnOnce(&mut Study) -> ApiResult<R>, save: impl FnOnce(&Store, &Study, &R) -> Result<(), StoreError>,
+    ) -> ApiResult<R> {
         let mut studies = lock(&self.studies);
         let current = match studies.get(id) {
             Some(s) => s.clone(),
@@ -838,7 +851,7 @@ impl Inner {
         let mut draft = current.clone();
         let result = f(&mut draft)?;
         if draft.revision != current.revision {
-            self.store.save_study(&draft)?;
+            save(&self.store, &draft, &result)?;
             studies.insert(id.to_string(), draft);
             // 写入与放进会话表之后才加一：取到这个序号的视图一定读得到这份棋谱
             self.bump_view();

@@ -9,14 +9,32 @@ fn temp_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{name}.tmp"))
 }
 
+/// 改名之后把目录项也刷到磁盘（Unix）：断电后文件名指向新的内容。Windows 上改名由文件系统的日志保证。
+fn sync_dir(path: &Path) {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent()
+        && let Ok(d) = std::fs::File::open(if dir.as_os_str().is_empty() { Path::new(".") } else { dir })
+    {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let tmp = temp_path(path);
     let result = (|| {
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(data)?;
+        let half = data.len() / 2;
+        f.write_all(&data[..half])?;
+        crate::failpoints::hit("write_atomic:half")?;
+        f.write_all(&data[half..])?;
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, path)
+        crate::failpoints::hit("write_atomic:before_rename")?;
+        std::fs::rename(&tmp, path)?;
+        sync_dir(path);
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);

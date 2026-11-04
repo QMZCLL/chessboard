@@ -16,6 +16,7 @@ use crate::llm::CoachRecord;
 use crate::llm::CoachResult;
 use crate::llm::CoachState;
 use crate::llm::ask::AnswerRecord;
+use crate::failpoints;
 use crate::inbox::InboxEntry;
 use crate::learning::LearningEvent;
 use crate::practice::PracticeSession;
@@ -185,6 +186,48 @@ impl Store {
         Ok(())
     }
 
+    /// 写入属于某一着的记录（讲解、AI 讲解、缓存与追问）：在同一个写事务中确认这一着仍在，已经删除时不写入，返回 false。
+    /// 写事务一次只有一个：删除着法（见 `save_study_removing`）要么在这之前提交（这里看到着法已经不在），
+    /// 要么在这之后提交（一并删除这里写入的记录），不会留下不属于任何着法的记录。
+    fn put_attached<T: Serialize>(
+        &self, table: TableDefinition<&str, &str>, key: &str, value: &T, study: &str, node: NodeId,
+    ) -> Result<bool, StoreError> {
+        let json = serde_json::to_string(value)?;
+        let tx = self.db.begin_write()?;
+        let alive = match tx.open_table(STUDIES)?.get(study)? {
+            Some(v) => serde_json::from_str::<StudyNodes>(v.value()).is_ok_and(|s| s.nodes.contains_key(&node)),
+            None => false,
+        };
+        if alive {
+            tx.open_table(table)?.insert(key, json.as_str())?;
+        }
+        tx.commit()?;
+        Ok(alive)
+    }
+
+    /// 保存删除了一些着法之后的会话，并删除这些着法上的讲解、AI 讲解（含缓存）与追问：在同一个写事务中完成，
+    /// 中途出错或进程终止时会话与这些记录都保持原样。
+    pub fn save_study_removing(&self, study: &Study, removed: &[NodeId]) -> Result<(), StoreError> {
+        let tx = self.db.begin_write()?;
+        tx.open_table(STUDIES)?.insert(study.id.as_str(), serde_json::to_string(study)?.as_str())?;
+        failpoints::hit("delete_node:after_study")?;
+        remove_node_records(&tx, &study.id, removed)?;
+        failpoints::hit("delete_node:before_commit")?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// 保存会话并加入学习事件（如先想后讲的一次练习）：在同一个写事务中完成。
+    pub fn save_study_with_events(&self, study: &Study, events: &[LearningEvent]) -> Result<(), StoreError> {
+        let tx = self.db.begin_write()?;
+        tx.open_table(STUDIES)?.insert(study.id.as_str(), serde_json::to_string(study)?.as_str())?;
+        failpoints::hit("study_event:after_study")?;
+        insert_events(&mut tx.open_table(EVENTS)?, events)?;
+        failpoints::hit("study_event:before_commit")?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// 在同一写事务中读取最新的值、修改并写回；`f` 返回 `false` 时不写回。不存在或没有写回时返回 `None`。
     fn update_if<T: Serialize + DeserializeOwned>(
         &self, table: TableDefinition<&str, &str>, key: &str, f: impl FnOnce(&mut T) -> bool,
@@ -276,6 +319,7 @@ impl Store {
                 inbox.insert(entry.study_id.as_str(), serde_json::to_string(entry)?.as_str())?;
             }
         }
+        failpoints::hit("inbox_import:before_commit")?;
         tx.commit()?;
         Ok(())
     }
@@ -308,8 +352,9 @@ impl Store {
         self.get(ANALYSES, &format!("cloud:{fen}"))
     }
 
-    pub fn save_explanation(&self, record: &ExplanationRecord) -> Result<(), StoreError> {
-        self.put(EXPLANATIONS, &explanation_key(&record.study_id, record.node_id), record)
+    /// 保存一着的讲解记录；这一着已经删除时不写入，返回 false（见 `put_attached`）。
+    pub fn save_explanation(&self, record: &ExplanationRecord) -> Result<bool, StoreError> {
+        self.put_attached(EXPLANATIONS, &explanation_key(&record.study_id, record.node_id), record, &record.study_id, record.node_id)
     }
 
     pub fn load_explanation(&self, study: &str, node: NodeId) -> Result<Option<ExplanationRecord>, StoreError> {
@@ -332,33 +377,23 @@ impl Store {
     /// 删除这些节点的讲解、AI 讲解与缓存，以及以它们为比较起点的追问。
     pub fn delete_explanations(&self, study: &str, nodes: &[NodeId]) -> Result<(), StoreError> {
         let tx = self.db.begin_write()?;
-        {
-            let mut t = tx.open_table(EXPLANATIONS)?;
-            let mut coach = tx.open_table(COACH)?;
-            let mut cache = tx.open_table(COACH_CACHE)?;
-            let mut asks = tx.open_table(COACH_ASK)?;
-            for node in nodes {
-                let key = explanation_key(study, *node);
-                t.remove(key.as_str())?;
-                coach.remove(key.as_str())?;
-                remove_prefix(&mut cache, &format!("{key}/"))?;
-                remove_prefix(&mut asks, &format!("{key}/"))?;
-            }
-        }
+        remove_node_records(&tx, study, nodes)?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn save_coach(&self, record: &CoachRecord) -> Result<(), StoreError> {
-        self.put(COACH, &explanation_key(&record.study_id, record.node_id), record)
+    /// 保存一着的 AI 讲解；这一着已经删除时不写入，返回 false。
+    pub fn save_coach(&self, record: &CoachRecord) -> Result<bool, StoreError> {
+        self.put_attached(COACH, &explanation_key(&record.study_id, record.node_id), record, &record.study_id, record.node_id)
     }
 
     pub fn load_coach(&self, study: &str, node: NodeId) -> Result<Option<CoachRecord>, StoreError> {
         self.get(COACH, &explanation_key(study, node))
     }
 
-    pub fn save_coach_cache(&self, study: &str, node: NodeId, result: &CoachResult) -> Result<(), StoreError> {
-        self.put(COACH_CACHE, &coach_cache_key(study, node, &result.cache_key), result)
+    /// 保存 AI 讲解的缓存；这一着已经删除时不写入，返回 false。
+    pub fn save_coach_cache(&self, study: &str, node: NodeId, result: &CoachResult) -> Result<bool, StoreError> {
+        self.put_attached(COACH_CACHE, &coach_cache_key(study, node, &result.cache_key), result, study, node)
     }
 
     pub fn load_coach_cache(&self, study: &str, node: NodeId, key: &str) -> Result<Option<CoachResult>, StoreError> {
@@ -414,9 +449,14 @@ impl Store {
                     Some(_) => Inserted::Kept,
                 };
                 outcome.push(result);
+                // 一批题目写到一半
+                if outcome.len() == cards.len().div_ceil(2) {
+                    failpoints::hit("exercises:half")?;
+                }
             }
             outcome
         };
+        failpoints::hit("exercises:before_commit")?;
         tx.commit()?;
         Ok(outcome)
     }
@@ -492,6 +532,7 @@ impl Store {
             insert_events(&mut tx.open_table(EVENTS)?, events)?;
             out
         };
+        failpoints::hit("import:before_commit")?;
         tx.commit()?;
         Ok(stored)
     }
@@ -528,6 +569,7 @@ impl Store {
                 },
             }
         };
+        failpoints::hit("attempt:before_commit")?;
         tx.commit()?;
         Ok(result)
     }
@@ -645,8 +687,9 @@ impl Store {
         Ok(())
     }
 
-    pub fn save_answer(&self, record: &AnswerRecord) -> Result<(), StoreError> {
-        self.put(COACH_ASK, &record.question.key(), record)
+    /// 保存追问的记录；比较起点已经删除时不写入，返回 false。
+    pub fn save_answer(&self, record: &AnswerRecord) -> Result<bool, StoreError> {
+        self.put_attached(COACH_ASK, &record.question.key(), record, &record.question.study_id, record.question.node_id)
     }
 
     pub fn load_answer(&self, key: &str) -> Result<Option<AnswerRecord>, StoreError> { self.get(COACH_ASK, key) }
@@ -743,6 +786,28 @@ impl Store {
 }
 
 /// 写入学习事件，同一编号已有时不覆盖；返回写入的条数。
+/// 只读出会话中有哪些节点（不解析节点的内容）。
+#[derive(serde::Deserialize)]
+struct StudyNodes {
+    nodes: std::collections::BTreeMap<NodeId, serde::de::IgnoredAny>,
+}
+
+/// 删除这些着法上的讲解、AI 讲解（含缓存）与追问。
+fn remove_node_records(tx: &redb::WriteTransaction, study: &str, nodes: &[NodeId]) -> Result<(), StoreError> {
+    let mut t = tx.open_table(EXPLANATIONS)?;
+    let mut coach = tx.open_table(COACH)?;
+    let mut cache = tx.open_table(COACH_CACHE)?;
+    let mut asks = tx.open_table(COACH_ASK)?;
+    for node in nodes {
+        let key = explanation_key(study, *node);
+        t.remove(key.as_str())?;
+        coach.remove(key.as_str())?;
+        remove_prefix(&mut cache, &format!("{key}/"))?;
+        remove_prefix(&mut asks, &format!("{key}/"))?;
+    }
+    Ok(())
+}
+
 fn insert_events(t: &mut redb::Table<&str, &str>, events: &[LearningEvent]) -> Result<usize, StoreError> {
     let mut n = 0;
     for e in events {
@@ -851,6 +916,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("db.redb")).unwrap();
+        store.save_study(&study("s")).unwrap();
         let mv = |s: &str| xq_core::Move::parse_iccs(s).unwrap();
         let question = Question { study_id: "s".into(), node_id: 0, mine: mv("h2e2"), reference: mv("h0g2"), kind: QuestionKind::MyMove };
         let record = AnswerRecord { question: question.clone(), state: CoachState::Running, generation: 3, result: None, error: None, updated_at: 1 };
@@ -862,6 +928,42 @@ mod tests {
         // 删除比较起点时一起删除
         store.delete_explanations("s", &[0]).unwrap();
         assert!(store.load_answer(&question.key()).unwrap().is_none());
+    }
+
+    fn study(id: &str) -> Study {
+        use xq_core::study::NewStudy;
+        Study::new(NewStudy {
+            id: id.into(),
+            name: "测试".into(),
+            source: xq_core::study::StudySource::Standard,
+            start: xq_core::Position::startpos(),
+            counters: None,
+            history_complete: true,
+            orientation: xq_core::study::Orientation::RedBottom,
+            user_side: xq_core::Color::Red,
+            rules: Default::default(),
+            now: 0,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn records_of_a_deleted_move_are_removed_with_it_and_never_written_afterwards() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.redb")).unwrap();
+        let mut s = study("s");
+        let mv = xq_core::Move::parse_iccs("h2e2").unwrap();
+        let node = s.apply_move(xq_core::study::ROOT, mv, xq_core::study::MoveSource::User, 1).unwrap().node;
+        store.save_study(&s).unwrap();
+        assert!(store.save_explanation(&ExplanationRecord::new("s", node, 1)).unwrap());
+        // 删除这一着：会话与讲解在同一个写事务中改变
+        let removed = s.delete_subtree(node, 2).unwrap();
+        store.save_study_removing(&s, &removed).unwrap();
+        assert!(store.load_explanation("s", node).unwrap().is_none());
+        // 删除之后才到达的结果不再写入
+        assert!(!store.save_explanation(&ExplanationRecord::new("s", node, 3)).unwrap());
+        assert!(store.load_explanation("s", node).unwrap().is_none());
+        assert!(!store.save_explanation(&ExplanationRecord::new("没有的会话", 1, 3)).unwrap());
     }
 
 }

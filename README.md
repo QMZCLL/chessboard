@@ -164,6 +164,10 @@ AI 讲解、先想后讲、棋盘显示、节点与讲解、演示、会话的�
 可设置 `XQ_SKIP_ENGINE_TESTS=1` 明确跳过。引擎服务的异常情况（候选排名变化、部分更新、崩溃、设置变更）
 由可编排的模拟引擎 `xq-mock-uci` 稳定复现，不依赖真实引擎。
 
+数据升级、崩溃与后台任务的处理方式见 [docs/data-guarantees.md](./docs/data-guarantees.md)，对应三组测试：
+旧版本实际写出的数据目录（`server/crates/xq-app/tests/history/`，生成后不再修改）的迁移与导入（`history.rs`），
+在写入的关键位置终止进程后检查数据（`crash.rs`，故障注入点只在测试构建中启用），以及后台任务的生命周期（`lifecycle.rs`）。
+
 在浏览器中调试界面（使用真实引擎，屏幕识别为模拟输入）：
 
 ```bash
