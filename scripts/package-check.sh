@@ -22,6 +22,7 @@ smoke() {
   local name=$1 report="$work/$1.json" status=0
   if [ $# -ge 2 ]; then xqlink --smoke "$report" --data "$2" > /dev/null || status=$?; else xqlink --smoke "$report" > /dev/null || status=$?; fi
   cat "$report"
+  echo
   python3 - "$report" "$expected" "$status" <<'PY'
 import json, sys
 r = json.load(open(sys.argv[1])); expected = sys.argv[2]; status = int(sys.argv[3])
@@ -46,7 +47,9 @@ echo "::endgroup::"
 
 echo "::group::卸载"
 sudo apt-get remove -y xqlink
-if command -v xqlink; then echo "卸载后程序仍在"; exit 1; fi
+# 之前运行过 xqlink，bash 记住了它的位置：先清掉，再看程序是否真的删除了
+hash -r
+if dpkg -s xqlink > /dev/null 2>&1 || command -v xqlink; then echo "卸载后程序仍在"; exit 1; fi
 [ -f "$data_dir/xqlink.redb" ] || { echo "卸载删除了学习数据"; exit 1; }
 rm -rf "$data_dir" "$config_dir"
 echo "::endgroup::"

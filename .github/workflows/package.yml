@@ -45,8 +45,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view v0.3.0 -R "${{ github.repository }}" *> $null
-          if ($LASTEXITCODE -ne 0) { Write-Host "::notice::仓库中没有 v0.3.0 的发布，跳过升级检查"; exit 0 }
+          # 只有确实没有这个发布时才跳过；其他错误（权限、网络）让流程失败并显示原因
+          $out = gh release view v0.3.0 -R "${{ github.repository }}" --json tagName 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            if ("$out" -match "not found") { Write-Host "::notice::仓库中没有 v0.3.0 的发布，跳过升级检查"; exit 0 }
+            throw "查询 v0.3.0 的发布失败：$out"
+          }
           $dir = Join-Path $env:RUNNER_TEMP "previous"
           gh release download v0.3.0 -R "${{ github.repository }}" -p "*.msi" -D $dir
           if ($LASTEXITCODE -ne 0) { throw "下载 v0.3.0 的安装包失败" }
@@ -100,9 +104,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.3.0 -R "${{ github.repository }}" > /dev/null 2>&1; then
-            echo "::notice::仓库中没有 v0.3.0 的发布，跳过升级检查"
-            exit 0
+          # 只有确实没有这个发布时才跳过；其他错误（权限、网络）让流程失败并显示原因
+          if ! out=$(gh release view v0.3.0 -R "${{ github.repository }}" --json tagName 2>&1); then
+            if echo "$out" | grep -qi "not found"; then
+              echo "::notice::仓库中没有 v0.3.0 的发布，跳过升级检查"
+              exit 0
+            fi
+            echo "查询 v0.3.0 的发布失败：$out"
+            exit 1
           fi
           gh release download v0.3.0 -R "${{ github.repository }}" -p "*.deb" -D "$RUNNER_TEMP/previous"
           echo "deb=$(ls "$RUNNER_TEMP"/previous/*.deb | head -1)" >> "$GITHUB_OUTPUT"
