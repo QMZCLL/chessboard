@@ -5,6 +5,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import {
   NButton,
+  NCheckbox,
   NCollapse,
   NCollapseItem,
   NDrawer,
@@ -22,7 +23,7 @@ import {
   NTag,
   useMessage,
 } from "naive-ui";
-import { api, copyText, errorMessage, isTauri } from "../api/backend";
+import { api, copyText, errorMessage, isTauri, pickSavePath } from "../api/backend";
 import type { AppConfig, Audience, CoachProvider, CoachScope, Detail } from "../api/types";
 import { refreshCoach, wb, type SettingsTab } from "../state/workbench";
 import { setThemePref, themePref } from "../state/theme";
@@ -259,6 +260,41 @@ async function copyDiagnostics() {
   }
 }
 
+/** 诊断包默认不含棋谱内容；勾选后附上学习档案。 */
+const bundleGames = ref(false);
+const bundleBusy = ref(false);
+
+function bundleName() {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `象棋学习助手-诊断包-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.zip`;
+}
+
+async function exportBundle() {
+  bundleBusy.value = true;
+  try {
+    const req = { include_games: bundleGames.value };
+    if (isTauri) {
+      const path = await pickSavePath(bundleName(), { name: "诊断包", extensions: ["zip"] });
+      if (!path) return;
+      await api.exportDiagnostics(path, req);
+      message.success(`诊断包已导出到 ${path}`);
+      return;
+    }
+    const bytes = Uint8Array.from(atob(await api.diagnosticBundle(req)), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = bundleName();
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    message.error(errorMessage(e));
+  } finally {
+    bundleBusy.value = false;
+  }
+}
+
 async function openLogs() {
   await api.openLogDir().catch((e) => message.error(errorMessage(e)));
 }
@@ -403,8 +439,14 @@ const engineText = computed(() => {
             <p class="muted">数据目录：{{ wb.status?.data_dir }}</p>
             <div class="diag-actions">
               <n-button size="small" @click="copyDiagnostics">复制诊断信息</n-button>
+              <n-button size="small" :loading="bundleBusy" data-testid="diag-bundle" @click="exportBundle">导出诊断包</n-button>
               <n-button v-if="isTauri" size="small" @click="openLogs">打开日志目录</n-button>
             </div>
+            <n-checkbox v-model:checked="bundleGames" data-testid="diag-bundle-games">诊断包中包含棋谱内容</n-checkbox>
+            <p class="muted diag-note">
+              诊断包含有设置、数据版本、后台任务记录与最近的日志，已清除密钥、接口地址中的凭据、本机用户名与路径；
+              不勾选时也清除局面、着法与会话名称。
+            </p>
             <n-form label-placement="left" label-width="112" size="small">
               <n-form-item label="日志级别"><n-select v-model:value="form.log_level" :options="LEVELS" /></n-form-item>
             </n-form>
@@ -459,8 +501,13 @@ const engineText = computed(() => {
 }
 .diag-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-2);
-  margin: var(--sp-2) 0 var(--sp-4);
+  margin: var(--sp-2) 0 var(--sp-2);
+}
+
+.diag-note {
+  margin: var(--sp-1) 0 var(--sp-4);
 }
 .footer {
   display: flex;

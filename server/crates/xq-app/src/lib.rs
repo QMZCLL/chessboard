@@ -29,6 +29,7 @@ pub mod review;
 pub mod schedule;
 mod service;
 pub mod storage;
+pub mod support;
 pub mod topics;
 mod transfer;
 

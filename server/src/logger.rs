@@ -17,6 +17,7 @@ fn directives(level: &str) -> String {
 }
 
 /// 初始化日志：写入 Tauri 提供的应用日志目录，按天滚动并保留最近 14 天。
+/// 文件中每行是一条 JSON（时间、级别、来源与字段），诊断包直接附上；控制台仍是便于阅读的单行格式。
 pub fn init(log_dir: &Path) {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(directives("info")));
     let (filter, handle) = reload::Layer::new(filter);
@@ -34,7 +35,8 @@ pub fn init(log_dir: &Path) {
         Ok(appender) => {
             let (writer, guard) = tracing_appender::non_blocking(appender);
             let _ = GUARD.set(guard);
-            let file_layer = tracing_subscriber::fmt::layer().with_ansi(false).with_writer(writer).compact();
+            let file_layer =
+                tracing_subscriber::fmt::layer().json().flatten_event(true).with_current_span(false).with_ansi(false).with_writer(writer);
             let _ = tracing_subscriber::registry().with(filter).with(console).with(file_layer).try_init();
         }
         Err(e) => {

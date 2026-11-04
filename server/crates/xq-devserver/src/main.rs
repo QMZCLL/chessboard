@@ -137,6 +137,12 @@ fn dispatch(service: &AppService, sim: &SimBackend, cmd: &str, args: &Value) -> 
         "import_text" => to_value(service.import_text(&arg::<String>(args, "text")?, arg(args, "name")?)?),
         "diagnostics" => to_value(service.diagnostics()),
         "job_history" => to_value(service.jobs()),
+        // 浏览器中下载：返回 zip 文件内容的 base64
+        "diagnostic_bundle" => {
+            use base64::Engine as _;
+            let bytes = service.diagnostic_bundle(arg(args, "req")?)?;
+            to_value(base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
         "open_log_dir" => Err("开发桥不支持打开目录".into()),
         "list_windows" => to_value(service.list_windows()?),
         "capture_snapshot" => to_value(service.capture_snapshot(arg(args, "windowId")?)?),

@@ -260,6 +260,10 @@ export const api = {
   diagnostics: () => call<string>("diagnostics"),
   /** 后台任务的登记：进行中的与最近结束的任务（诊断用） */
   jobHistory: () => call<T.JobSnapshot>("job_history"),
+  /** 诊断包（zip）的 base64，浏览器中下载用（开发桥） */
+  diagnosticBundle: (req: T.DiagnosticsRequest) => call<string>("diagnostic_bundle", { req }),
+  /** 导出诊断包到文件（桌面应用） */
+  exportDiagnostics: (path: string, req: T.DiagnosticsRequest) => call<void>("export_diagnostics", { path, req }),
   openLogDir: () => call<void>("open_log_dir"),
   listWindows: () => call<T.WindowInfo[]>("list_windows"),
   captureSnapshot: (windowId: number) => call<T.Snapshot>("capture_snapshot", { windowId }),
@@ -281,9 +285,12 @@ export const api = {
 };
 
 /** 选择保存位置（仅桌面应用）。 */
-export async function pickSavePath(defaultName: string): Promise<string | null> {
+export async function pickSavePath(
+  defaultName: string,
+  filter: { name: string; extensions: string[] } = { name: "象棋学习数据", extensions: ["json"] },
+): Promise<string | null> {
   const { save } = await import("@tauri-apps/plugin-dialog");
-  return await save({ defaultPath: defaultName, filters: [{ name: "象棋学习数据", extensions: ["json"] }] });
+  return await save({ defaultPath: defaultName, filters: [filter] });
 }
 
 /** 选择要导入的文件（仅桌面应用）。 */

@@ -125,6 +125,7 @@ pub fn run() {
             commands::import_text,
             commands::diagnostics,
             commands::job_history,
+            commands::export_diagnostics,
             commands::open_log_dir,
             commands::list_windows,
             commands::capture_snapshot,

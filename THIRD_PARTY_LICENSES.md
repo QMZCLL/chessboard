@@ -9,7 +9,7 @@
 | Pikafish 2026-09-06（引擎） | GPL-3.0 | 许可全文：libs/pikafish/Copying.txt；作者：libs/pikafish/AUTHORS；对应源码：https://github.com/official-pikafish/Pikafish/releases/tag/Pikafish-2026-09-06 |
 | pikafish.nnue（网络文件） | 见 libs/pikafish/NNUE-License.md | 仅限合法用途，未经许可不得商用 |
 
-## 桌面程序依赖的 Rust crate（582 个）
+## 桌面程序依赖的 Rust crate（583 个）
 
 | 名称 | 版本 | 许可 |
 | --- | --- | --- |
@@ -463,6 +463,7 @@
 | tracing-attributes | 0.1.28 | MIT |
 | tracing-core | 0.1.33 | MIT |
 | tracing-log | 0.2.0 | MIT |
+| tracing-serde | 0.2.0 | MIT |
 | tracing-subscriber | 0.3.19 | MIT |
 | tray-icon | 0.20.1 | MIT OR Apache-2.0 |
 | try-lock | 0.2.5 | MIT |

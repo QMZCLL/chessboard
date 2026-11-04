@@ -58,6 +58,7 @@ export type * from "./DecisionState";
 export type * from "./DecisionSupport";
 export type * from "./DecisionVerdict";
 export type * from "./Detail";
+export type * from "./DiagnosticsRequest";
 export type * from "./EngineConfig";
 export type * from "./EngineIdentity";
 export type * from "./EngineState";

@@ -30,7 +30,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 sha2 = "0.10"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "time", "local-time"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time", "local-time", "json"] }
 tracing-appender = "0.2"
 ndarray = "0.16"
 

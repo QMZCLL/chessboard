@@ -360,6 +360,13 @@ pub async fn export_archive_to_file(state: State<'_, AppService>, path: PathBuf)
     blocking(move || s.export_archive_to_file(&path)).await
 }
 
+/// 导出诊断包到选择的文件（见 `xq_app::support`）。
+#[tauri::command]
+pub async fn export_diagnostics(state: State<'_, AppService>, path: PathBuf, req: xq_app::support::DiagnosticsRequest) -> ApiResult<()> {
+    let s = service(&state);
+    blocking(move || s.export_diagnostics_to_file(&path, req)).await
+}
+
 #[tauri::command]
 pub async fn preview_archive(state: State<'_, AppService>, source: ArchiveSource) -> ApiResult<ArchiveSummary> {
     let s = service(&state);

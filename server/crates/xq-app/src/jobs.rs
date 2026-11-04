@@ -226,6 +226,15 @@ impl JobRegistry {
             detail: None,
             committed: false,
         };
+        tracing::debug!(
+            target: "jobs",
+            job_id = %record.job_id,
+            operation_id = %record.operation_id,
+            kind = ?record.kind,
+            key = %record.key,
+            attempt = record.attempt,
+            "任务开始"
+        );
         if let Some(old) = st.active.insert(spec.job_id.clone(), record) {
             // 同一个编号重复登记：之前的那次不会再有结果
             let mut old = old;
@@ -362,6 +371,21 @@ fn finish_locked(st: &mut State, job_id: &str, outcome: Outcome) -> bool {
     r.detail = detail;
     r.committed = committed;
     r.finished_at = Some(now_ms());
+    // 每个任务结束时一行结构化日志：同一次操作的几次执行有同一个 operation_id，可以从界面的请求追到结果
+    tracing::info!(
+        target: "jobs",
+        job_id = %r.job_id,
+        operation_id = %r.operation_id,
+        kind = ?r.kind,
+        key = %r.key,
+        study_id = r.study_id.as_deref().unwrap_or(""),
+        attempt = r.attempt,
+        state = ?r.state,
+        committed = r.committed,
+        elapsed_ms = r.finished_at.unwrap_or(r.created_at) - r.created_at,
+        detail = r.detail.as_deref().unwrap_or(""),
+        "任务结束"
+    );
     push_finished(st, r);
     true
 }

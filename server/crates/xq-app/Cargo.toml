@@ -13,6 +13,8 @@ tracing = "0.1"
 redb = "2"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
+# 诊断包的清除规则
+regex = "1"
 
 # Windows 使用系统 TLS（schannel），其他平台使用 rustls，避免依赖 OpenSSL 开发包
 [target.'cfg(windows)'.dependencies]
