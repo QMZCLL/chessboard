@@ -1,0 +1,68 @@
+name: 发布前检查
+
+# 手动触发（Actions 页面 → 发布前检查 → Run workflow，选择要检查的分支）：发布候选版本前在同一份代码上反复运行浏览器场景，
+# 确认没有时序造成的偶发失败。全部场景默认连续运行 30 轮，竞态与时序相关的场景（run.mjs 的 RACES）默认 100 轮。
+# 每轮使用新的数据目录；任何一轮失败、开发桥日志中出现 panic、结束后留下引擎进程，检查都不通过。
+# 每个场景的结果（通过、断言失败、运行出错、超时、环境故障）写在 results.json 中，随运行保存。
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: 全部场景运行的轮数
+        default: "30"
+      race_rounds:
+        description: 竞态场景运行的轮数
+        default: "100"
+
+jobs:
+  scenarios:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 全部场景
+            args: --repeat ${{ inputs.rounds }}
+            artifact: release-check-all
+          - name: 竞态场景
+            args: --races --repeat ${{ inputs.race_rounds }}
+            artifact: release-check-races
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 安装 Chromium 与中文字体
+        run: |
+          pnpm exec playwright-core install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+      - name: 运行场景
+        run: node tests/e2e/run.mjs ${{ matrix.args }}
+      - name: 没有遗留的引擎进程
+        if: always()
+        run: |
+          if pgrep -fa "pikafish-linux|xq-mock-uci|xq-devserver"; then
+            echo "场景结束后仍有引擎或开发桥进程"
+            exit 1
+          fi
+      - name: 保存结果与日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            tests/e2e/.out/results.json
+            tests/e2e/.out/logs
+          include-hidden-files: true
+          retention-days: 14

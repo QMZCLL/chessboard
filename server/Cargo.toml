@@ -28,6 +28,8 @@ serde_json = "1"
 xcap = { version = "0.5.1" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
+# 冒烟测试按 Tauri 的规则找到应用目录（与 tauri 使用同一个版本）
+dirs = "6"
 sha2 = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "time", "local-time", "json"] }

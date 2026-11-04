@@ -6561,6 +6561,7 @@ name = "xqlink"
 version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
+ "dirs",
  "image 0.25.6",
  "ndarray",
  "ort",

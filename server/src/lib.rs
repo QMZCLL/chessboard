@@ -10,6 +10,7 @@ use xq_app::events::EventSink;
 mod commands;
 mod logger;
 mod recognition;
+mod smoke;
 
 /// 服务启动失败的原因；界面启动时读取并提示用户。
 pub struct StartupError(pub Mutex<Option<String>>);
@@ -47,6 +48,12 @@ fn start_service(handle: &tauri::AppHandle) -> Result<AppService, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    // 安装包的冒烟测试：不打开窗口，检查后退出（见 `smoke`）
+    if let Some((report, data)) = smoke::requested() {
+        let identifier = context.config().identifier.clone();
+        std::process::exit(smoke::run(&identifier, context.package_info(), &report, data.as_deref()));
+    }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -135,7 +142,7 @@ pub fn run() {
             commands::resolve_capture,
             commands::relocate_capture,
         ])
-        .build(tauri::generate_context!());
+        .build(context);
     let app = match app {
         Ok(app) => app,
         Err(e) => {
