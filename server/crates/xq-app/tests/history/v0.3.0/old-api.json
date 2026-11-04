@@ -1,0 +1,2239 @@
+{
+  "profile": "v0.3.0",
+  "studies": {
+    "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59": {
+      "explain_seq": 47,
+      "explain_status": {
+        "1": "detailed",
+        "2": "detailed",
+        "3": "detailed",
+        "4": "detailed",
+        "5": "detailed",
+        "6": "detailed",
+        "7": "detailed",
+        "8": "detailed",
+        "9": "detailed",
+        "10": "detailed",
+        "11": "detailed",
+        "12": "detailed",
+        "13": "detailed"
+      },
+      "stats": {
+        "basic": 13,
+        "detailed": 13,
+        "failed": 0,
+        "moves": 13,
+        "partial": 0,
+        "pending": 0
+      },
+      "study": {
+        "created_at": 1793772571220,
+        "format_version": 1,
+        "history_complete": true,
+        "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+        "live_node": null,
+        "name": "样本：中炮对屏风马（复盘）",
+        "next_id": 15,
+        "nodes": {
+          "0": {
+            "children": [
+              1
+            ],
+            "created_at": 1793772571220,
+            "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 0,
+            "mv": null,
+            "notation": null,
+            "note": "",
+            "parent": null,
+            "ply": 0,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "user",
+            "starred": false
+          },
+          "1": {
+            "children": [
+              2,
+              13
+            ],
+            "created_at": 1793772571221,
+            "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b",
+            "gap": false,
+            "gap_reason": null,
+            "id": 1,
+            "mv": "h2e2",
+            "notation": "炮二平五",
+            "note": "",
+            "parent": 0,
+            "ply": 1,
+            "practice": null,
+            "side_to_move": "black",
+            "source": "record",
+            "starred": false
+          },
+          "2": {
+            "children": [
+              3
+            ],
+            "created_at": 1793772571221,
+            "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 2,
+            "mv": "h9g7",
+            "notation": "马8进7",
+            "note": "",
+            "parent": 1,
+            "ply": 2,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "record",
+            "starred": false
+          },
+          "3": {
+            "children": [
+              4
+            ],
+            "created_at": 1793772571221,
+            "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R b",
+            "gap": false,
+            "gap_reason": null,
+            "id": 3,
+            "mv": "h0g2",
+            "notation": "马二进三",
+            "note": "这里要注意中路",
+            "parent": 2,
+            "ply": 3,
+            "practice": null,
+            "side_to_move": "black",
+            "source": "record",
+            "starred": true
+          },
+          "4": {
+            "children": [
+              5
+            ],
+            "created_at": 1793772571221,
+            "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 4,
+            "mv": "i9h9",
+            "notation": "车9平8",
+            "note": "",
+            "parent": 3,
+            "ply": 4,
+            "practice": {
+              "first_choice": "a6a5",
+              "hints": null,
+              "hints_used": 1,
+              "matched": false,
+              "revealed_directly": false,
+              "sessions": 1,
+              "updated_at": 1793772571979
+            },
+            "side_to_move": "red",
+            "source": "record",
+            "starred": false
+          },
+          "5": {
+            "children": [
+              6
+            ],
+            "created_at": 1793772571222,
+            "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 b",
+            "gap": false,
+            "gap_reason": null,
+            "id": 5,
+            "mv": "i0h0",
+            "notation": "车一平二",
+            "note": "",
+            "parent": 4,
+            "ply": 5,
+            "practice": null,
+            "side_to_move": "black",
+            "source": "record",
+            "starred": false
+          },
+          "6": {
+            "children": [
+              7
+            ],
+            "created_at": 1793772571222,
+            "fen": "r1bakabr1/9/1cn3nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 6,
+            "mv": "b9c7",
+            "notation": "马2进3",
+            "note": "",
+            "parent": 5,
+            "ply": 6,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "record",
+            "starred": false
+          },
+          "7": {
+            "children": [
+              8
+            ],
+            "created_at": 1793772571222,
+            "fen": "r1bakabr1/9/1cn3nc1/p1p1p1p1p/9/2P6/P3P1P1P/1C2C1N2/9/RNBAKABR1 b",
+            "gap": false,
+            "gap_reason": null,
+            "id": 7,
+            "mv": "c3c4",
+            "notation": "兵七进一",
+            "note": "",
+            "parent": 6,
+            "ply": 7,
+            "practice": null,
+            "side_to_move": "black",
+            "source": "record",
+            "starred": false
+          },
+          "8": {
+            "children": [
+              9
+            ],
+            "created_at": 1793772571222,
+            "fen": "r1bakabr1/9/1cn3nc1/p1p1p3p/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKABR1 w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 8,
+            "mv": "g6g5",
+            "notation": "卒7进1",
+            "note": "",
+            "parent": 7,
+            "ply": 8,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "record",
+            "starred": false
+          },
+          "9": {
+            "children": [
+              10
+            ],
+            "created_at": 1793772571222,
+            "fen": "r1bakabr1/9/1cn3nc1/p1p1p2Rp/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 b",
+            "gap": false,
+            "gap_reason": null,
+            "id": 9,
+            "mv": "h0h6",
+            "notation": "车二进六",
+            "note": "",
+            "parent": 8,
+            "ply": 9,
+            "practice": null,
+            "side_to_move": "black",
+            "source": "record",
+            "starred": false
+          },
+          "10": {
+            "children": [
+              11
+            ],
+            "created_at": 1793772571222,
+            "fen": "r1bakabr1/9/1cn3n1c/p1p1p2Rp/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 10,
+            "mv": "h7i7",
+            "notation": "炮8平9",
+            "note": "",
+            "parent": 9,
+            "ply": 10,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "record",
+            "starred": false
+          },
+          "11": {
+            "children": [
+              12
+            ],
+            "created_at": 1793772571222,
+            "fen": "r1bakabr1/9/1cn3n1c/p1p1p1R1p/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 b",
+            "gap": false,
+            "gap_reason": null,
+            "id": 11,
+            "mv": "h6g6",
+            "notation": "车二平三",
+            "note": "",
+            "parent": 10,
+            "ply": 11,
+            "practice": null,
+            "side_to_move": "black",
+            "source": "record",
+            "starred": false
+          },
+          "12": {
+            "children": [],
+            "created_at": 1793772571222,
+            "fen": "r1bakabr1/8c/1cn3n2/p1p1p1R1p/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 12,
+            "mv": "i7i8",
+            "notation": "炮9退1",
+            "note": "",
+            "parent": 11,
+            "ply": 12,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "record",
+            "starred": false
+          },
+          "13": {
+            "children": [],
+            "created_at": 1793772571742,
+            "fen": "rnbakabnr/9/1c5c1/2p1p1p1p/p8/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 13,
+            "mv": "a6a5",
+            "notation": "卒1进1",
+            "note": "",
+            "parent": 1,
+            "ply": 2,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "variation",
+            "starred": false
+          }
+        },
+        "orientation": "red_bottom",
+        "revision": 20,
+        "root_fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+        "rules": {
+          "repetition_rule": "ChineseRule",
+          "sixty_move_rule": true
+        },
+        "source": "record",
+        "updated_at": 1793772573462,
+        "user_side": "red"
+      }
+    },
+    "54263c05-43c6-4f17-a5ba-ed70917923b3": {
+      "explain_seq": 47,
+      "explain_status": {
+        "1": "detailed",
+        "2": "detailed"
+      },
+      "stats": {
+        "basic": 2,
+        "detailed": 2,
+        "failed": 0,
+        "moves": 2,
+        "partial": 0,
+        "pending": 0
+      },
+      "study": {
+        "created_at": 1793772573363,
+        "format_version": 1,
+        "history_complete": true,
+        "id": "54263c05-43c6-4f17-a5ba-ed70917923b3",
+        "live_node": null,
+        "name": "样本：执黑练习",
+        "next_id": 3,
+        "nodes": {
+          "0": {
+            "children": [
+              1
+            ],
+            "created_at": 1793772573363,
+            "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 0,
+            "mv": null,
+            "notation": null,
+            "note": "",
+            "parent": null,
+            "ply": 0,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "user",
+            "starred": false
+          },
+          "1": {
+            "children": [
+              2
+            ],
+            "created_at": 1793772573410,
+            "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b",
+            "gap": false,
+            "gap_reason": null,
+            "id": 1,
+            "mv": "h2e2",
+            "notation": "炮二平五",
+            "note": "",
+            "parent": 0,
+            "ply": 1,
+            "practice": null,
+            "side_to_move": "black",
+            "source": "user",
+            "starred": false
+          },
+          "2": {
+            "children": [],
+            "created_at": 1793772573415,
+            "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w",
+            "gap": false,
+            "gap_reason": null,
+            "id": 2,
+            "mv": "h9g7",
+            "notation": "马8进7",
+            "note": "",
+            "parent": 1,
+            "ply": 2,
+            "practice": null,
+            "side_to_move": "red",
+            "source": "user",
+            "starred": false
+          }
+        },
+        "orientation": "black_bottom",
+        "revision": 3,
+        "root_fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+        "rules": {
+          "repetition_rule": "ChineseRule",
+          "sixty_move_rule": true
+        },
+        "source": "standard",
+        "updated_at": 1793772573415,
+        "user_side": "black"
+      }
+    }
+  },
+  "reviews": {
+    "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006": {
+      "card": {
+        "answer": {
+          "mv": "b9c7",
+          "notation": "马2进3"
+        },
+        "attempts": [
+          {
+            "at": 1793772572110,
+            "choice": {
+              "mv": "b9c7",
+              "notation": "马2进3"
+            },
+            "confidence": "sure",
+            "decision": {
+              "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 2 个候选 · ChineseRule · 指定着法单独分析",
+              "error": null,
+              "points": [
+                "同一次搜索中，马2进3与卒7进1评分接近（相差约 0 分）"
+              ],
+              "reference": {
+                "mv": "b9c7",
+                "notation": "马2进3"
+              },
+              "stability": "medium",
+              "state": "ready",
+              "support": "supported",
+              "verdict": "same_as_record"
+            },
+            "elapsed_ms": 8100,
+            "goal": "decision",
+            "hints": 0,
+            "intent": "capture",
+            "marks": [],
+            "matched": true,
+            "practice": null,
+            "reflection": {
+              "changes": [
+                "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+                "右马离开底线投入行动"
+              ],
+              "checks": [
+                "这一步没有吃子"
+              ],
+              "intent": "capture"
+            },
+            "request": "56a29d4a-c380-451e-b019-54ae82e686f5"
+          },
+          {
+            "at": 1793772573353,
+            "choice": {
+              "mv": "b9c7",
+              "notation": "马2进3"
+            },
+            "confidence": "guess",
+            "decision": null,
+            "elapsed_ms": 3000,
+            "goal": "recall",
+            "hints": 0,
+            "intent": null,
+            "marks": [],
+            "matched": true,
+            "practice": "588637b5-7648-4f53-a74e-977da87afde2",
+            "reflection": {
+              "changes": [
+                "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+                "右马离开底线投入行动"
+              ],
+              "checks": [],
+              "intent": null
+            },
+            "request": "0b695dde-3259-459e-a906-831385aca710"
+          }
+        ],
+        "basis": {
+          "basis": [
+            "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+            "右马离开底线投入行动"
+          ],
+          "budget": "quick",
+          "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772571427,
+          "generator_version": 5,
+          "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+          "level": "detailed",
+          "need": [
+            "当前没有直接威胁，主要任务是尽快出动尚在底线的车马"
+          ],
+          "replies": [
+            "对方主要应对兵七进一：挺七路兵"
+          ],
+          "summary": "马2进3：出动右马，并增加对中卒的保护。",
+          "verdict": {
+            "delta": 7,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": []
+        },
+        "created_at": 1793772572039,
+        "due_at": 1793772572039,
+        "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 b",
+        "history": [
+          {
+            "mv": "h2e2",
+            "notation": "炮二平五"
+          },
+          {
+            "mv": "h9g7",
+            "notation": "马8进7"
+          },
+          {
+            "mv": "h0g2",
+            "notation": "马二进三"
+          },
+          {
+            "mv": "i9h9",
+            "notation": "车9平8"
+          },
+          {
+            "mv": "i0h0",
+            "notation": "车一平二"
+          }
+        ],
+        "history_complete": true,
+        "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006",
+        "issues": [],
+        "kind": "move",
+        "node_id": 6,
+        "note": "",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": null,
+        "played": null,
+        "reviewed_at": 1793772573353,
+        "revision": 3,
+        "schedule_base": null,
+        "side": "black",
+        "stage": 0,
+        "status": "due",
+        "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+        "study_name": "样本：中炮对屏风马",
+        "targets": [],
+        "thinking": null,
+        "turn": 3,
+        "updated_at": 1793772573353
+      },
+      "legal_moves": [
+        "a6a5",
+        "c6c5",
+        "e6e5",
+        "g6g5",
+        "i6i5",
+        "b7c7",
+        "b7d7",
+        "b7e7",
+        "b7f7",
+        "b7a7",
+        "b7b8",
+        "b7b6",
+        "b7b5",
+        "b7b4",
+        "b7b3",
+        "b7b0",
+        "g7e8",
+        "h7i7",
+        "h7h8",
+        "h7h6",
+        "h7h5",
+        "h7h4",
+        "h7h3",
+        "h7h2",
+        "h7h1",
+        "a9a8",
+        "a9a7",
+        "b9c7",
+        "b9a7",
+        "c9e7",
+        "c9a7",
+        "d9e8",
+        "e9e8",
+        "f9e8",
+        "g9i7",
+        "g9e7",
+        "h9i9",
+        "h9h8"
+      ],
+      "source_available": true,
+      "study_name": "样本：中炮对屏风马（复盘）",
+      "themes": [
+        {
+          "theme": "protection",
+          "why": "这一步保护了士和中卒"
+        }
+      ]
+    },
+    "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001/threat": {
+      "card": {
+        "answer": {
+          "mv": "e2c3",
+          "notation": "马五进七"
+        },
+        "attempts": [],
+        "basis": {
+          "basis": [
+            "中马原本是中炮与帅之间唯一的炮架，移开后炮无法再隔子将军"
+          ],
+          "budget": "deep",
+          "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772572972,
+          "generator_version": 5,
+          "lesson": "被将军时比较三种应将方式：动将、垫子、吃掉将军的棋子，并看应将后哪些棋子更安全。",
+          "level": "detailed",
+          "need": [
+            "红方正被将军，必须先应将"
+          ],
+          "replies": [
+            "对方主要应对将4进1：动将"
+          ],
+          "summary": "马五进七：移开炮架解将。",
+          "verdict": {
+            "delta": 2,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": [
+            "此前的着法历史不完整，长将、长捉等依赖历史的判定可能不准确",
+            "最近几个深度首选仍在变化，这里的评价只因差距较大才给出"
+          ]
+        },
+        "created_at": 1793772573195,
+        "due_at": 1793772573195,
+        "fen": "3k5/9/4c4/9/9/9/9/4N4/9/4K4 w",
+        "history": [],
+        "history_complete": false,
+        "id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001/threat",
+        "issues": [],
+        "kind": "threat",
+        "node_id": 1,
+        "note": "",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": "第 1 回合：走这一步之前有 1 处受到威胁，先想后讲中没有选对",
+        "played": null,
+        "reviewed_at": null,
+        "revision": 0,
+        "schedule_base": null,
+        "side": "red",
+        "stage": 0,
+        "status": "due",
+        "study_id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8",
+        "study_name": "样本：马炮残局",
+        "targets": [
+          "e7"
+        ],
+        "thinking": {
+          "first_choice": {
+            "mv": "e0f0",
+            "notation": "帅五平四"
+          },
+          "hints": null,
+          "hints_used": 0,
+          "matched": false,
+          "practiced_at": 1793772573189,
+          "revealed_directly": false
+        },
+        "turn": 1,
+        "updated_at": 1793772573195
+      },
+      "legal_moves": [
+        "e0f0",
+        "e2f4",
+        "e2d4",
+        "e2f0",
+        "e2d0",
+        "e2g3",
+        "e2g1",
+        "e2c3",
+        "e2c1"
+      ],
+      "source_available": false,
+      "study_name": "样本：马炮残局",
+      "themes": [
+        {
+          "theme": "king_safety",
+          "why": "走之前正被将军，这一步应将"
+        }
+      ]
+    },
+    "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001": {
+      "card": {
+        "answer": {
+          "mv": "e2c3",
+          "notation": "马五进七"
+        },
+        "attempts": [],
+        "basis": {
+          "basis": [
+            "中马原本是中炮与帅之间唯一的炮架，移开后炮无法再隔子将军"
+          ],
+          "budget": "deep",
+          "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772572972,
+          "generator_version": 5,
+          "lesson": "被将军时比较三种应将方式：动将、垫子、吃掉将军的棋子，并看应将后哪些棋子更安全。",
+          "level": "detailed",
+          "need": [
+            "红方正被将军，必须先应将"
+          ],
+          "replies": [
+            "对方主要应对将4进1：动将"
+          ],
+          "summary": "马五进七：移开炮架解将。",
+          "verdict": {
+            "delta": 2,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": [
+            "此前的着法历史不完整，长将、长捉等依赖历史的判定可能不准确",
+            "最近几个深度首选仍在变化，这里的评价只因差距较大才给出"
+          ]
+        },
+        "created_at": 1793772573198,
+        "due_at": 1793772573198,
+        "fen": "3k5/9/4c4/9/9/9/9/4N4/9/4K4 w",
+        "history": [],
+        "history_complete": false,
+        "id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001",
+        "issues": [],
+        "kind": "move",
+        "node_id": 1,
+        "note": "",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": null,
+        "played": null,
+        "reviewed_at": null,
+        "revision": 0,
+        "schedule_base": null,
+        "side": "red",
+        "stage": 0,
+        "status": "due",
+        "study_id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8",
+        "study_name": "样本：马炮残局",
+        "targets": [],
+        "thinking": {
+          "first_choice": {
+            "mv": "e0f0",
+            "notation": "帅五平四"
+          },
+          "hints": null,
+          "hints_used": 0,
+          "matched": false,
+          "practiced_at": 1793772573189,
+          "revealed_directly": false
+        },
+        "turn": 1,
+        "updated_at": 1793772573198
+      },
+      "legal_moves": [
+        "e0f0",
+        "e2f4",
+        "e2d4",
+        "e2f0",
+        "e2d0",
+        "e2g3",
+        "e2g1",
+        "e2c3",
+        "e2c1"
+      ],
+      "source_available": false,
+      "study_name": "样本：马炮残局",
+      "themes": [
+        {
+          "theme": "king_safety",
+          "why": "走之前正被将军，这一步应将"
+        }
+      ]
+    },
+    "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000004": {
+      "card": {
+        "answer": {
+          "mv": "i9h9",
+          "notation": "车9平8"
+        },
+        "attempts": [
+          {
+            "at": 1793772572049,
+            "choice": {
+              "mv": "a6a5",
+              "notation": "卒1进1"
+            },
+            "confidence": "unsure",
+            "decision": null,
+            "elapsed_ms": 5200,
+            "goal": "recall",
+            "hints": 1,
+            "intent": "develop",
+            "marks": [],
+            "matched": false,
+            "practice": null,
+            "reflection": {
+              "changes": [
+                "1路卒向前挺进一步；本步没有吃子或将军"
+              ],
+              "checks": [
+                "这一步走的不是还在底线的车、马，也不是过河兵（卒）或中炮"
+              ],
+              "intent": "develop"
+            },
+            "request": "9b93129f-4c36-4d3d-bc7c-cbbea3f00ed6"
+          }
+        ],
+        "basis": {
+          "basis": [
+            "左车离开底线投入行动",
+            "需要注意：左车离开后，9路卒失去了保护"
+          ],
+          "budget": "quick",
+          "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772571391,
+          "generator_version": 5,
+          "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+          "level": "detailed",
+          "need": [
+            "当前没有直接威胁，主要任务是尽快出动尚在底线的车马"
+          ],
+          "replies": [
+            "对方主要应对兵三进一：挺三路兵"
+          ],
+          "summary": "车9平8：出动左车。",
+          "verdict": {
+            "delta": 8,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": []
+        },
+        "created_at": 1793772571990,
+        "due_at": 1793858972098,
+        "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R b",
+        "history": [
+          {
+            "mv": "h2e2",
+            "notation": "炮二平五"
+          },
+          {
+            "mv": "h9g7",
+            "notation": "马8进7"
+          },
+          {
+            "mv": "h0g2",
+            "notation": "马二进三"
+          }
+        ],
+        "history_complete": true,
+        "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000004",
+        "issues": [
+          "missed_threat"
+        ],
+        "kind": "move",
+        "node_id": 4,
+        "note": "没看到对方的炮",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": null,
+        "played": null,
+        "reviewed_at": 1793772572049,
+        "revision": 2,
+        "schedule_base": {
+          "at": 1793772572098,
+          "attempt_at": 1793772572049,
+          "stage": 0
+        },
+        "side": "black",
+        "stage": 0,
+        "status": "again",
+        "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+        "study_name": "样本：中炮对屏风马",
+        "targets": [],
+        "thinking": {
+          "first_choice": {
+            "mv": "a6a5",
+            "notation": "卒1进1"
+          },
+          "hints": null,
+          "hints_used": 1,
+          "matched": false,
+          "practiced_at": 1793772571979,
+          "revealed_directly": false
+        },
+        "turn": 2,
+        "updated_at": 1793772572098
+      },
+      "legal_moves": [
+        "a6a5",
+        "c6c5",
+        "e6e5",
+        "g6g5",
+        "i6i5",
+        "b7c7",
+        "b7d7",
+        "b7e7",
+        "b7f7",
+        "b7a7",
+        "b7b8",
+        "b7b6",
+        "b7b5",
+        "b7b4",
+        "b7b3",
+        "b7b0",
+        "g7h9",
+        "g7e8",
+        "h7i7",
+        "h7h8",
+        "h7h9",
+        "h7h6",
+        "h7h5",
+        "h7h4",
+        "h7h3",
+        "h7h2",
+        "h7h1",
+        "h7h0",
+        "a9a8",
+        "a9a7",
+        "b9c7",
+        "b9a7",
+        "c9e7",
+        "c9a7",
+        "d9e8",
+        "e9e8",
+        "f9e8",
+        "g9i7",
+        "g9e7",
+        "i9h9",
+        "i9i8",
+        "i9i7"
+      ],
+      "source_available": true,
+      "study_name": "样本：中炮对屏风马（复盘）",
+      "themes": [
+        {
+          "theme": "protection",
+          "why": "这一步保护了左炮"
+        }
+      ]
+    }
+  },
+  "coach": {
+    "2": {
+      "node_id": 2,
+      "reason": null,
+      "record": {
+        "error": null,
+        "generation": 1,
+        "node_id": 2,
+        "result": {
+          "audience": "beginner",
+          "cache_key": "e448d02d500e8f290525540ede9ac2cb20f3ea3ded187743145a55537a830578",
+          "claims": [
+            {
+              "certainty": "certain",
+              "evidence_ids": [
+                "f1"
+              ],
+              "group": "need",
+              "id": "c1",
+              "kind": "threat",
+              "statement": "中卒受到对方中炮攻击，且没有保护"
+            },
+            {
+              "certainty": "certain",
+              "evidence_ids": [
+                "f2"
+              ],
+              "group": "basis",
+              "id": "c2",
+              "kind": "defend",
+              "statement": "中卒原本受到中炮攻击，7路马在新位置保护了它（马腿 f7 无子）：对方中炮吃下后，7路马可以吃回"
+            },
+            {
+              "certainty": "supported",
+              "evidence_ids": [
+                "v1",
+                "v2"
+              ],
+              "group": "comparison",
+              "id": "c4",
+              "kind": "best",
+              "statement": "在当前分析中，马8进7是首选；与第二候选马2进3相差约 11 分，在当前分析预算下两者接近（马2进3的直接作用：化解中卒受攻击的问题，并出动右马）"
+            },
+            {
+              "certainty": "supported",
+              "evidence_ids": [
+                "v3"
+              ],
+              "group": "reply",
+              "id": "c5",
+              "kind": "reply",
+              "statement": "对方主要应对马二进三：出动右马，并增加对中兵的保护"
+            },
+            {
+              "certainty": "tentative",
+              "evidence_ids": [],
+              "group": "lesson",
+              "id": "c7",
+              "kind": "lesson",
+              "statement": "选择出子位置时，同时检查新增了哪些攻击和保护关系。"
+            }
+          ],
+          "created_at": 1793772572243,
+          "detail": "normal",
+          "evidence": [
+            {
+              "arrows": [
+                "e2e6"
+              ],
+              "certainty": "certain",
+              "id": "f1",
+              "kind": "fact",
+              "line": null,
+              "on": "parent",
+              "squares": [
+                "e6",
+                "e2"
+              ],
+              "text": "中卒受到对方中炮攻击，且没有保护",
+              "topic": "threat"
+            },
+            {
+              "arrows": [],
+              "certainty": "certain",
+              "id": "f2",
+              "kind": "fact",
+              "line": null,
+              "on": "parent",
+              "squares": [
+                "e6",
+                "e2"
+              ],
+              "text": "中卒原本受到中炮攻击，7路马在新位置保护了它（马腿 f7 无子）：对方中炮吃下后，7路马可以吃回",
+              "topic": "defend"
+            },
+            {
+              "arrows": [
+                "h9g7"
+              ],
+              "certainty": "supported",
+              "id": "v1",
+              "kind": "variation",
+              "line": {
+                "base": "parent",
+                "moves": [
+                  "h9g7",
+                  "h0g2",
+                  "g6g5",
+                  "b2d2",
+                  "b9c7",
+                  "b0c2"
+                ],
+                "notation": [
+                  "马8进7",
+                  "马二进三",
+                  "卒7进1",
+                  "炮八平六",
+                  "马2进3",
+                  "马八进七"
+                ]
+              },
+              "on": "parent",
+              "squares": [
+                "h9",
+                "g7"
+              ],
+              "text": "引擎首选马8进7（黑方视角评分 -23，深度 8）",
+              "topic": "best"
+            },
+            {
+              "arrows": [
+                "b9c7"
+              ],
+              "certainty": "supported",
+              "id": "v2",
+              "kind": "variation",
+              "line": {
+                "base": "parent",
+                "moves": [
+                  "b9c7",
+                  "h0g2",
+                  "h9g7",
+                  "c3c4"
+                ],
+                "notation": [
+                  "马2进3",
+                  "马二进三",
+                  "马8进7",
+                  "兵七进一"
+                ]
+              },
+              "on": "parent",
+              "squares": [
+                "b9",
+                "c7"
+              ],
+              "text": "第二候选马2进3（黑方视角评分 -34）",
+              "topic": "second"
+            },
+            {
+              "arrows": [
+                "h0g2"
+              ],
+              "certainty": "supported",
+              "id": "v3",
+              "kind": "variation",
+              "line": {
+                "base": "parent",
+                "moves": [
+                  "h9g7",
+                  "h0g2",
+                  "g6g5",
+                  "b2d2",
+                  "b9c7",
+                  "b0c2"
+                ],
+                "notation": [
+                  "马8进7",
+                  "马二进三",
+                  "卒7进1",
+                  "炮八平六",
+                  "马2进3",
+                  "马八进七"
+                ]
+              },
+              "on": "node",
+              "squares": [
+                "h0",
+                "g2"
+              ],
+              "text": "对方主要应对马二进三：出动右马，并增加对中兵的保护（主变化：马8进7 马二进三 卒7进1 炮八平六 马2进3 马八进七）",
+              "topic": "reply"
+            }
+          ],
+          "evidence_revision": "9fb71588c6ae54c713bb0870955d90540eeea2832206b8541ebbb2f80fa748da",
+          "model_label": "DeepSeek · mock-model",
+          "output": {
+            "followups": [
+              {
+                "action": "show_reply",
+                "evidence_id": "v3",
+                "label": "演示对方的应对"
+              }
+            ],
+            "lesson": {
+              "claim_ids": [
+                "c7"
+              ],
+              "text": "出子时检查新增的攻击和保护关系。"
+            },
+            "sections": [
+              {
+                "claim_ids": [
+                  "c1"
+                ],
+                "kind": "purpose",
+                "text": "开局阶段没有直接威胁，主要任务是尽快出动子力。"
+              },
+              {
+                "claim_ids": [
+                  "c2"
+                ],
+                "kind": "reason",
+                "text": "马8进7让炮来到中路，可以从中路施加压力。"
+              },
+              {
+                "claim_ids": [
+                  "c4"
+                ],
+                "kind": "comparison",
+                "text": "与其他候选的差别可以看下方的候选比较。"
+              },
+              {
+                "claim_ids": [
+                  "c5"
+                ],
+                "kind": "reply",
+                "text": "接下来要留意对方出马保护中卒。"
+              }
+            ],
+            "summary": {
+              "claim_ids": [
+                "c2"
+              ],
+              "text": "马8进7：架起中炮，开始出动子力。"
+            }
+          }
+        },
+        "state": "ready",
+        "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+        "updated_at": 1793772572245,
+        "waiting_evidence": false
+      },
+      "result_current": true,
+      "seq": 5,
+      "status": "ready",
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59"
+    }
+  },
+  "answers": [
+    {
+      "question": {
+        "kind": "difference",
+        "mine": "a0a1",
+        "node_id": 4,
+        "reference": "i0h0",
+        "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59"
+      },
+      "reason": null,
+      "record": {
+        "error": null,
+        "generation": 2,
+        "question": {
+          "kind": "difference",
+          "mine": "a0a1",
+          "node_id": 4,
+          "reference": "i0h0",
+          "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59"
+        },
+        "result": {
+          "audience": "beginner",
+          "cache_key": "91f46ae0618ffce723a3030ab89eb3d072e848ae99bce686a083a73dec518cb1",
+          "claims": [
+            {
+              "certainty": "certain",
+              "evidence_ids": [
+                "b-f2"
+              ],
+              "group": "reference",
+              "id": "c3",
+              "kind": "develop",
+              "statement": "车一平二：右车离开底线投入行动"
+            },
+            {
+              "certainty": "supported",
+              "evidence_ids": [],
+              "group": "difference",
+              "id": "c7",
+              "kind": "difference",
+              "statement": "同一次搜索中，车九进一比车一平二低约 181 分（明显不如）"
+            }
+          ],
+          "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 2 个候选 · ChineseRule · 指定着法单独分析",
+          "created_at": 1793772572658,
+          "demos": [
+            {
+              "label": "演示我的选择 车九进一",
+              "moves": [
+                "a0a1",
+                "b7b0",
+                "i0h0",
+                "b9c7",
+                "a1a0",
+                "b0d0",
+                "e0d0",
+                "a9b9"
+              ],
+              "notation": [
+                "车九进一",
+                "炮2进7",
+                "车一平二",
+                "马2进3",
+                "车九退一",
+                "炮2平4",
+                "帅五平六",
+                "车1平2"
+              ]
+            },
+            {
+              "label": "演示对照选择 车一平二",
+              "moves": [
+                "i0h0",
+                "c6c5",
+                "b0a2",
+                "b9c7",
+                "h0h4",
+                "h7i7",
+                "h4h9",
+                "g7h9"
+              ],
+              "notation": [
+                "车一平二",
+                "卒3进1",
+                "马八进九",
+                "马2进3",
+                "车二进四",
+                "炮8平9",
+                "车二进五",
+                "马7退8"
+              ]
+            }
+          ],
+          "evidence": [
+            {
+              "arrows": [
+                "i0h0"
+              ],
+              "certainty": "certain",
+              "id": "b-f2",
+              "kind": "fact",
+              "line": null,
+              "on": "node",
+              "squares": [
+                "i0",
+                "h0"
+              ],
+              "text": "右车离开底线投入行动",
+              "topic": "develop"
+            }
+          ],
+          "evidence_revision": "bafba3dc89c495c87f45d3aa8f7edfc802ceb37674515e3f7f4f3d2c9a3a0e10",
+          "model_label": "DeepSeek · mock-model",
+          "output": {
+            "answer": {
+              "claim_ids": [
+                "c7"
+              ],
+              "text": "车九进一改变了这一侧的子力关系，接下来要留意对方怎样出子。"
+            },
+            "check": "现在哪些棋子在保护中路？",
+            "points": [
+              {
+                "claim_ids": [
+                  "c3"
+                ],
+                "text": "对照选择改变了什么，可以对照下方程序给出的依据。"
+              }
+            ]
+          }
+        },
+        "state": "ready",
+        "updated_at": 1793772572659
+      },
+      "result_current": true,
+      "seq": 5,
+      "status": "ready"
+    }
+  ],
+  "status": {
+    "version": "0.3.0",
+    "config": {
+      "analysis": {
+        "auto_explain": true,
+        "deep_depth": 10,
+        "deep_time_ms": 30000,
+        "deepen_unsettled": true,
+        "multipv": 3,
+        "quick_depth": 8,
+        "quick_time_ms": 20000,
+        "repetition_rule": "ChineseRule",
+        "sixty_move_rule": true
+      },
+      "capture": {
+        "confidence_threshold": 0.800000011920929,
+        "interval_ms": 150,
+        "model": null,
+        "stable_frames": 3,
+        "unexplained_frames": 6
+      },
+      "cloud": {
+        "enabled": false,
+        "timeout_ms": 5000
+      },
+      "coach": {
+        "audience": "beginner",
+        "auto_explain_scope": "off",
+        "base_url": "http://127.0.0.1:37413",
+        "credential_ref": "store:coach",
+        "daily_request_budget": 200,
+        "detail": "normal",
+        "enabled": true,
+        "max_output_tokens": 1500,
+        "max_parallel_requests": 2,
+        "model": "mock-model",
+        "provider": "deepseek",
+        "timeout_ms": 60000
+      },
+      "engine": {
+        "binary": null,
+        "hash_mb": 32,
+        "nnue": null,
+        "threads": 1
+      },
+      "log_level": "info",
+      "review": {
+        "backup_keep": 7,
+        "intervals_days": [
+          1,
+          3,
+          7,
+          14,
+          30
+        ]
+      },
+      "version": 1
+    }
+  },
+  "list_studies": [
+    {
+      "created_at": 1793772571220,
+      "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "moves": 13,
+      "name": "样本：中炮对屏风马（复盘）",
+      "root_fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+      "source": "record",
+      "updated_at": 1793772573462
+    },
+    {
+      "created_at": 1793772573363,
+      "id": "54263c05-43c6-4f17-a5ba-ed70917923b3",
+      "moves": 2,
+      "name": "样本：执黑练习",
+      "root_fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+      "source": "standard",
+      "updated_at": 1793772573415
+    }
+  ],
+  "list_reviews": [
+    {
+      "card": {
+        "answer": {
+          "mv": "b9c7",
+          "notation": "马2进3"
+        },
+        "attempts": [
+          {
+            "at": 1793772572110,
+            "choice": {
+              "mv": "b9c7",
+              "notation": "马2进3"
+            },
+            "confidence": "sure",
+            "decision": {
+              "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 2 个候选 · ChineseRule · 指定着法单独分析",
+              "error": null,
+              "points": [
+                "同一次搜索中，马2进3与卒7进1评分接近（相差约 0 分）"
+              ],
+              "reference": {
+                "mv": "b9c7",
+                "notation": "马2进3"
+              },
+              "stability": "medium",
+              "state": "ready",
+              "support": "supported",
+              "verdict": "same_as_record"
+            },
+            "elapsed_ms": 8100,
+            "goal": "decision",
+            "hints": 0,
+            "intent": "capture",
+            "marks": [],
+            "matched": true,
+            "practice": null,
+            "reflection": {
+              "changes": [
+                "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+                "右马离开底线投入行动"
+              ],
+              "checks": [
+                "这一步没有吃子"
+              ],
+              "intent": "capture"
+            },
+            "request": "56a29d4a-c380-451e-b019-54ae82e686f5"
+          },
+          {
+            "at": 1793772573353,
+            "choice": {
+              "mv": "b9c7",
+              "notation": "马2进3"
+            },
+            "confidence": "guess",
+            "decision": null,
+            "elapsed_ms": 3000,
+            "goal": "recall",
+            "hints": 0,
+            "intent": null,
+            "marks": [],
+            "matched": true,
+            "practice": "588637b5-7648-4f53-a74e-977da87afde2",
+            "reflection": {
+              "changes": [
+                "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+                "右马离开底线投入行动"
+              ],
+              "checks": [],
+              "intent": null
+            },
+            "request": "0b695dde-3259-459e-a906-831385aca710"
+          }
+        ],
+        "basis": {
+          "basis": [
+            "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+            "右马离开底线投入行动"
+          ],
+          "budget": "quick",
+          "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772571427,
+          "generator_version": 5,
+          "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+          "level": "detailed",
+          "need": [
+            "当前没有直接威胁，主要任务是尽快出动尚在底线的车马"
+          ],
+          "replies": [
+            "对方主要应对兵七进一：挺七路兵"
+          ],
+          "summary": "马2进3：出动右马，并增加对中卒的保护。",
+          "verdict": {
+            "delta": 7,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": []
+        },
+        "created_at": 1793772572039,
+        "due_at": 1793772572039,
+        "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 b",
+        "history": [
+          {
+            "mv": "h2e2",
+            "notation": "炮二平五"
+          },
+          {
+            "mv": "h9g7",
+            "notation": "马8进7"
+          },
+          {
+            "mv": "h0g2",
+            "notation": "马二进三"
+          },
+          {
+            "mv": "i9h9",
+            "notation": "车9平8"
+          },
+          {
+            "mv": "i0h0",
+            "notation": "车一平二"
+          }
+        ],
+        "history_complete": true,
+        "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006",
+        "issues": [],
+        "kind": "move",
+        "node_id": 6,
+        "note": "",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": null,
+        "played": null,
+        "reviewed_at": 1793772573353,
+        "revision": 3,
+        "schedule_base": null,
+        "side": "black",
+        "stage": 0,
+        "status": "due",
+        "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+        "study_name": "样本：中炮对屏风马",
+        "targets": [],
+        "thinking": null,
+        "turn": 3,
+        "updated_at": 1793772573353
+      },
+      "source_available": true,
+      "study_name": "样本：中炮对屏风马（复盘）",
+      "themes": [
+        {
+          "theme": "protection",
+          "why": "这一步保护了士和中卒"
+        }
+      ]
+    },
+    {
+      "card": {
+        "answer": {
+          "mv": "e2c3",
+          "notation": "马五进七"
+        },
+        "attempts": [],
+        "basis": {
+          "basis": [
+            "中马原本是中炮与帅之间唯一的炮架，移开后炮无法再隔子将军"
+          ],
+          "budget": "deep",
+          "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772572972,
+          "generator_version": 5,
+          "lesson": "被将军时比较三种应将方式：动将、垫子、吃掉将军的棋子，并看应将后哪些棋子更安全。",
+          "level": "detailed",
+          "need": [
+            "红方正被将军，必须先应将"
+          ],
+          "replies": [
+            "对方主要应对将4进1：动将"
+          ],
+          "summary": "马五进七：移开炮架解将。",
+          "verdict": {
+            "delta": 2,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": [
+            "此前的着法历史不完整，长将、长捉等依赖历史的判定可能不准确",
+            "最近几个深度首选仍在变化，这里的评价只因差距较大才给出"
+          ]
+        },
+        "created_at": 1793772573195,
+        "due_at": 1793772573195,
+        "fen": "3k5/9/4c4/9/9/9/9/4N4/9/4K4 w",
+        "history": [],
+        "history_complete": false,
+        "id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001/threat",
+        "issues": [],
+        "kind": "threat",
+        "node_id": 1,
+        "note": "",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": "第 1 回合：走这一步之前有 1 处受到威胁，先想后讲中没有选对",
+        "played": null,
+        "reviewed_at": null,
+        "revision": 0,
+        "schedule_base": null,
+        "side": "red",
+        "stage": 0,
+        "status": "due",
+        "study_id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8",
+        "study_name": "样本：马炮残局",
+        "targets": [
+          "e7"
+        ],
+        "thinking": {
+          "first_choice": {
+            "mv": "e0f0",
+            "notation": "帅五平四"
+          },
+          "hints": null,
+          "hints_used": 0,
+          "matched": false,
+          "practiced_at": 1793772573189,
+          "revealed_directly": false
+        },
+        "turn": 1,
+        "updated_at": 1793772573195
+      },
+      "source_available": false,
+      "study_name": "样本：马炮残局",
+      "themes": [
+        {
+          "theme": "king_safety",
+          "why": "走之前正被将军，这一步应将"
+        }
+      ]
+    },
+    {
+      "card": {
+        "answer": {
+          "mv": "e2c3",
+          "notation": "马五进七"
+        },
+        "attempts": [],
+        "basis": {
+          "basis": [
+            "中马原本是中炮与帅之间唯一的炮架，移开后炮无法再隔子将军"
+          ],
+          "budget": "deep",
+          "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772572972,
+          "generator_version": 5,
+          "lesson": "被将军时比较三种应将方式：动将、垫子、吃掉将军的棋子，并看应将后哪些棋子更安全。",
+          "level": "detailed",
+          "need": [
+            "红方正被将军，必须先应将"
+          ],
+          "replies": [
+            "对方主要应对将4进1：动将"
+          ],
+          "summary": "马五进七：移开炮架解将。",
+          "verdict": {
+            "delta": 2,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": [
+            "此前的着法历史不完整，长将、长捉等依赖历史的判定可能不准确",
+            "最近几个深度首选仍在变化，这里的评价只因差距较大才给出"
+          ]
+        },
+        "created_at": 1793772573198,
+        "due_at": 1793772573198,
+        "fen": "3k5/9/4c4/9/9/9/9/4N4/9/4K4 w",
+        "history": [],
+        "history_complete": false,
+        "id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001",
+        "issues": [],
+        "kind": "move",
+        "node_id": 1,
+        "note": "",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": null,
+        "played": null,
+        "reviewed_at": null,
+        "revision": 0,
+        "schedule_base": null,
+        "side": "red",
+        "stage": 0,
+        "status": "due",
+        "study_id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8",
+        "study_name": "样本：马炮残局",
+        "targets": [],
+        "thinking": {
+          "first_choice": {
+            "mv": "e0f0",
+            "notation": "帅五平四"
+          },
+          "hints": null,
+          "hints_used": 0,
+          "matched": false,
+          "practiced_at": 1793772573189,
+          "revealed_directly": false
+        },
+        "turn": 1,
+        "updated_at": 1793772573198
+      },
+      "source_available": false,
+      "study_name": "样本：马炮残局",
+      "themes": [
+        {
+          "theme": "king_safety",
+          "why": "走之前正被将军，这一步应将"
+        }
+      ]
+    },
+    {
+      "card": {
+        "answer": {
+          "mv": "i9h9",
+          "notation": "车9平8"
+        },
+        "attempts": [
+          {
+            "at": 1793772572049,
+            "choice": {
+              "mv": "a6a5",
+              "notation": "卒1进1"
+            },
+            "confidence": "unsure",
+            "decision": null,
+            "elapsed_ms": 5200,
+            "goal": "recall",
+            "hints": 1,
+            "intent": "develop",
+            "marks": [],
+            "matched": false,
+            "practice": null,
+            "reflection": {
+              "changes": [
+                "1路卒向前挺进一步；本步没有吃子或将军"
+              ],
+              "checks": [
+                "这一步走的不是还在底线的车、马，也不是过河兵（卒）或中炮"
+              ],
+              "intent": "develop"
+            },
+            "request": "9b93129f-4c36-4d3d-bc7c-cbbea3f00ed6"
+          }
+        ],
+        "basis": {
+          "basis": [
+            "左车离开底线投入行动",
+            "需要注意：左车离开后，9路卒失去了保护"
+          ],
+          "budget": "quick",
+          "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+          "explained_at": 1793772571391,
+          "generator_version": 5,
+          "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+          "level": "detailed",
+          "need": [
+            "当前没有直接威胁，主要任务是尽快出动尚在底线的车马"
+          ],
+          "replies": [
+            "对方主要应对兵三进一：挺三路兵"
+          ],
+          "summary": "车9平8：出动左车。",
+          "verdict": {
+            "delta": 8,
+            "label": "与首选接近",
+            "note": "",
+            "tone": "close"
+          },
+          "warnings": []
+        },
+        "created_at": 1793772571990,
+        "due_at": 1793858972098,
+        "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R b",
+        "history": [
+          {
+            "mv": "h2e2",
+            "notation": "炮二平五"
+          },
+          {
+            "mv": "h9g7",
+            "notation": "马8进7"
+          },
+          {
+            "mv": "h0g2",
+            "notation": "马二进三"
+          }
+        ],
+        "history_complete": true,
+        "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000004",
+        "issues": [
+          "missed_threat"
+        ],
+        "kind": "move",
+        "node_id": 4,
+        "note": "没看到对方的炮",
+        "options": [],
+        "orientation": "red_bottom",
+        "origin": null,
+        "played": null,
+        "reviewed_at": 1793772572049,
+        "revision": 2,
+        "schedule_base": {
+          "at": 1793772572098,
+          "attempt_at": 1793772572049,
+          "stage": 0
+        },
+        "side": "black",
+        "stage": 0,
+        "status": "again",
+        "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+        "study_name": "样本：中炮对屏风马",
+        "targets": [],
+        "thinking": {
+          "first_choice": {
+            "mv": "a6a5",
+            "notation": "卒1进1"
+          },
+          "hints": null,
+          "hints_used": 1,
+          "matched": false,
+          "practiced_at": 1793772571979,
+          "revealed_directly": false
+        },
+        "turn": 2,
+        "updated_at": 1793772572098
+      },
+      "source_available": true,
+      "study_name": "样本：中炮对屏风马（复盘）",
+      "themes": [
+        {
+          "theme": "protection",
+          "why": "这一步保护了左炮"
+        }
+      ]
+    }
+  ],
+  "learning_events": [
+    {
+      "at": 1793772573189,
+      "card": null,
+      "confidence": null,
+      "elapsed_ms": null,
+      "fen": "3k5/9/4c4/9/9/9/9/4N4/9/4K4 w",
+      "goal": "recall",
+      "hints": 0,
+      "id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001/think/1793772573189",
+      "intent": null,
+      "issues": [],
+      "kind": "move",
+      "node_id": 1,
+      "outcome": "missed",
+      "practice": null,
+      "source": "think",
+      "stability": null,
+      "study_id": "937666fc-64bb-48dd-a4a1-21f62c1f3ed8",
+      "themes": [
+        "king_safety"
+      ]
+    },
+    {
+      "at": 1793772572049,
+      "card": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000004",
+      "confidence": "unsure",
+      "elapsed_ms": 5200,
+      "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R b",
+      "goal": "recall",
+      "hints": 1,
+      "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000004/1793772572049",
+      "intent": "develop",
+      "issues": [],
+      "kind": "move",
+      "node_id": 4,
+      "outcome": "missed",
+      "practice": null,
+      "source": "review",
+      "stability": null,
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "themes": [
+        "protection"
+      ]
+    },
+    {
+      "at": 1793772571979,
+      "card": null,
+      "confidence": null,
+      "elapsed_ms": null,
+      "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R b",
+      "goal": "recall",
+      "hints": 1,
+      "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000004/think/1793772571979",
+      "intent": null,
+      "issues": [],
+      "kind": "move",
+      "node_id": 4,
+      "outcome": "missed",
+      "practice": null,
+      "source": "think",
+      "stability": null,
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "themes": [
+        "protection"
+      ]
+    },
+    {
+      "at": 1793772572110,
+      "card": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006",
+      "confidence": "sure",
+      "elapsed_ms": 8100,
+      "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 b",
+      "goal": "decision",
+      "hints": 0,
+      "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006/1793772572110",
+      "intent": "capture",
+      "issues": [],
+      "kind": "move",
+      "node_id": 6,
+      "outcome": "independent",
+      "practice": null,
+      "source": "review",
+      "stability": "medium",
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "themes": [
+        "protection"
+      ]
+    },
+    {
+      "at": 1793772573353,
+      "card": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006",
+      "confidence": "guess",
+      "elapsed_ms": 3000,
+      "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 b",
+      "goal": "recall",
+      "hints": 0,
+      "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006/1793772573353",
+      "intent": null,
+      "issues": [],
+      "kind": "move",
+      "node_id": 6,
+      "outcome": "independent",
+      "practice": "588637b5-7648-4f53-a74e-977da87afde2",
+      "source": "review",
+      "stability": null,
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "themes": [
+        "protection"
+      ]
+    }
+  ],
+  "current_practice": {
+    "cards": [
+      "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59/0000000006",
+      "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001/threat",
+      "937666fc-64bb-48dd-a4a1-21f62c1f3ed8/0000000001"
+    ],
+    "finished_at": null,
+    "goal": "recall",
+    "id": "588637b5-7648-4f53-a74e-977da87afde2",
+    "index": 1,
+    "label": "今日练习",
+    "revision": 1,
+    "skipped": [],
+    "source": "today",
+    "started_at": 1793772573299,
+    "topic": null,
+    "updated_at": 1793772573361
+  },
+  "learning_profile": {
+    "answered": 5,
+    "enough": true,
+    "generated_at": 1793772578446,
+    "mastery": [
+      {
+        "text": "“保护关系变化”：独立选对 2 次（1 个不同局面），其中 1 次是同一局面当天重复作答；隔天以后再做时选对 0 次，还需要隔天再检验。",
+        "theme": "protection"
+      }
+    ],
+    "note": null,
+    "phases": [
+      {
+        "label": "开局",
+        "phase": "opening",
+        "recent": {
+          "answered": 4,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 2,
+          "missed": 2,
+          "revealed": 0
+        }
+      },
+      {
+        "label": "中局",
+        "phase": "middlegame",
+        "recent": {
+          "answered": 0,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 0,
+          "revealed": 0
+        }
+      },
+      {
+        "label": "残局",
+        "phase": "endgame",
+        "recent": {
+          "answered": 1,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 1,
+          "revealed": 0
+        }
+      }
+    ],
+    "recommendation": null,
+    "themes": [
+      {
+        "all": {
+          "answered": 1,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 1,
+          "revealed": 0
+        },
+        "cards": 2,
+        "label": "应将与将帅安全",
+        "positions": 0,
+        "recent": {
+          "answered": 1,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 1,
+          "revealed": 0
+        },
+        "repeated": 0,
+        "spaced": 0,
+        "theme": "king_safety"
+      },
+      {
+        "all": {
+          "answered": 0,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 0,
+          "revealed": 0
+        },
+        "cards": 0,
+        "label": "受攻击棋子的处理",
+        "positions": 0,
+        "recent": {
+          "answered": 0,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 0,
+          "revealed": 0
+        },
+        "repeated": 0,
+        "spaced": 0,
+        "theme": "threatened"
+      },
+      {
+        "all": {
+          "answered": 4,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 2,
+          "missed": 2,
+          "revealed": 0
+        },
+        "cards": 2,
+        "label": "保护关系变化",
+        "positions": 1,
+        "recent": {
+          "answered": 4,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 2,
+          "missed": 2,
+          "revealed": 0
+        },
+        "repeated": 1,
+        "spaced": 0,
+        "theme": "protection"
+      },
+      {
+        "all": {
+          "answered": 0,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 0,
+          "revealed": 0
+        },
+        "cards": 0,
+        "label": "炮架与线路变化",
+        "positions": 0,
+        "recent": {
+          "answered": 0,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 0,
+          "revealed": 0
+        },
+        "repeated": 0,
+        "spaced": 0,
+        "theme": "lines"
+      },
+      {
+        "all": {
+          "answered": 0,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 0,
+          "revealed": 0
+        },
+        "cards": 0,
+        "label": "吃子后的回吃关系",
+        "positions": 0,
+        "recent": {
+          "answered": 0,
+          "assisted": 0,
+          "confident_misses": 0,
+          "independent": 0,
+          "missed": 0,
+          "revealed": 0
+        },
+        "repeated": 0,
+        "spaced": 0,
+        "theme": "recapture"
+      }
+    ],
+    "weaknesses": []
+  },
+  "game_report": {
+    "detailed": 12,
+    "good_choices": [],
+    "key_positions": [
+      {
+        "label": "第 2 回合 · 红方 马二进三",
+        "node_id": 3,
+        "ply": 3,
+        "reasons": [
+          "收藏"
+        ],
+        "review": null,
+        "summary": "马二进三：出动右马，并增加对中兵的保护。"
+      }
+    ],
+    "moves": 12,
+    "notes": [
+      "评价只比较每一着自己的候选（同一次搜索、同一视角），不同局面之间的评分不直接相减。",
+      "这盘棋中达到条件的关键局面只有 1 处。"
+    ],
+    "practice": {
+      "hinted": 1,
+      "matched": 0,
+      "practiced": 1,
+      "revealed": 0
+    },
+    "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+    "study_name": "样本：中炮对屏风马（复盘）",
+    "to_recheck": []
+  },
+  "backup_info": {
+    "dir": "/home/qmz/projects/chessboard/server/crates/xq-app/tests/history/v0.3.0/home/data/backups",
+    "files": [
+      {
+        "modified_at": 1793772578188,
+        "name": "xqlink-archive-2026-11-04.json",
+        "size": 84473
+      }
+    ],
+    "keep": 7
+  },
+  "read_at": 1793772578592
+}

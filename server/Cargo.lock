@@ -6515,6 +6515,7 @@ dependencies = [
  "tracing",
  "ts-rs",
  "uuid",
+ "xq-app",
  "xq-core",
 ]
 

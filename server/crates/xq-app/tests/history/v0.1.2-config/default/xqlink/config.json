@@ -1,0 +1,14 @@
+{
+  "loglevel": "INFO",
+  "timer_interval": 100,
+  "confirm_interval": 200,
+  "engine": {
+    "depth": 20,
+    "time": 5000,
+    "threads": 4,
+    "hash": 64,
+    "show_wdl": false,
+    "chessdb_enabled": true,
+    "chessdb_timeout": 5
+  }
+}

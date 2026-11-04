@@ -1,0 +1,2 @@
+# 历史数据样本按原样保存：不转换换行，也不按文本合并（校验值见 tests/history/SHA256SUMS）
+server/crates/xq-app/tests/history/** -text -diff

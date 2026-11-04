@@ -1,0 +1,4682 @@
+{
+  "format": "xqlink-study",
+  "version": 1,
+  "app_version": "0.3.0",
+  "exported_at": 1793772578172,
+  "study": {
+    "format_version": 1,
+    "id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+    "name": "样本：中炮对屏风马（复盘）",
+    "created_at": 1793772571220,
+    "updated_at": 1793772573462,
+    "source": "record",
+    "root_fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+    "history_complete": true,
+    "orientation": "red_bottom",
+    "user_side": "red",
+    "rules": {
+      "repetition_rule": "ChineseRule",
+      "sixty_move_rule": true
+    },
+    "nodes": {
+      "0": {
+        "id": 0,
+        "parent": null,
+        "children": [
+          1
+        ],
+        "mv": null,
+        "notation": null,
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+        "side_to_move": "red",
+        "ply": 0,
+        "source": "user",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571220
+      },
+      "1": {
+        "id": 1,
+        "parent": 0,
+        "children": [
+          2,
+          13
+        ],
+        "mv": "h2e2",
+        "notation": "炮二平五",
+        "fen": "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR b",
+        "side_to_move": "black",
+        "ply": 1,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571221
+      },
+      "2": {
+        "id": 2,
+        "parent": 1,
+        "children": [
+          3
+        ],
+        "mv": "h9g7",
+        "notation": "马8进7",
+        "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w",
+        "side_to_move": "red",
+        "ply": 2,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571221
+      },
+      "3": {
+        "id": 3,
+        "parent": 2,
+        "children": [
+          4
+        ],
+        "mv": "h0g2",
+        "notation": "马二进三",
+        "fen": "rnbakab1r/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R b",
+        "side_to_move": "black",
+        "ply": 3,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "这里要注意中路",
+        "starred": true,
+        "practice": null,
+        "created_at": 1793772571221
+      },
+      "4": {
+        "id": 4,
+        "parent": 3,
+        "children": [
+          5
+        ],
+        "mv": "i9h9",
+        "notation": "车9平8",
+        "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKAB1R w",
+        "side_to_move": "red",
+        "ply": 4,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": {
+          "hints_used": 1,
+          "revealed_directly": false,
+          "first_choice": "a6a5",
+          "matched": false,
+          "sessions": 1,
+          "hints": null,
+          "updated_at": 1793772571979
+        },
+        "created_at": 1793772571221
+      },
+      "5": {
+        "id": 5,
+        "parent": 4,
+        "children": [
+          6
+        ],
+        "mv": "i0h0",
+        "notation": "车一平二",
+        "fen": "rnbakabr1/9/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 b",
+        "side_to_move": "black",
+        "ply": 5,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "6": {
+        "id": 6,
+        "parent": 5,
+        "children": [
+          7
+        ],
+        "mv": "b9c7",
+        "notation": "马2进3",
+        "fen": "r1bakabr1/9/1cn3nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C1N2/9/RNBAKABR1 w",
+        "side_to_move": "red",
+        "ply": 6,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "7": {
+        "id": 7,
+        "parent": 6,
+        "children": [
+          8
+        ],
+        "mv": "c3c4",
+        "notation": "兵七进一",
+        "fen": "r1bakabr1/9/1cn3nc1/p1p1p1p1p/9/2P6/P3P1P1P/1C2C1N2/9/RNBAKABR1 b",
+        "side_to_move": "black",
+        "ply": 7,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "8": {
+        "id": 8,
+        "parent": 7,
+        "children": [
+          9
+        ],
+        "mv": "g6g5",
+        "notation": "卒7进1",
+        "fen": "r1bakabr1/9/1cn3nc1/p1p1p3p/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKABR1 w",
+        "side_to_move": "red",
+        "ply": 8,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "9": {
+        "id": 9,
+        "parent": 8,
+        "children": [
+          10
+        ],
+        "mv": "h0h6",
+        "notation": "车二进六",
+        "fen": "r1bakabr1/9/1cn3nc1/p1p1p2Rp/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 b",
+        "side_to_move": "black",
+        "ply": 9,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "10": {
+        "id": 10,
+        "parent": 9,
+        "children": [
+          11
+        ],
+        "mv": "h7i7",
+        "notation": "炮8平9",
+        "fen": "r1bakabr1/9/1cn3n1c/p1p1p2Rp/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 w",
+        "side_to_move": "red",
+        "ply": 10,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "11": {
+        "id": 11,
+        "parent": 10,
+        "children": [
+          12
+        ],
+        "mv": "h6g6",
+        "notation": "车二平三",
+        "fen": "r1bakabr1/9/1cn3n1c/p1p1p1R1p/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 b",
+        "side_to_move": "black",
+        "ply": 11,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "12": {
+        "id": 12,
+        "parent": 11,
+        "children": [],
+        "mv": "i7i8",
+        "notation": "炮9退1",
+        "fen": "r1bakabr1/8c/1cn3n2/p1p1p1R1p/6p2/2P6/P3P1P1P/1C2C1N2/9/RNBAKAB2 w",
+        "side_to_move": "red",
+        "ply": 12,
+        "source": "record",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571222
+      },
+      "13": {
+        "id": 13,
+        "parent": 1,
+        "children": [],
+        "mv": "a6a5",
+        "notation": "卒1进1",
+        "fen": "rnbakabnr/9/1c5c1/2p1p1p1p/p8/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w",
+        "side_to_move": "red",
+        "ply": 2,
+        "source": "variation",
+        "gap": false,
+        "gap_reason": null,
+        "note": "",
+        "starred": false,
+        "practice": null,
+        "created_at": 1793772571742
+      }
+    },
+    "next_id": 15,
+    "revision": 20,
+    "live_node": null
+  },
+  "explanations": [
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 1,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "red",
+        "mv": "h2e2",
+        "notation": "炮二平五",
+        "summary": "炮二平五：架中炮，并攻击对方无保护的中卒。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "中炮在新位置攻击对方中卒，该子没有保护",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "炮移到中路，正对对方中路（通常配合车马进攻中路）",
+            "evidence": [
+              "p2"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "当前深度的首选是炮八平五（架中炮，并攻击对方无保护的中卒）；炮二平五比它低约 6 分，与首选接近",
+            "evidence": [
+              "v1"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对马8进7：化解中卒受攻击的问题，并出动左马",
+            "evidence": [
+              "v2"
+            ]
+          }
+        ],
+        "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+        "verdict": {
+          "tone": "close",
+          "label": "与首选接近",
+          "delta": 6,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "b2e2",
+            "notation": "炮八平五",
+            "score": {
+              "kind": "cp",
+              "value": 30
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "b2e2",
+              "b9c7",
+              "c3c4",
+              "h7e7",
+              "b0c2",
+              "h9g7",
+              "h0i2",
+              "i9h9",
+              "i0h0",
+              "a9b9"
+            ],
+            "pv_notation": [
+              "炮八平五",
+              "马2进3",
+              "兵七进一",
+              "炮8平5",
+              "马八进七",
+              "马8进7",
+              "马二进一",
+              "车9平8",
+              "车一平二",
+              "车1平2"
+            ],
+            "rank": 1,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "架中炮，并攻击对方无保护的中卒"
+          },
+          {
+            "mv": "h2e2",
+            "notation": "炮二平五",
+            "score": {
+              "kind": "cp",
+              "value": 24
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "h2e2",
+              "h9g7",
+              "h0g2",
+              "i9h9",
+              "i0h0",
+              "c6c5",
+              "b0a2",
+              "b9c7",
+              "b2c2"
+            ],
+            "pv_notation": [
+              "炮二平五",
+              "马8进7",
+              "马二进三",
+              "车9平8",
+              "车一平二",
+              "卒3进1",
+              "马八进九",
+              "马2进3",
+              "炮八平七"
+            ],
+            "rank": 2,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "架中炮，并攻击对方无保护的中卒"
+          },
+          {
+            "mv": "h0g2",
+            "notation": "马二进三",
+            "score": {
+              "kind": "cp",
+              "value": 22
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "h0g2",
+              "b9c7",
+              "g3g4",
+              "c6c5",
+              "c0e2",
+              "c9e7"
+            ],
+            "pv_notation": [
+              "马二进三",
+              "马2进3",
+              "兵三进一",
+              "卒3进1",
+              "相七进五",
+              "象3进5"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "出动右马，并增加对中兵的保护"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "左车、左马、右马和右车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "attack",
+            "text": "中炮在新位置攻击对方中卒，该子没有保护",
+            "squares": [
+              "e2",
+              "e6"
+            ],
+            "arrows": [
+              "e2e6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "p2",
+            "kind": "positional",
+            "topic": "develop",
+            "text": "炮移到中路，正对对方中路（通常配合车马进攻中路）",
+            "squares": [
+              "h2",
+              "e2"
+            ],
+            "arrows": [
+              "h2e2"
+            ],
+            "line": null,
+            "certainty": "tentative",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "当前深度的首选炮八平五（红方视角评分 +30，深度 10）",
+            "squares": [
+              "b2",
+              "e2"
+            ],
+            "arrows": [
+              "b2e2"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "b2e2",
+                "b9c7",
+                "c3c4",
+                "h7e7",
+                "b0c2",
+                "h9g7",
+                "h0i2",
+                "i9h9",
+                "i0h0",
+                "a9b9"
+              ],
+              "notation": [
+                "炮八平五",
+                "马2进3",
+                "兵七进一",
+                "炮8平5",
+                "马八进七",
+                "马8进7",
+                "马二进一",
+                "车9平8",
+                "车一平二",
+                "车1平2"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对马8进7：化解中卒受攻击的问题，并出动左马（主变化：炮二平五 马8进7 马二进三 车9平8 车一平二 卒3进1 马八进九 马2进3 炮八平七）",
+            "squares": [
+              "h9",
+              "g7"
+            ],
+            "arrows": [
+              "h9g7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h2e2",
+                "h9g7",
+                "h0g2",
+                "i9h9",
+                "i0h0",
+                "c6c5",
+                "b0a2",
+                "b9c7",
+                "b2c2"
+              ],
+              "notation": [
+                "炮二平五",
+                "马8进7",
+                "马二进三",
+                "车9平8",
+                "车一平二",
+                "卒3进1",
+                "马八进九",
+                "马2进3",
+                "炮八平七"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [
+          "最近几个深度首选仍在变化，这里的评价只因差距较大才给出"
+        ],
+        "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "shifting",
+          "reasons": [
+            "深度 7–10 中首选在兵七进一、炮二平五、炮八平五之间变化了 2 次"
+          ],
+          "depths": [
+            7,
+            10
+          ]
+        }
+      },
+      "budget": "deep",
+      "conditions_key": "e838804d0cbaa917889d0186fcc8577520108644c8ab376261ce26261de345c6",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571566
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 2,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "black",
+        "mv": "h9g7",
+        "notation": "马8进7",
+        "summary": "马8进7：化解中卒受攻击的问题，并出动左马。",
+        "need": [
+          {
+            "text": "中卒受到对方中炮攻击，且没有保护",
+            "evidence": [
+              "f1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "中卒原本受到中炮攻击，7路马在新位置保护了它（马腿 f7 无子）：对方中炮吃下后，7路马可以吃回",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "左马离开底线投入行动",
+            "evidence": [
+              "f3"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，马8进7是首选；与第二候选马2进3相差约 11 分，在当前分析预算下两者接近（马2进3的直接作用：化解中卒受攻击的问题，并出动右马）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对马二进三：出动右马，并增加对中兵的保护",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "h9g7",
+            "notation": "马8进7",
+            "score": {
+              "kind": "cp",
+              "value": -23
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h9g7",
+              "h0g2",
+              "g6g5",
+              "b2d2",
+              "b9c7",
+              "b0c2"
+            ],
+            "pv_notation": [
+              "马8进7",
+              "马二进三",
+              "卒7进1",
+              "炮八平六",
+              "马2进3",
+              "马八进七"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "化解中卒受攻击的问题，并出动左马"
+          },
+          {
+            "mv": "b9c7",
+            "notation": "马2进3",
+            "score": {
+              "kind": "cp",
+              "value": -34
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b9c7",
+              "h0g2",
+              "h9g7",
+              "c3c4"
+            ],
+            "pv_notation": [
+              "马2进3",
+              "马二进三",
+              "马8进7",
+              "兵七进一"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "化解中卒受攻击的问题，并出动右马"
+          },
+          {
+            "mv": "b7e7",
+            "notation": "炮2平5",
+            "score": {
+              "kind": "cp",
+              "value": -41
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b7e7",
+              "h0g2",
+              "h9g7",
+              "i0h0",
+              "i9h9",
+              "b0c2"
+            ],
+            "pv_notation": [
+              "炮2平5",
+              "马二进三",
+              "马8进7",
+              "车一平二",
+              "车9平8",
+              "马八进七"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "架中炮，并攻击对方无保护的中兵"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "threat",
+            "text": "中卒受到对方中炮攻击，且没有保护",
+            "squares": [
+              "e6",
+              "e2"
+            ],
+            "arrows": [
+              "e2e6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "defend",
+            "text": "中卒原本受到中炮攻击，7路马在新位置保护了它（马腿 f7 无子）：对方中炮吃下后，7路马可以吃回",
+            "squares": [
+              "e6",
+              "e2"
+            ],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "develop",
+            "text": "左马离开底线投入行动",
+            "squares": [
+              "h9",
+              "g7"
+            ],
+            "arrows": [
+              "h9g7"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选马8进7（黑方视角评分 -23，深度 8）",
+            "squares": [
+              "h9",
+              "g7"
+            ],
+            "arrows": [
+              "h9g7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h9g7",
+                "h0g2",
+                "g6g5",
+                "b2d2",
+                "b9c7",
+                "b0c2"
+              ],
+              "notation": [
+                "马8进7",
+                "马二进三",
+                "卒7进1",
+                "炮八平六",
+                "马2进3",
+                "马八进七"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选马2进3（黑方视角评分 -34）",
+            "squares": [
+              "b9",
+              "c7"
+            ],
+            "arrows": [
+              "b9c7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "b9c7",
+                "h0g2",
+                "h9g7",
+                "c3c4"
+              ],
+              "notation": [
+                "马2进3",
+                "马二进三",
+                "马8进7",
+                "兵七进一"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对马二进三：出动右马，并增加对中兵的保护（主变化：马8进7 马二进三 卒7进1 炮八平六 马2进3 马八进七）",
+            "squares": [
+              "h0",
+              "g2"
+            ],
+            "arrows": [
+              "h0g2"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h9g7",
+                "h0g2",
+                "g6g5",
+                "b2d2",
+                "b9c7",
+                "b0c2"
+              ],
+              "notation": [
+                "马8进7",
+                "马二进三",
+                "卒7进1",
+                "炮八平六",
+                "马2进3",
+                "马八进七"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "medium",
+          "reasons": [
+            "深度 5–8 中前几名的次序变化了 2 次"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "6ec47a82ea7be12d9fc9f1d8ba92b0cfe3498361cfd6b1cfcaa19a5f7336c4b9",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571357
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 3,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "red",
+        "mv": "h0g2",
+        "notation": "马二进三",
+        "summary": "马二进三：出动右马，并增加对中兵的保护。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "三路马在新位置保护中兵（马腿 f2 无子），该子此前没有保护",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "右马离开底线投入行动",
+            "evidence": [
+              "f3"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，马二进三是首选；与第二候选兵三进一相差约 8 分，在当前分析预算下两者接近（兵三进一的直接作用：挺三路兵）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对车9平8：出动左车",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "h0g2",
+            "notation": "马二进三",
+            "score": {
+              "kind": "cp",
+              "value": 29
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "h0g2",
+              "i9h9",
+              "i0h0",
+              "g6g5"
+            ],
+            "pv_notation": [
+              "马二进三",
+              "车9平8",
+              "车一平二",
+              "卒7进1"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "出动右马，并增加对中兵的保护"
+          },
+          {
+            "mv": "g3g4",
+            "notation": "兵三进一",
+            "score": {
+              "kind": "cp",
+              "value": 21
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "g3g4",
+              "b7e7",
+              "b0c2",
+              "b9c7",
+              "a0b0",
+              "a9b9",
+              "h0g2",
+              "b9b5",
+              "i0h0",
+              "i9h9"
+            ],
+            "pv_notation": [
+              "兵三进一",
+              "炮2平5",
+              "马八进七",
+              "马2进3",
+              "车九平八",
+              "车1平2",
+              "马二进三",
+              "车2进4",
+              "车一平二",
+              "车9平8"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺三路兵"
+          },
+          {
+            "mv": "c3c4",
+            "notation": "兵七进一",
+            "score": {
+              "kind": "cp",
+              "value": 18
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "c3c4",
+              "g6g5",
+              "h0g2",
+              "i9h9",
+              "i0h0",
+              "h7h3",
+              "b0c2",
+              "c9e7",
+              "b2a2",
+              "b9d8",
+              "a0b0"
+            ],
+            "pv_notation": [
+              "兵七进一",
+              "卒7进1",
+              "马二进三",
+              "车9平8",
+              "车一平二",
+              "炮8进4",
+              "马八进七",
+              "象3进5",
+              "炮八平九",
+              "马2进4",
+              "车九平八"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺七路兵"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "左车、左马、右马和右车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "protect",
+            "text": "三路马在新位置保护中兵（马腿 f2 无子），该子此前没有保护",
+            "squares": [
+              "g2",
+              "e3"
+            ],
+            "arrows": [
+              "g2e3"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "develop",
+            "text": "右马离开底线投入行动",
+            "squares": [
+              "h0",
+              "g2"
+            ],
+            "arrows": [
+              "h0g2"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选马二进三（红方视角评分 +29，深度 10）",
+            "squares": [
+              "h0",
+              "g2"
+            ],
+            "arrows": [
+              "h0g2"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h0g2",
+                "i9h9",
+                "i0h0",
+                "g6g5"
+              ],
+              "notation": [
+                "马二进三",
+                "车9平8",
+                "车一平二",
+                "卒7进1"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选兵三进一（红方视角评分 +21）",
+            "squares": [
+              "g3",
+              "g4"
+            ],
+            "arrows": [
+              "g3g4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "g3g4",
+                "b7e7",
+                "b0c2",
+                "b9c7",
+                "a0b0",
+                "a9b9",
+                "h0g2",
+                "b9b5",
+                "i0h0",
+                "i9h9"
+              ],
+              "notation": [
+                "兵三进一",
+                "炮2平5",
+                "马八进七",
+                "马2进3",
+                "车九平八",
+                "车1平2",
+                "马二进三",
+                "车2进4",
+                "车一平二",
+                "车9平8"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对车9平8：出动左车（主变化：马二进三 车9平8 车一平二 卒7进1）",
+            "squares": [
+              "i9",
+              "h9"
+            ],
+            "arrows": [
+              "i9h9"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h0g2",
+                "i9h9",
+                "i0h0",
+                "g6g5"
+              ],
+              "notation": [
+                "马二进三",
+                "车9平8",
+                "车一平二",
+                "卒7进1"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "medium",
+          "reasons": [
+            "深度 7–10 中前几名的次序变化了 2 次"
+          ],
+          "depths": [
+            7,
+            10
+          ]
+        }
+      },
+      "budget": "deep",
+      "conditions_key": "4506dd48c3038f1b9856fc34988cd73965c0776789dfa183ce6c3da9d0c2d3bf",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571584
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 4,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "black",
+        "mv": "i9h9",
+        "notation": "车9平8",
+        "summary": "车9平8：出动左车。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "左车离开底线投入行动",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "需要注意：左车离开后，9路卒失去了保护",
+            "evidence": [
+              "f3"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "引擎首选卒7进1（挺7路卒）；车9平8比它低约 8 分，与首选接近",
+            "evidence": [
+              "v1"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对兵三进一：挺三路兵",
+            "evidence": [
+              "v2"
+            ]
+          }
+        ],
+        "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+        "verdict": {
+          "tone": "close",
+          "label": "与首选接近",
+          "delta": 8,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "g6g5",
+            "notation": "卒7进1",
+            "score": {
+              "kind": "cp",
+              "value": -20
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "g6g5",
+              "i0h0",
+              "i9h9",
+              "h0h6",
+              "b9c7",
+              "c3c4",
+              "h7i7",
+              "h6h9",
+              "g7h9"
+            ],
+            "pv_notation": [
+              "卒7进1",
+              "车一平二",
+              "车9平8",
+              "车二进六",
+              "马2进3",
+              "兵七进一",
+              "炮8平9",
+              "车二进三",
+              "马7退8"
+            ],
+            "rank": 1,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺7路卒"
+          },
+          {
+            "mv": "i9h9",
+            "notation": "车9平8",
+            "score": {
+              "kind": "cp",
+              "value": -28
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "i9h9",
+              "g3g4",
+              "h7i7",
+              "b0a2",
+              "b7e7",
+              "a0b0",
+              "b9c7",
+              "b2c2"
+            ],
+            "pv_notation": [
+              "车9平8",
+              "兵三进一",
+              "炮8平9",
+              "马八进九",
+              "炮2平5",
+              "车九平八",
+              "马2进3",
+              "炮八平七"
+            ],
+            "rank": 2,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "出动左车"
+          },
+          {
+            "mv": "b9c7",
+            "notation": "马2进3",
+            "score": {
+              "kind": "cp",
+              "value": -32
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b9c7",
+              "i0h0",
+              "i9h9",
+              "g3g4",
+              "c6c5",
+              "b0a2",
+              "c9e7",
+              "h0h6"
+            ],
+            "pv_notation": [
+              "马2进3",
+              "车一平二",
+              "车9平8",
+              "兵三进一",
+              "卒3进1",
+              "马八进九",
+              "象3进5",
+              "车二进六"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "出动右马，并增加对中卒的保护"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "右车、右马和左车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "develop",
+            "text": "左车离开底线投入行动",
+            "squares": [
+              "i9",
+              "h9"
+            ],
+            "arrows": [
+              "i9h9"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "unprotect",
+            "text": "左车离开后，9路卒失去了保护",
+            "squares": [
+              "i9",
+              "i6"
+            ],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选卒7进1（黑方视角评分 -20，深度 8）",
+            "squares": [
+              "g6",
+              "g5"
+            ],
+            "arrows": [
+              "g6g5"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "g6g5",
+                "i0h0",
+                "i9h9",
+                "h0h6",
+                "b9c7",
+                "c3c4",
+                "h7i7",
+                "h6h9",
+                "g7h9"
+              ],
+              "notation": [
+                "卒7进1",
+                "车一平二",
+                "车9平8",
+                "车二进六",
+                "马2进3",
+                "兵七进一",
+                "炮8平9",
+                "车二进三",
+                "马7退8"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对兵三进一：挺三路兵（主变化：车9平8 兵三进一 炮8平9 马八进九 炮2平5 车九平八 马2进3 炮八平七）",
+            "squares": [
+              "g3",
+              "g4"
+            ],
+            "arrows": [
+              "g3g4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "i9h9",
+                "g3g4",
+                "h7i7",
+                "b0a2",
+                "b7e7",
+                "a0b0",
+                "b9c7",
+                "b2c2"
+              ],
+              "notation": [
+                "车9平8",
+                "兵三进一",
+                "炮8平9",
+                "马八进九",
+                "炮2平5",
+                "车九平八",
+                "马2进3",
+                "炮八平七"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "high",
+          "reasons": [
+            "深度 5–8（最近 4 个深度）首选都是卒7进1，前几名的次序没有变化"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "edfd974e9744301e7745b184e46ded48e34e6d605f16e3bff322e9d89155c035",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571391
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 5,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "red",
+        "mv": "i0h0",
+        "notation": "车一平二",
+        "summary": "车一平二：出动右车。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "右车离开底线投入行动",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "右车在新位置瞄准对方左炮（对方有保护）",
+            "evidence": [
+              "f3"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，车一平二是首选；与第二候选兵三进一相差约 1 分，在当前分析预算下两者接近（兵三进一的直接作用：挺三路兵）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对卒3进1：挺3路卒",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "i0h0",
+            "notation": "车一平二",
+            "score": {
+              "kind": "cp",
+              "value": 29
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "i0h0",
+              "c6c5",
+              "b0a2",
+              "b9c7",
+              "h0h4",
+              "h7i7",
+              "h4h9",
+              "g7h9",
+              "g3g4",
+              "c9e7",
+              "b2c2",
+              "c7b5",
+              "g2f4"
+            ],
+            "pv_notation": [
+              "车一平二",
+              "卒3进1",
+              "马八进九",
+              "马2进3",
+              "车二进四",
+              "炮8平9",
+              "车二进五",
+              "马7退8",
+              "兵三进一",
+              "象3进5",
+              "炮八平七",
+              "马3进2",
+              "马三进四"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "出动右车"
+          },
+          {
+            "mv": "g3g4",
+            "notation": "兵三进一",
+            "score": {
+              "kind": "cp",
+              "value": 28
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "g3g4",
+              "c6c5",
+              "i0h0",
+              "b9c7",
+              "b0a2"
+            ],
+            "pv_notation": [
+              "兵三进一",
+              "卒3进1",
+              "车一平二",
+              "马2进3",
+              "马八进九"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺三路兵"
+          },
+          {
+            "mv": "c3c4",
+            "notation": "兵七进一",
+            "score": {
+              "kind": "cp",
+              "value": 19
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "c3c4",
+              "g6g5",
+              "b0c2",
+              "b7b3",
+              "e3e4",
+              "b9c7",
+              "e4e5",
+              "c9e7",
+              "e5d5"
+            ],
+            "pv_notation": [
+              "兵七进一",
+              "卒7进1",
+              "马八进七",
+              "炮2进4",
+              "兵五进一",
+              "马2进3",
+              "兵五进一",
+              "象3进5",
+              "兵五平六"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺七路兵"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "左车、左马和右车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "develop",
+            "text": "右车离开底线投入行动",
+            "squares": [
+              "i0",
+              "h0"
+            ],
+            "arrows": [
+              "i0h0"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "aim",
+            "text": "右车在新位置瞄准对方左炮（对方有保护）",
+            "squares": [
+              "h0",
+              "h7"
+            ],
+            "arrows": [
+              "h0h7"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选车一平二（红方视角评分 +29，深度 10）",
+            "squares": [
+              "i0",
+              "h0"
+            ],
+            "arrows": [
+              "i0h0"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "i0h0",
+                "c6c5",
+                "b0a2",
+                "b9c7",
+                "h0h4",
+                "h7i7",
+                "h4h9",
+                "g7h9",
+                "g3g4",
+                "c9e7",
+                "b2c2",
+                "c7b5",
+                "g2f4"
+              ],
+              "notation": [
+                "车一平二",
+                "卒3进1",
+                "马八进九",
+                "马2进3",
+                "车二进四",
+                "炮8平9",
+                "车二进五",
+                "马7退8",
+                "兵三进一",
+                "象3进5",
+                "炮八平七",
+                "马3进2",
+                "马三进四"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选兵三进一（红方视角评分 +28）",
+            "squares": [
+              "g3",
+              "g4"
+            ],
+            "arrows": [
+              "g3g4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "g3g4",
+                "c6c5",
+                "i0h0",
+                "b9c7",
+                "b0a2"
+              ],
+              "notation": [
+                "兵三进一",
+                "卒3进1",
+                "车一平二",
+                "马2进3",
+                "马八进九"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对卒3进1：挺3路卒（主变化：车一平二 卒3进1 马八进九 马2进3 车二进四 炮8平9 车二进五 马7退8 兵三进一 象3进5 炮八平七 马3进2 马三进四）",
+            "squares": [
+              "c6",
+              "c5"
+            ],
+            "arrows": [
+              "c6c5"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "i0h0",
+                "c6c5",
+                "b0a2",
+                "b9c7",
+                "h0h4",
+                "h7i7",
+                "h4h9",
+                "g7h9",
+                "g3g4",
+                "c9e7",
+                "b2c2",
+                "c7b5",
+                "g2f4"
+              ],
+              "notation": [
+                "车一平二",
+                "卒3进1",
+                "马八进九",
+                "马2进3",
+                "车二进四",
+                "炮8平9",
+                "车二进五",
+                "马7退8",
+                "兵三进一",
+                "象3进5",
+                "炮八平七",
+                "马3进2",
+                "马三进四"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "high",
+          "reasons": [
+            "深度 7–10（最近 4 个深度）首选都是车一平二，前几名的次序没有变化"
+          ],
+          "depths": [
+            7,
+            10
+          ]
+        }
+      },
+      "budget": "deep",
+      "conditions_key": "44cd54c21f311ac18aacad7f92d364d2503384ab8140cef8520f36efdd52ddb2",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571609
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 6,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "black",
+        "mv": "b9c7",
+        "notation": "马2进3",
+        "summary": "马2进3：出动右马，并增加对中卒的保护。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "右马离开底线投入行动",
+            "evidence": [
+              "f3"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "引擎首选卒7进1（挺7路卒）；马2进3比它低约 7 分，与首选接近",
+            "evidence": [
+              "v1"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对兵七进一：挺七路兵",
+            "evidence": [
+              "v2"
+            ]
+          }
+        ],
+        "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+        "verdict": {
+          "tone": "close",
+          "label": "与首选接近",
+          "delta": 7,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "g6g5",
+            "notation": "卒7进1",
+            "score": {
+              "kind": "cp",
+              "value": -24
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "g6g5",
+              "h0h4",
+              "h7i7",
+              "h4h9"
+            ],
+            "pv_notation": [
+              "卒7进1",
+              "车二进四",
+              "炮8平9",
+              "车二进五"
+            ],
+            "rank": 1,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺7路卒"
+          },
+          {
+            "mv": "c6c5",
+            "notation": "卒3进1",
+            "score": {
+              "kind": "cp",
+              "value": -29
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "c6c5",
+              "h0h4",
+              "h7i7",
+              "h4h9",
+              "g7h9",
+              "b2c2"
+            ],
+            "pv_notation": [
+              "卒3进1",
+              "车二进四",
+              "炮8平9",
+              "车二进五",
+              "马7退8",
+              "炮八平七"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺3路卒"
+          },
+          {
+            "mv": "b9c7",
+            "notation": "马2进3",
+            "score": {
+              "kind": "cp",
+              "value": -31
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b9c7",
+              "c3c4",
+              "g6g5",
+              "h0h6",
+              "h7i7",
+              "h6g6",
+              "i7i8",
+              "b0c2",
+              "i8g8"
+            ],
+            "pv_notation": [
+              "马2进3",
+              "兵七进一",
+              "卒7进1",
+              "车二进六",
+              "炮8平9",
+              "车二平三",
+              "炮9退1",
+              "马八进七",
+              "炮9平7"
+            ],
+            "rank": 3,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "出动右马，并增加对中卒的保护"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "右车、右马和左车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "protect",
+            "text": "3路马在新位置保护中卒（马腿 d7 无子），它正受到对方攻击：对方中炮吃下后，3路马可以吃回",
+            "squares": [
+              "c7",
+              "e6"
+            ],
+            "arrows": [
+              "c7e6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "develop",
+            "text": "右马离开底线投入行动",
+            "squares": [
+              "b9",
+              "c7"
+            ],
+            "arrows": [
+              "b9c7"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选卒7进1（黑方视角评分 -24，深度 8）",
+            "squares": [
+              "g6",
+              "g5"
+            ],
+            "arrows": [
+              "g6g5"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "g6g5",
+                "h0h4",
+                "h7i7",
+                "h4h9"
+              ],
+              "notation": [
+                "卒7进1",
+                "车二进四",
+                "炮8平9",
+                "车二进五"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对兵七进一：挺七路兵（主变化：马2进3 兵七进一 卒7进1 车二进六 炮8平9 车二平三 炮9退1 马八进七 炮9平7）",
+            "squares": [
+              "c3",
+              "c4"
+            ],
+            "arrows": [
+              "c3c4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "b9c7",
+                "c3c4",
+                "g6g5",
+                "h0h6",
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8"
+              ],
+              "notation": [
+                "马2进3",
+                "兵七进一",
+                "卒7进1",
+                "车二进六",
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "high",
+          "reasons": [
+            "深度 5–8（最近 4 个深度）首选都是卒7进1，前几名的次序没有变化"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "9a658365f6d5c7c5fb1e20c8791cb51fcc9b744dbc7d6a703ad6910468788456",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571427
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 7,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "red",
+        "mv": "c3c4",
+        "notation": "兵七进一",
+        "summary": "兵七进一：挺七路兵。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "七路兵向前挺进一步；本步没有吃子或将军",
+            "evidence": [
+              "p2"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，兵七进一是首选；与第二候选车二进四相差约 7 分，在当前分析预算下两者接近（车二进四的直接作用：出动右车）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对卒7进1：挺7路卒",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "没有直接战术时，优先让活动范围小的棋子参与配合。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "c3c4",
+            "notation": "兵七进一",
+            "score": {
+              "kind": "cp",
+              "value": 31
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "c3c4",
+              "g6g5",
+              "h0h6",
+              "h7i7",
+              "h6g6",
+              "i7i8",
+              "b0c2",
+              "i8g8"
+            ],
+            "pv_notation": [
+              "兵七进一",
+              "卒7进1",
+              "车二进六",
+              "炮8平9",
+              "车二平三",
+              "炮9退1",
+              "马八进七",
+              "炮9平7"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "挺七路兵"
+          },
+          {
+            "mv": "h0h4",
+            "notation": "车二进四",
+            "score": {
+              "kind": "cp",
+              "value": 24
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h0h4",
+              "g6g5",
+              "c3c4",
+              "h7i7",
+              "h4h9",
+              "g7h9",
+              "b0c2",
+              "c9e7"
+            ],
+            "pv_notation": [
+              "车二进四",
+              "卒7进1",
+              "兵七进一",
+              "炮8平9",
+              "车二进五",
+              "马7退8",
+              "马八进七",
+              "象3进5"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "出动右车"
+          },
+          {
+            "mv": "g3g4",
+            "notation": "兵三进一",
+            "score": {
+              "kind": "cp",
+              "value": 23
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "g3g4",
+              "c6c5",
+              "b0a2",
+              "c9e7",
+              "b2c2",
+              "c7b5",
+              "g2f4",
+              "d9e8",
+              "f4e6",
+              "h7h3",
+              "e6g7",
+              "b7g7"
+            ],
+            "pv_notation": [
+              "兵三进一",
+              "卒3进1",
+              "马八进九",
+              "象3进5",
+              "炮八平七",
+              "马3进2",
+              "马三进四",
+              "士4进5",
+              "马四进五",
+              "炮8进4",
+              "马五进三",
+              "炮2平7"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "挺三路兵"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "左车、左马和右车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "p2",
+            "kind": "positional",
+            "topic": "reposition",
+            "text": "七路兵向前挺进一步；本步没有吃子或将军",
+            "squares": [
+              "c3",
+              "c4"
+            ],
+            "arrows": [
+              "c3c4"
+            ],
+            "line": null,
+            "certainty": "tentative",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选兵七进一（红方视角评分 +31，深度 8）",
+            "squares": [
+              "c3",
+              "c4"
+            ],
+            "arrows": [
+              "c3c4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "c3c4",
+                "g6g5",
+                "h0h6",
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8"
+              ],
+              "notation": [
+                "兵七进一",
+                "卒7进1",
+                "车二进六",
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选车二进四（红方视角评分 +24）",
+            "squares": [
+              "h0",
+              "h4"
+            ],
+            "arrows": [
+              "h0h4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h0h4",
+                "g6g5",
+                "c3c4",
+                "h7i7",
+                "h4h9",
+                "g7h9",
+                "b0c2",
+                "c9e7"
+              ],
+              "notation": [
+                "车二进四",
+                "卒7进1",
+                "兵七进一",
+                "炮8平9",
+                "车二进五",
+                "马7退8",
+                "马八进七",
+                "象3进5"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对卒7进1：挺7路卒（主变化：兵七进一 卒7进1 车二进六 炮8平9 车二平三 炮9退1 马八进七 炮9平7）",
+            "squares": [
+              "g6",
+              "g5"
+            ],
+            "arrows": [
+              "g6g5"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "c3c4",
+                "g6g5",
+                "h0h6",
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8"
+              ],
+              "notation": [
+                "兵七进一",
+                "卒7进1",
+                "车二进六",
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "high",
+          "reasons": [
+            "深度 5–8（最近 4 个深度）首选都是兵七进一，前几名的次序没有变化"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "4c440a45d9d929e6286971513edc90d88ef6186c13c94cd42d578c10c906d06d",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571448
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 8,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "black",
+        "mv": "g6g5",
+        "notation": "卒7进1",
+        "summary": "卒7进1：挺7路卒。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "7路卒向前挺进一步；本步没有吃子或将军",
+            "evidence": [
+              "p2"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，卒7进1是首选；与第二候选炮2平1相差约 10 分，在当前分析预算下两者接近（炮2平1的直接作用：瞄准对方九路兵）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对车二进六：出动右车，并攻击对方无保护的9路卒",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "没有直接战术时，优先让活动范围小的棋子参与配合。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "g6g5",
+            "notation": "卒7进1",
+            "score": {
+              "kind": "cp",
+              "value": -42
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "g6g5",
+              "h0h6",
+              "h7i7",
+              "h6g6",
+              "i7i8",
+              "b0c2",
+              "i8g8",
+              "g6f6",
+              "g7h5",
+              "c2d4"
+            ],
+            "pv_notation": [
+              "卒7进1",
+              "车二进六",
+              "炮8平9",
+              "车二平三",
+              "炮9退1",
+              "马八进七",
+              "炮9平7",
+              "车三平四",
+              "马7进8",
+              "马七进六"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "挺7路卒"
+          },
+          {
+            "mv": "b7a7",
+            "notation": "炮2平1",
+            "score": {
+              "kind": "cp",
+              "value": -52
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b7a7",
+              "b0c2",
+              "a9b9",
+              "a0b0",
+              "b9b5",
+              "b2a2",
+              "b5b0",
+              "c2b0",
+              "g6g5",
+              "h0h6"
+            ],
+            "pv_notation": [
+              "炮2平1",
+              "马八进七",
+              "车1平2",
+              "车九平八",
+              "车2进4",
+              "炮八平九",
+              "车2进5",
+              "马七退八",
+              "卒7进1",
+              "车二进六"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "瞄准对方九路兵"
+          },
+          {
+            "mv": "h7h3",
+            "notation": "炮8进4",
+            "score": {
+              "kind": "cp",
+              "value": -87
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h7h3",
+              "b0c2",
+              "b7a7",
+              "a0b0",
+              "a9b9",
+              "g3g4",
+              "b9b5",
+              "b2a2",
+              "b5b0",
+              "c2b0",
+              "a7a3"
+            ],
+            "pv_notation": [
+              "炮8进4",
+              "马八进七",
+              "炮2平1",
+              "车九平八",
+              "车1平2",
+              "兵三进一",
+              "车2进4",
+              "炮八平九",
+              "车2进5",
+              "马七退八",
+              "炮1进4"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "瞄准对方中兵"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "右车和左车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "p2",
+            "kind": "positional",
+            "topic": "reposition",
+            "text": "7路卒向前挺进一步；本步没有吃子或将军",
+            "squares": [
+              "g6",
+              "g5"
+            ],
+            "arrows": [
+              "g6g5"
+            ],
+            "line": null,
+            "certainty": "tentative",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选卒7进1（黑方视角评分 -42，深度 8）",
+            "squares": [
+              "g6",
+              "g5"
+            ],
+            "arrows": [
+              "g6g5"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "g6g5",
+                "h0h6",
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8",
+                "g6f6",
+                "g7h5",
+                "c2d4"
+              ],
+              "notation": [
+                "卒7进1",
+                "车二进六",
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7",
+                "车三平四",
+                "马7进8",
+                "马七进六"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选炮2平1（黑方视角评分 -52）",
+            "squares": [
+              "b7",
+              "a7"
+            ],
+            "arrows": [
+              "b7a7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "b7a7",
+                "b0c2",
+                "a9b9",
+                "a0b0",
+                "b9b5",
+                "b2a2",
+                "b5b0",
+                "c2b0",
+                "g6g5",
+                "h0h6"
+              ],
+              "notation": [
+                "炮2平1",
+                "马八进七",
+                "车1平2",
+                "车九平八",
+                "车2进4",
+                "炮八平九",
+                "车2进5",
+                "马七退八",
+                "卒7进1",
+                "车二进六"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对车二进六：出动右车，并攻击对方无保护的9路卒（主变化：卒7进1 车二进六 炮8平9 车二平三 炮9退1 马八进七 炮9平7 车三平四 马7进8 马七进六）",
+            "squares": [
+              "h0",
+              "h6"
+            ],
+            "arrows": [
+              "h0h6"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "g6g5",
+                "h0h6",
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8",
+                "g6f6",
+                "g7h5",
+                "c2d4"
+              ],
+              "notation": [
+                "卒7进1",
+                "车二进六",
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7",
+                "车三平四",
+                "马7进8",
+                "马七进六"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "medium",
+          "reasons": [
+            "深度 5–8 中前几名的次序变化了 2 次"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "750d32b581cd14b0b3771fd7b6da769d48d69ce1d7608c4000096dcab28a0602",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571469
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 9,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "red",
+        "mv": "h0h6",
+        "notation": "车二进六",
+        "summary": "车二进六：出动右车，并攻击对方无保护的9路卒。",
+        "need": [
+          {
+            "text": "当前没有直接威胁，主要任务是尽快出动尚在底线的车马",
+            "evidence": [
+              "f1",
+              "p1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "二路车在新位置攻击对方9路卒，该子没有保护",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "右车离开底线投入行动",
+            "evidence": [
+              "f3"
+            ]
+          },
+          {
+            "text": "需要注意：右车离开后，相失去了保护",
+            "evidence": [
+              "f4"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，车二进六是首选；与第二候选车二进四相差约 21 分，在当前分析预算下两者接近（车二进四的直接作用：出动右车，并增加对七路兵的保护）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对炮8平9：化解9路卒受攻击的问题，并打开左车的线路",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "选择出子位置时，同时检查新增了哪些攻击和保护关系。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "h0h6",
+            "notation": "车二进六",
+            "score": {
+              "kind": "cp",
+              "value": 42
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h0h6",
+              "h7i7",
+              "h6g6",
+              "i7i8",
+              "b0c2",
+              "i8g8",
+              "g6f6",
+              "g7h5",
+              "c2d4"
+            ],
+            "pv_notation": [
+              "车二进六",
+              "炮8平9",
+              "车二平三",
+              "炮9退1",
+              "马八进七",
+              "炮9平7",
+              "车三平四",
+              "马7进8",
+              "马七进六"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "出动右车，并攻击对方无保护的9路卒"
+          },
+          {
+            "mv": "h0h4",
+            "notation": "车二进四",
+            "score": {
+              "kind": "cp",
+              "value": 21
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h0h4",
+              "b7b5",
+              "h4h6",
+              "g7f5",
+              "b0c2",
+              "c9e7",
+              "b2a2",
+              "a9b9"
+            ],
+            "pv_notation": [
+              "车二进四",
+              "炮2进2",
+              "车二进二",
+              "马7进6",
+              "马八进七",
+              "象3进5",
+              "炮八平九",
+              "车1平2"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "出动右车，并增加对七路兵的保护"
+          },
+          {
+            "mv": "b2b4",
+            "notation": "炮八进二",
+            "score": {
+              "kind": "cp",
+              "value": 15
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b2b4",
+              "b7a7",
+              "b0c2",
+              "a9b9",
+              "h0h6",
+              "b9b5",
+              "e3e4",
+              "h7i7",
+              "h6g6",
+              "i7i8",
+              "a0b0"
+            ],
+            "pv_notation": [
+              "炮八进二",
+              "炮2平1",
+              "马八进七",
+              "车1平2",
+              "车二进六",
+              "车2进4",
+              "兵五进一",
+              "炮8平9",
+              "车二平三",
+              "炮9退1",
+              "车九平八"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "调整左炮的位置"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "quiet",
+            "text": "当前没有被将军，也没有受攻击而缺少保护的棋子",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "development_need",
+            "text": "左车、左马和右车仍在底线，尚未出动",
+            "squares": [],
+            "arrows": [],
+            "line": null,
+            "certainty": "tentative",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "attack",
+            "text": "二路车在新位置攻击对方9路卒，该子没有保护",
+            "squares": [
+              "h6",
+              "i6"
+            ],
+            "arrows": [
+              "h6i6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "develop",
+            "text": "右车离开底线投入行动",
+            "squares": [
+              "h0",
+              "h6"
+            ],
+            "arrows": [
+              "h0h6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "f4",
+            "kind": "fact",
+            "topic": "unprotect",
+            "text": "右车离开后，相失去了保护",
+            "squares": [
+              "h0",
+              "g0"
+            ],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选车二进六（红方视角评分 +42，深度 8）",
+            "squares": [
+              "h0",
+              "h6"
+            ],
+            "arrows": [
+              "h0h6"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h0h6",
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8",
+                "g6f6",
+                "g7h5",
+                "c2d4"
+              ],
+              "notation": [
+                "车二进六",
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7",
+                "车三平四",
+                "马7进8",
+                "马七进六"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选车二进四（红方视角评分 +21）",
+            "squares": [
+              "h0",
+              "h4"
+            ],
+            "arrows": [
+              "h0h4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h0h4",
+                "b7b5",
+                "h4h6",
+                "g7f5",
+                "b0c2",
+                "c9e7",
+                "b2a2",
+                "a9b9"
+              ],
+              "notation": [
+                "车二进四",
+                "炮2进2",
+                "车二进二",
+                "马7进6",
+                "马八进七",
+                "象3进5",
+                "炮八平九",
+                "车1平2"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对炮8平9：化解9路卒受攻击的问题，并打开左车的线路（主变化：车二进六 炮8平9 车二平三 炮9退1 马八进七 炮9平7 车三平四 马7进8 马七进六）",
+            "squares": [
+              "h7",
+              "i7"
+            ],
+            "arrows": [
+              "h7i7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h0h6",
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8",
+                "g6f6",
+                "g7h5",
+                "c2d4"
+              ],
+              "notation": [
+                "车二进六",
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7",
+                "车三平四",
+                "马7进8",
+                "马七进六"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "medium",
+          "reasons": [
+            "首选在深度 6 由炮八进二换成车二进六，之后没有再变",
+            "深度 5–8 中前几名的次序变化了 2 次"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "a0313e9bbbf15fd3ac32848992b4351fff82bd80c9d65148cd3e0a518b6ffd16",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571491
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 10,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "black",
+        "mv": "h7i7",
+        "notation": "炮8平9",
+        "summary": "炮8平9：化解9路卒受攻击的问题，并打开左车的线路。",
+        "need": [
+          {
+            "text": "9路卒受到对方二路车攻击，且没有保护",
+            "evidence": [
+              "f1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "9路卒原本受到二路车攻击，挡住或消除了对9路卒的攻击",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "左炮让开线路后，左车可以攻击对方二路车（无保护）",
+            "evidence": [
+              "f3"
+            ]
+          },
+          {
+            "text": "需要注意：左炮让开线路后，对方二路车可以攻击左车",
+            "evidence": [
+              "f4"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，炮8平9是首选；与第二候选炮2平1相差约 7 分，在当前分析预算下两者接近（炮2平1的直接作用：瞄准对方九路兵）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对车二平三：化解二路车受攻击的问题，并攻击对方无保护的7路卒",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "没有直接战术时，优先让活动范围小的棋子参与配合。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "h7i7",
+            "notation": "炮8平9",
+            "score": {
+              "kind": "cp",
+              "value": -40
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h7i7",
+              "h6g6",
+              "i7i8",
+              "b0c2",
+              "d9e8"
+            ],
+            "pv_notation": [
+              "炮8平9",
+              "车二平三",
+              "炮9退1",
+              "马八进七",
+              "士4进5"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "化解9路卒受攻击的问题，并打开左车的线路"
+          },
+          {
+            "mv": "b7a7",
+            "notation": "炮2平1",
+            "score": {
+              "kind": "cp",
+              "value": -47
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b7a7",
+              "b0c2",
+              "a9b9",
+              "a0b0",
+              "b9b5",
+              "e3e4",
+              "h7h8",
+              "e4e5"
+            ],
+            "pv_notation": [
+              "炮2平1",
+              "马八进七",
+              "车1平2",
+              "车九平八",
+              "车2进4",
+              "兵五进一",
+              "炮8退1",
+              "兵五进一"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "瞄准对方九路兵"
+          },
+          {
+            "mv": "d9e8",
+            "notation": "士4进5",
+            "score": {
+              "kind": "cp",
+              "value": -52
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "d9e8",
+              "b0c2",
+              "h7i7",
+              "h6g6",
+              "i7i8",
+              "e3e4",
+              "i8g8",
+              "g6f6",
+              "g7h5",
+              "e4e5",
+              "e6e5",
+              "f6c6"
+            ],
+            "pv_notation": [
+              "士4进5",
+              "马八进七",
+              "炮8平9",
+              "车二平三",
+              "炮9退1",
+              "兵五进一",
+              "炮9平7",
+              "车三平四",
+              "马7进8",
+              "兵五进一",
+              "卒5进1",
+              "车四平七"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "补士巩固九宫"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "threat",
+            "text": "9路卒受到对方二路车攻击，且没有保护",
+            "squares": [
+              "i6",
+              "h6"
+            ],
+            "arrows": [
+              "h6i6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "defend",
+            "text": "9路卒原本受到二路车攻击，挡住或消除了对9路卒的攻击",
+            "squares": [
+              "i6",
+              "h6"
+            ],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "line",
+            "text": "左炮让开线路后，左车可以攻击对方二路车（无保护）",
+            "squares": [
+              "h9",
+              "h6",
+              "i7"
+            ],
+            "arrows": [
+              "h9h6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "f4",
+            "kind": "fact",
+            "topic": "enemy_line",
+            "text": "左炮让开线路后，对方二路车可以攻击左车",
+            "squares": [
+              "h6",
+              "h9"
+            ],
+            "arrows": [
+              "h6h9"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选炮8平9（黑方视角评分 -40，深度 8）",
+            "squares": [
+              "h7",
+              "i7"
+            ],
+            "arrows": [
+              "h7i7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "d9e8"
+              ],
+              "notation": [
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "士4进5"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选炮2平1（黑方视角评分 -47）",
+            "squares": [
+              "b7",
+              "a7"
+            ],
+            "arrows": [
+              "b7a7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "b7a7",
+                "b0c2",
+                "a9b9",
+                "a0b0",
+                "b9b5",
+                "e3e4",
+                "h7h8",
+                "e4e5"
+              ],
+              "notation": [
+                "炮2平1",
+                "马八进七",
+                "车1平2",
+                "车九平八",
+                "车2进4",
+                "兵五进一",
+                "炮8退1",
+                "兵五进一"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对车二平三：化解二路车受攻击的问题，并攻击对方无保护的7路卒（主变化：炮8平9 车二平三 炮9退1 马八进七 士4进5）",
+            "squares": [
+              "h6",
+              "g6"
+            ],
+            "arrows": [
+              "h6g6"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h7i7",
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "d9e8"
+              ],
+              "notation": [
+                "炮8平9",
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "士4进5"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "medium",
+          "reasons": [
+            "深度 5–8 中前几名的次序变化了 2 次"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "6ecc09efbb499117b077ef14d03fc2aa4963ca54e765a6ec1e4791d348d02f61",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571508
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 11,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "red",
+        "mv": "h6g6",
+        "notation": "车二平三",
+        "summary": "车二平三：化解二路车受攻击的问题，并攻击对方无保护的7路卒。",
+        "need": [
+          {
+            "text": "二路车受到对方左车攻击，且没有保护",
+            "evidence": [
+              "f1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "二路车原本受到左车攻击，本步把二路车移开，新位置没有受到同样的攻击",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "三路车在新位置攻击对方7路卒，该子没有保护",
+            "evidence": [
+              "f3"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "在当前分析中，车二平三是首选；与第二候选车二进三相差约 19 分，在当前分析预算下两者接近（车二进三的直接作用：吃掉对方左车，并攻击对方无保护的象）",
+            "evidence": [
+              "v1",
+              "v2"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对炮9退1：调整9路炮的位置",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "没有直接战术时，优先让活动范围小的棋子参与配合。",
+        "verdict": {
+          "tone": "best",
+          "label": "当前分析的首选",
+          "delta": null,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "h6g6",
+            "notation": "车二平三",
+            "score": {
+              "kind": "cp",
+              "value": 42
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h6g6",
+              "i7i8",
+              "b0c2",
+              "i8g8",
+              "g6f6",
+              "g7h5",
+              "c2d4",
+              "g8g3"
+            ],
+            "pv_notation": [
+              "车二平三",
+              "炮9退1",
+              "马八进七",
+              "炮9平7",
+              "车三平四",
+              "马7进8",
+              "马七进六",
+              "炮7进5"
+            ],
+            "rank": 1,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "化解二路车受攻击的问题，并攻击对方无保护的7路卒"
+          },
+          {
+            "mv": "h6h9",
+            "notation": "车二进三",
+            "score": {
+              "kind": "cp",
+              "value": 23
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h6h9",
+              "g7h9",
+              "b0c2",
+              "b7a7",
+              "b2b8"
+            ],
+            "pv_notation": [
+              "车二进三",
+              "马7退8",
+              "马八进七",
+              "炮2平1",
+              "炮八进六"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "吃掉对方左车，并攻击对方无保护的象"
+          },
+          {
+            "mv": "h6f6",
+            "notation": "车二平四",
+            "score": {
+              "kind": "cp",
+              "value": -32
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h6f6",
+              "c7e8",
+              "f6f4",
+              "h9h1",
+              "b2b6",
+              "h1b1",
+              "b6e6",
+              "g7e6",
+              "e2e6",
+              "e8g7"
+            ],
+            "pv_notation": [
+              "车二平四",
+              "马3退5",
+              "车四退二",
+              "车8进8",
+              "炮八进四",
+              "车8平2",
+              "炮八平五",
+              "马7进5",
+              "炮五进四",
+              "马5进7"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "化解二路车受攻击的问题"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "threat",
+            "text": "二路车受到对方左车攻击，且没有保护",
+            "squares": [
+              "h6",
+              "h9"
+            ],
+            "arrows": [
+              "h9h6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "defend",
+            "text": "二路车原本受到左车攻击，本步把二路车移开，新位置没有受到同样的攻击",
+            "squares": [
+              "h6",
+              "h9"
+            ],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "f3",
+            "kind": "fact",
+            "topic": "attack",
+            "text": "三路车在新位置攻击对方7路卒，该子没有保护",
+            "squares": [
+              "g6",
+              "g5"
+            ],
+            "arrows": [
+              "g6g5"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选车二平三（红方视角评分 +42，深度 8）",
+            "squares": [
+              "h6",
+              "g6"
+            ],
+            "arrows": [
+              "h6g6"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8",
+                "g6f6",
+                "g7h5",
+                "c2d4",
+                "g8g3"
+              ],
+              "notation": [
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7",
+                "车三平四",
+                "马7进8",
+                "马七进六",
+                "炮7进5"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "second",
+            "text": "第二候选车二进三（红方视角评分 +23）",
+            "squares": [
+              "h6",
+              "h9"
+            ],
+            "arrows": [
+              "h6h9"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h6h9",
+                "g7h9",
+                "b0c2",
+                "b7a7",
+                "b2b8"
+              ],
+              "notation": [
+                "车二进三",
+                "马7退8",
+                "马八进七",
+                "炮2平1",
+                "炮八进六"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对炮9退1：调整9路炮的位置（主变化：车二平三 炮9退1 马八进七 炮9平7 车三平四 马7进8 马七进六 炮7进5）",
+            "squares": [
+              "i7",
+              "i8"
+            ],
+            "arrows": [
+              "i7i8"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h6g6",
+                "i7i8",
+                "b0c2",
+                "i8g8",
+                "g6f6",
+                "g7h5",
+                "c2d4",
+                "g8g3"
+              ],
+              "notation": [
+                "车二平三",
+                "炮9退1",
+                "马八进七",
+                "炮9平7",
+                "车三平四",
+                "马7进8",
+                "马七进六",
+                "炮7进5"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "high",
+          "reasons": [
+            "深度 5–8（最近 4 个深度）首选都是车二平三，前几名的次序没有变化"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "f601c86e39dc384f8d27052a03970eb4d97466bc96f8b7ece6742799104742c0",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571527
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 12,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "black",
+        "mv": "i7i8",
+        "notation": "炮9退1",
+        "summary": "炮9退1：调整9路炮的位置。",
+        "need": [
+          {
+            "text": "7路卒受到对方三路车攻击，且没有保护",
+            "evidence": [
+              "f1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "需要注意：9路炮离开后，3路马失去了保护",
+            "evidence": [
+              "f2"
+            ]
+          },
+          {
+            "text": "本步没有吃子或将军；9路炮的可走点由 4 个变为 11 个",
+            "evidence": [
+              "p1"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "引擎首选车8进2（出动左车，并增加对7路马的保护）；炮9退1比它低约 6 分，与首选接近",
+            "evidence": [
+              "v1"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对兵五进一：挺中兵",
+            "evidence": [
+              "v2"
+            ]
+          }
+        ],
+        "lesson": "每走一步后都检查：自己哪些棋子受到攻击、哪些失去了保护。",
+        "verdict": {
+          "tone": "close",
+          "label": "与首选接近",
+          "delta": 6,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "h9h7",
+            "notation": "车8进2",
+            "score": {
+              "kind": "cp",
+              "value": -41
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "h9h7",
+              "b2d2",
+              "b7b3",
+              "e3e4",
+              "d9e8",
+              "b0c2",
+              "a9b9"
+            ],
+            "pv_notation": [
+              "车8进2",
+              "炮八平六",
+              "炮2进4",
+              "兵五进一",
+              "士4进5",
+              "马八进七",
+              "车1平2"
+            ],
+            "rank": 1,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "出动左车，并增加对7路马的保护"
+          },
+          {
+            "mv": "i7i8",
+            "notation": "炮9退1",
+            "score": {
+              "kind": "cp",
+              "value": -47
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "i7i8",
+              "e3e4",
+              "i8g8",
+              "g6f6",
+              "d9e8",
+              "b0c2",
+              "c9e7",
+              "b2a2",
+              "a9b9",
+              "a0b0",
+              "g7h5",
+              "e4e5"
+            ],
+            "pv_notation": [
+              "炮9退1",
+              "兵五进一",
+              "炮9平7",
+              "车三平四",
+              "士4进5",
+              "马八进七",
+              "象3进5",
+              "炮八平九",
+              "车1平2",
+              "车九平八",
+              "马7进8",
+              "兵五进一"
+            ],
+            "rank": 2,
+            "is_actual": true,
+            "source": "multi_pv",
+            "summary": "调整9路炮的位置"
+          },
+          {
+            "mv": "h9h1",
+            "notation": "车8进8",
+            "score": {
+              "kind": "cp",
+              "value": -54
+            },
+            "bound": "exact",
+            "depth": 10,
+            "pv": [
+              "h9h1",
+              "b0c2",
+              "i7i8",
+              "e3e4",
+              "d9e8",
+              "e4e5",
+              "i8g8",
+              "g6f6",
+              "c9e7",
+              "b2a2",
+              "h1b1",
+              "e5d5",
+              "g7h5",
+              "g2e3",
+              "g5g4"
+            ],
+            "pv_notation": [
+              "车8进8",
+              "马八进七",
+              "炮9退1",
+              "兵五进一",
+              "士4进5",
+              "兵五进一",
+              "炮9平7",
+              "车三平四",
+              "象3进5",
+              "炮八平九",
+              "车8平2",
+              "兵五平六",
+              "马7进8",
+              "马三进五",
+              "卒7进1"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "出动左车"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "threat",
+            "text": "7路卒受到对方三路车攻击，且没有保护",
+            "squares": [
+              "g5",
+              "g6"
+            ],
+            "arrows": [
+              "g6g5"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "f2",
+            "kind": "fact",
+            "topic": "unprotect",
+            "text": "9路炮离开后，3路马失去了保护",
+            "squares": [
+              "i7",
+              "c7"
+            ],
+            "arrows": [],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "reposition",
+            "text": "本步没有吃子或将军；9路炮的可走点由 4 个变为 11 个",
+            "squares": [
+              "i7",
+              "i8"
+            ],
+            "arrows": [
+              "i7i8"
+            ],
+            "line": null,
+            "certainty": "tentative",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选车8进2（黑方视角评分 -41，深度 10）",
+            "squares": [
+              "h9",
+              "h7"
+            ],
+            "arrows": [
+              "h9h7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h9h7",
+                "b2d2",
+                "b7b3",
+                "e3e4",
+                "d9e8",
+                "b0c2",
+                "a9b9"
+              ],
+              "notation": [
+                "车8进2",
+                "炮八平六",
+                "炮2进4",
+                "兵五进一",
+                "士4进5",
+                "马八进七",
+                "车1平2"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对兵五进一：挺中兵（主变化：炮9退1 兵五进一 炮9平7 车三平四 士4进5 马八进七 象3进5 炮八平九 车1平2 车九平八 马7进8 兵五进一）",
+            "squares": [
+              "e3",
+              "e4"
+            ],
+            "arrows": [
+              "e3e4"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "i7i8",
+                "e3e4",
+                "i8g8",
+                "g6f6",
+                "d9e8",
+                "b0c2",
+                "c9e7",
+                "b2a2",
+                "a9b9",
+                "a0b0",
+                "g7h5",
+                "e4e5"
+              ],
+              "notation": [
+                "炮9退1",
+                "兵五进一",
+                "炮9平7",
+                "车三平四",
+                "士4进5",
+                "马八进七",
+                "象3进5",
+                "炮八平九",
+                "车1平2",
+                "车九平八",
+                "马7进8",
+                "兵五进一"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 深入分析（≤30.0 秒，深度≤10）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "medium",
+          "reasons": [
+            "首选在深度 9 由炮9退1换成车8进2，之后没有再变",
+            "深度 7–10 中前几名的次序变化了 2 次"
+          ],
+          "depths": [
+            7,
+            10
+          ]
+        }
+      },
+      "budget": "deep",
+      "conditions_key": "0c9fdf10aa744dd9f8aaaf095d97d1df61e1b7a026a62934e9a6080cdff1ef0f",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571649
+    },
+    {
+      "study_id": "bd4a2b85-8ea6-42ed-8d6b-90992e33ea59",
+      "node_id": 13,
+      "explanation": {
+        "generator_version": 5,
+        "level": "detailed",
+        "mover": "black",
+        "mv": "a6a5",
+        "notation": "卒1进1",
+        "summary": "卒1进1：挺1路卒，但按主要变化会净损失子力一个马炮以上。",
+        "need": [
+          {
+            "text": "中卒受到对方中炮攻击，且没有保护",
+            "evidence": [
+              "f1"
+            ]
+          }
+        ],
+        "basis": [
+          {
+            "text": "1路卒向前挺进一步；本步没有吃子或将军",
+            "evidence": [
+              "p1"
+            ]
+          }
+        ],
+        "comparison": [
+          {
+            "text": "卒1进1没有进入前 3 个候选，已在相同条件下单独分析",
+            "evidence": [
+              "v1"
+            ]
+          },
+          {
+            "text": "引擎首选马8进7（化解中卒受攻击的问题，并出动左马）；卒1进1比它低约 298 分，严重失误",
+            "evidence": [
+              "v1"
+            ]
+          }
+        ],
+        "replies": [
+          {
+            "text": "对方主要应对炮五进四：吃掉对方中卒",
+            "evidence": [
+              "v2"
+            ]
+          },
+          {
+            "text": "按这条变化走 6 步后，黑方净损失子力一个马炮以上",
+            "evidence": [
+              "v3"
+            ]
+          }
+        ],
+        "lesson": "走子前先检查：落点和失去保护的棋子会不会被对方吃掉，对方吃完后自己能否吃回。",
+        "verdict": {
+          "tone": "blunder",
+          "label": "严重失误",
+          "delta": 298,
+          "note": ""
+        },
+        "candidates": [
+          {
+            "mv": "h9g7",
+            "notation": "马8进7",
+            "score": {
+              "kind": "cp",
+              "value": -23
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "h9g7",
+              "h0g2",
+              "g6g5",
+              "b2d2",
+              "b9c7",
+              "b0c2"
+            ],
+            "pv_notation": [
+              "马8进7",
+              "马二进三",
+              "卒7进1",
+              "炮八平六",
+              "马2进3",
+              "马八进七"
+            ],
+            "rank": 1,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "化解中卒受攻击的问题，并出动左马"
+          },
+          {
+            "mv": "b9c7",
+            "notation": "马2进3",
+            "score": {
+              "kind": "cp",
+              "value": -34
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b9c7",
+              "h0g2",
+              "h9g7",
+              "c3c4"
+            ],
+            "pv_notation": [
+              "马2进3",
+              "马二进三",
+              "马8进7",
+              "兵七进一"
+            ],
+            "rank": 2,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "化解中卒受攻击的问题，并出动右马"
+          },
+          {
+            "mv": "b7e7",
+            "notation": "炮2平5",
+            "score": {
+              "kind": "cp",
+              "value": -41
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "b7e7",
+              "h0g2",
+              "h9g7",
+              "i0h0",
+              "i9h9",
+              "b0c2"
+            ],
+            "pv_notation": [
+              "炮2平5",
+              "马二进三",
+              "马8进7",
+              "车一平二",
+              "车9平8",
+              "马八进七"
+            ],
+            "rank": 3,
+            "is_actual": false,
+            "source": "multi_pv",
+            "summary": "架中炮，并攻击对方无保护的中兵"
+          },
+          {
+            "mv": "a6a5",
+            "notation": "卒1进1",
+            "score": {
+              "kind": "cp",
+              "value": -321
+            },
+            "bound": "exact",
+            "depth": 8,
+            "pv": [
+              "a6a5",
+              "e2e6",
+              "b9a7",
+              "e6e4",
+              "a7b5",
+              "b2b7",
+              "b5c3",
+              "e4i4",
+              "h7e7",
+              "g0e2"
+            ],
+            "pv_notation": [
+              "卒1进1",
+              "炮五进四",
+              "马2进1",
+              "炮五退二",
+              "马1进2",
+              "炮八进五",
+              "马2进3",
+              "炮五平一",
+              "炮8平5",
+              "相三进五"
+            ],
+            "rank": null,
+            "is_actual": true,
+            "source": "search_moves",
+            "summary": "挺1路卒"
+          }
+        ],
+        "evidence": [
+          {
+            "id": "f1",
+            "kind": "fact",
+            "topic": "threat",
+            "text": "中卒受到对方中炮攻击，且没有保护",
+            "squares": [
+              "e6",
+              "e2"
+            ],
+            "arrows": [
+              "e2e6"
+            ],
+            "line": null,
+            "certainty": "certain",
+            "on": "parent"
+          },
+          {
+            "id": "p1",
+            "kind": "positional",
+            "topic": "reposition",
+            "text": "1路卒向前挺进一步；本步没有吃子或将军",
+            "squares": [
+              "a6",
+              "a5"
+            ],
+            "arrows": [
+              "a6a5"
+            ],
+            "line": null,
+            "certainty": "tentative",
+            "on": "node"
+          },
+          {
+            "id": "v1",
+            "kind": "variation",
+            "topic": "best",
+            "text": "引擎首选马8进7（黑方视角评分 -23，深度 8）",
+            "squares": [
+              "h9",
+              "g7"
+            ],
+            "arrows": [
+              "h9g7"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "h9g7",
+                "h0g2",
+                "g6g5",
+                "b2d2",
+                "b9c7",
+                "b0c2"
+              ],
+              "notation": [
+                "马8进7",
+                "马二进三",
+                "卒7进1",
+                "炮八平六",
+                "马2进3",
+                "马八进七"
+              ]
+            },
+            "certainty": "supported",
+            "on": "parent"
+          },
+          {
+            "id": "v2",
+            "kind": "variation",
+            "topic": "reply",
+            "text": "对方主要应对炮五进四：吃掉对方中卒（主变化：卒1进1 炮五进四 马2进1 炮五退二 马1进2 炮八进五 马2进3 炮五平一 炮8平5 相三进五）",
+            "squares": [
+              "e2",
+              "e6"
+            ],
+            "arrows": [
+              "e2e6"
+            ],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "a6a5",
+                "e2e6",
+                "b9a7",
+                "e6e4",
+                "a7b5",
+                "b2b7",
+                "b5c3",
+                "e4i4",
+                "h7e7",
+                "g0e2"
+              ],
+              "notation": [
+                "卒1进1",
+                "炮五进四",
+                "马2进1",
+                "炮五退二",
+                "马1进2",
+                "炮八进五",
+                "马2进3",
+                "炮五平一",
+                "炮8平5",
+                "相三进五"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          },
+          {
+            "id": "v3",
+            "kind": "variation",
+            "topic": "material",
+            "text": "按这条变化走 6 步后，黑方净损失子力一个马炮以上",
+            "squares": [],
+            "arrows": [],
+            "line": {
+              "base": "parent",
+              "moves": [
+                "a6a5",
+                "e2e6",
+                "b9a7",
+                "e6e4",
+                "a7b5",
+                "b2b7"
+              ],
+              "notation": [
+                "卒1进1",
+                "炮五进四",
+                "马2进1",
+                "炮五退二",
+                "马1进2",
+                "炮八进五"
+              ]
+            },
+            "certainty": "supported",
+            "on": "node"
+          }
+        ],
+        "warnings": [],
+        "conditions": "Pikafish 2026-09-06 · 快速分析（≤20.0 秒，深度≤8）· 3 个候选 · ChineseRule",
+        "stability": {
+          "level": "medium",
+          "reasons": [
+            "深度 5–8 中前几名的次序变化了 2 次"
+          ],
+          "depths": [
+            5,
+            8
+          ]
+        }
+      },
+      "budget": "quick",
+      "conditions_key": "6ec47a82ea7be12d9fc9f1d8ba92b0cfe3498361cfd6b1cfcaa19a5f7336c4b9",
+      "pending": false,
+      "error": null,
+      "updated_at": 1793772571772
+    }
+  ]
+}

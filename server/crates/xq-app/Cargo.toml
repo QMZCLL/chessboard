@@ -21,7 +21,13 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 [target.'cfg(not(windows))'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 
+[features]
+# 故障注入点（见 src/failpoints.rs）：测试与端到端场景使用，发布版本不启用
+failpoints = []
+
 [dev-dependencies]
+# 测试总是带上故障注入点
+xq-app = { path = ".", features = ["failpoints"] }
 tempfile = "3"
 # 测试中模拟语言模型服务
 tiny_http = "0.12"

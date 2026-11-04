@@ -24,29 +24,34 @@ use crate::records::CloudRecord;
 use crate::records::ExplanationRecord;
 use crate::review::ReviewCard;
 
-const META: TableDefinition<&str, &str> = TableDefinition::new("meta");
-const STUDIES: TableDefinition<&str, &str> = TableDefinition::new("studies");
-const ANALYSES: TableDefinition<&str, &str> = TableDefinition::new("analyses");
-const EXPLANATIONS: TableDefinition<&str, &str> = TableDefinition::new("explanations");
+pub(crate) const META: TableDefinition<&str, &str> = TableDefinition::new("meta");
+pub(crate) const STUDIES: TableDefinition<&str, &str> = TableDefinition::new("studies");
+pub(crate) const ANALYSES: TableDefinition<&str, &str> = TableDefinition::new("analyses");
+pub(crate) const EXPLANATIONS: TableDefinition<&str, &str> = TableDefinition::new("explanations");
 /// 每一着的 AI 讲解状态与最近结果，键为“会话/节点”。
-const COACH: TableDefinition<&str, &str> = TableDefinition::new("coach");
+pub(crate) const COACH: TableDefinition<&str, &str> = TableDefinition::new("coach");
 /// 通过检查的 AI 讲解，键为“会话/节点/缓存键”；证据、模型或讲解设置相同时直接复用。
-const COACH_CACHE: TableDefinition<&str, &str> = TableDefinition::new("coach_cache");
+pub(crate) const COACH_CACHE: TableDefinition<&str, &str> = TableDefinition::new("coach_cache");
 const COACH_USAGE: &str = "coach_usage";
 /// 教练追问的状态与最近一次回答，键为“会话/比较起点/两步着法/问题类型”（见 `Question::key`）。
-const COACH_ASK: TableDefinition<&str, &str> = TableDefinition::new("coach_ask");
+pub(crate) const COACH_ASK: TableDefinition<&str, &str> = TableDefinition::new("coach_ask");
 /// 复习卡片，键为“会话/节点”（与讲解记录相同）。卡片是独立的快照，删除会话时保留。
-const REVIEWS: TableDefinition<&str, &str> = TableDefinition::new("reviews");
+pub(crate) const REVIEWS: TableDefinition<&str, &str> = TableDefinition::new("reviews");
 /// 练习批次，键为批次编号（见 `practice`）。
-const PRACTICE: TableDefinition<&str, &str> = TableDefinition::new("practice");
+pub(crate) const PRACTICE: TableDefinition<&str, &str> = TableDefinition::new("practice");
 /// 学习事件，键为事件编号（见 `learning`）。只追加；局面决策的结果晚到时更新同一条。
-const EVENTS: TableDefinition<&str, &str> = TableDefinition::new("learning_events");
+pub(crate) const EVENTS: TableDefinition<&str, &str> = TableDefinition::new("learning_events");
 /// 复盘收件箱中的棋局，键为会话编号（见 `inbox`）。删除会话时一并删除。
-const INBOX: TableDefinition<&str, &str> = TableDefinition::new("inbox");
+pub(crate) const INBOX: TableDefinition<&str, &str> = TableDefinition::new("inbox");
+/// 迁移时无法读取或不成立的记录，原样保存（见 `migration`），键为“原来的表/原来的键”。
+pub(crate) const QUARANTINE: TableDefinition<&str, &str> = TableDefinition::new("quarantine");
 /// 已经从早期的记录补上学习事件（见 `learning`）。
 const EVENTS_BACKFILLED: &str = "events_backfilled";
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub use crate::migration::MigrationEntry;
+pub use crate::migration::MigrationReport;
+pub use crate::migration::Quarantined;
+pub use crate::migration::SCHEMA_VERSION;
 
 #[derive(Debug)]
 pub struct StoreError(pub String);
@@ -85,11 +90,14 @@ impl_from!(
     redb::TableError,
     redb::StorageError,
     redb::CommitError,
-    serde_json::Error
+    serde_json::Error,
+    crate::failpoints::Injected
 );
 
 pub struct Store {
     db: Database,
+    /// 这次打开时做的迁移。
+    migration: Option<MigrationReport>,
 }
 
 /// 带检查的修改的结果。
@@ -118,38 +126,56 @@ fn remove_prefix(t: &mut redb::Table<&str, &str>, prefix: &str) -> Result<(), St
 }
 
 impl Store {
+    /// 打开数据库；来自较早版本时先备份数据库文件，再在一个写事务中迁移到当前版本（见 `migration`）。
+    /// 来自较新的版本时拒绝打开，不改动文件。
     pub fn open(path: &Path) -> Result<Store, StoreError> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| StoreError(e.to_string()))?;
         }
         let db = Database::create(path)?;
-        let tx = db.begin_write()?;
-        {
-            let mut meta = tx.open_table(META)?;
-            let version = meta.get("schema_version")?.map(|v| v.value().parse::<u32>().unwrap_or(0));
-            match version {
-                None => {
-                    meta.insert("schema_version", SCHEMA_VERSION.to_string().as_str())?;
-                }
-                Some(v) if v > SCHEMA_VERSION => {
-                    return Err(StoreError(format!("数据库来自更新的版本（{v}），请升级应用后再打开")));
-                }
-                Some(_) => {}
+        let mut migration = None;
+        let db = match crate::migration::stored_version(&db)? {
+            Some(v) if v > SCHEMA_VERSION => {
+                return Err(StoreError(format!("数据库来自更新的版本（{v}），请升级应用后再打开")));
             }
-            tx.open_table(STUDIES)?;
-            tx.open_table(ANALYSES)?;
-            tx.open_table(EXPLANATIONS)?;
-            tx.open_table(COACH)?;
-            tx.open_table(COACH_CACHE)?;
-            tx.open_table(COACH_ASK)?;
-            tx.open_table(REVIEWS)?;
-            tx.open_table(PRACTICE)?;
-            tx.open_table(EVENTS)?;
-            tx.open_table(INBOX)?;
-        }
-        tx.commit()?;
-        Ok(Store { db })
+            None => {
+                let tx = db.begin_write()?;
+                crate::migration::init(&tx)?;
+                tx.commit()?;
+                db
+            }
+            Some(v) if v == SCHEMA_VERSION => {
+                let tx = db.begin_write()?;
+                crate::migration::open_tables(&tx)?;
+                tx.commit()?;
+                db
+            }
+            Some(v) => {
+                // 复制文件时数据库不能处于打开状态（Windows 上打开的数据库文件被锁住）
+                drop(db);
+                let backup = crate::migration::backup_copy(path, v)?;
+                let db = Database::create(path)?;
+                let tx = db.begin_write()?;
+                let entry = crate::migration::migrate(&tx, v).map_err(|e| {
+                    StoreError(format!("数据从版本 {v} 升级失败，原来的数据没有改动（另有副本 {}）：{}", backup.display(), e.0))
+                })?;
+                tx.commit()?;
+                tracing::info!("数据库已从版本 {v} 迁移到 {SCHEMA_VERSION}：{entry:?}，迁移前的副本 {}", backup.display());
+                migration = Some(MigrationReport { entry, backup });
+                db
+            }
+        };
+        Ok(Store { db, migration })
     }
+
+    /// 这次打开时做的迁移。
+    pub fn migration(&self) -> Option<&MigrationReport> { self.migration.as_ref() }
+
+    /// 已经做过的全部迁移。
+    pub fn migrations(&self) -> Result<Vec<MigrationEntry>, StoreError> { crate::migration::history(&self.db) }
+
+    /// 隔离表中的记录。
+    pub fn quarantined(&self) -> Result<Vec<Quarantined>, StoreError> { self.list(QUARANTINE, "隔离的记录") }
 
     fn put<T: Serialize>(&self, table: TableDefinition<&str, &str>, key: &str, value: &T) -> Result<(), StoreError> {
         let json = serde_json::to_string(value)?;

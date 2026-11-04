@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "log_level": "info",
+  "engine": {
+    "binary": null,
+    "nnue": null,
+    "threads": 1,
+    "hash_mb": 32
+  },
+  "analysis": {
+    "quick_time_ms": 20000,
+    "quick_depth": 8,
+    "deep_time_ms": 30000,
+    "deep_depth": 10,
+    "multipv": 3,
+    "repetition_rule": "ChineseRule",
+    "sixty_move_rule": true,
+    "auto_explain": true,
+    "deepen_unsettled": true
+  },
+  "capture": {
+    "interval_ms": 150,
+    "stable_frames": 3,
+    "unexplained_frames": 6,
+    "confidence_threshold": 0.8,
+    "model": null
+  },
+  "cloud": {
+    "enabled": false,
+    "timeout_ms": 5000
+  },
+  "coach": {
+    "enabled": true,
+    "provider": "deepseek",
+    "base_url": "http://127.0.0.1:46063",
+    "model": "mock-model",
+    "credential_ref": "store:coach",
+    "timeout_ms": 60000,
+    "max_output_tokens": 1500,
+    "max_parallel_requests": 2,
+    "daily_request_budget": 200,
+    "auto_explain_scope": "off",
+    "audience": "beginner",
+    "detail": "normal"
+  },
+  "review": {
+    "intervals_days": [
+      1,
+      3,
+      7,
+      14,
+      30
+    ],
+    "backup_keep": 7
+  },
+  "player": {
+    "names": [
+      "样本棋手"
+    ]
+  }
+}

@@ -250,8 +250,20 @@ pub(crate) fn engine_spec(paths: &AppPaths, cfg: &AppConfig) -> EngineSpec {
 
 impl AppService {
     pub fn start(paths: AppPaths, events: Arc<dyn EventSink>, capture_backend: Arc<dyn CaptureBackend>) -> ApiResult<Self> {
-        let loaded = config::load(&paths.config_dir, paths.legacy_config.as_deref());
+        let mut loaded = config::load(&paths.config_dir, paths.legacy_config.as_deref());
         let store = Store::open(&paths.data_dir.join("xqlink.redb"))?;
+        if let Some(m) = store.migration() {
+            let mut text = format!(
+                "学习数据已从版本 {} 升级到 {}，升级前的数据库已备份为 {}",
+                m.entry.from,
+                m.entry.to,
+                m.backup.display()
+            );
+            if m.entry.quarantined > 0 {
+                text.push_str(&format!("；{} 条无法读取的记录已原样保留在隔离区，没有删除", m.entry.quarantined));
+            }
+            loaded.notes.push(text);
+        }
         // 上次退出时尚未完成的 AI 讲解请求已经不存在，标为中断，避免界面一直显示排队或生成中
         match store.reset_interrupted_coach(now_ms()) {
             Ok(0) => {}
